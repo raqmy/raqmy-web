@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Search, Filter, Download, Star, Store as StoreIcon, Tag } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 
@@ -20,6 +20,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
 
   useEffect(() => {
     fetchProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortBy]);
 
   const fetchProducts = async () => {
@@ -33,9 +34,11 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
         .eq('is_active', true)
         .eq('visibility', 'marketplace')
         .order(
-          sortBy === 'newest' ? 'created_at' :
-          sortBy === 'popular' ? 'sales_count' :
-          'price',
+          sortBy === 'newest'
+            ? 'created_at'
+            : sortBy === 'popular'
+              ? 'sales_count'
+              : 'price',
           { ascending: sortBy === 'price_low' }
         );
 
@@ -90,7 +93,6 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
       setProducts(enrichedProducts as any);
       setLoading(false);
       return;
-
     } catch (error) {
       console.error('💥 Exception:', error);
       setProducts([]);
@@ -100,11 +102,30 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
     }
   };
 
-  const filteredProducts = products.filter((product) => {
-    const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === 'all' || product.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  // Helpers عشان ما يطيح الموقع لو بعض الحقول ناقصة
+  const getProductName = (p: any) => {
+    const v = p?.name ?? p?.title ?? '';
+    return String(v || '');
+  };
+
+  const getProductDescription = (p: any) => {
+    const v = p?.description ?? p?.details ?? '';
+    return String(v || '');
+  };
+
+  const filteredProducts = useMemo(() => {
+    const q = (searchQuery || '').toLowerCase().trim();
+
+    return products.filter((product) => {
+      const productName = getProductName(product).toLowerCase();
+      const matchesSearch = q === '' || productName.includes(q);
+
+      const productCategory = product?.category ?? product?.store?.category ?? null;
+      const matchesCategory = selectedCategory === 'all' || productCategory === selectedCategory;
+
+      return matchesSearch && matchesCategory;
+    });
+  }, [products, searchQuery, selectedCategory]);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -113,7 +134,9 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
           <h1 className="text-4xl font-bold text-gray-900 mb-2">السوق العام</h1>
           <p className="text-lg text-gray-600">
             اكتشف آلاف المنتجات الرقمية
-            {!loading && <span className="text-blue-600 font-semibold"> ({filteredProducts.length} منتج متاح)</span>}
+            {!loading && (
+              <span className="text-blue-600 font-semibold"> ({filteredProducts.length} منتج متاح)</span>
+            )}
           </p>
         </div>
 
@@ -163,70 +186,86 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredProducts.map((product) => (
-              <div
-                key={product.id}
-                className="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all cursor-pointer"
-                onClick={() => onNavigate(`product-${product.id}`)}
-              >
-                <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                  {product.thumbnail_url ? (
-                    <img
-                      src={product.thumbnail_url}
-                      alt={product.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <Download className="w-16 h-16 text-blue-600" />
-                  )}
-                </div>
-                <div className="p-6">
-                  <div className="flex items-center gap-2 mb-3">
-                    {product.store ? (
-                      <div className="flex items-center gap-1 text-sm text-gray-600">
-                        <StoreIcon className="w-4 h-4" />
-                        <span className="font-medium">{product.store.name}</span>
-                      </div>
+            {filteredProducts.map((product) => {
+              const productName = getProductName(product);
+              const productDesc = getProductDescription(product);
+
+              return (
+                <div
+                  key={product.id}
+                  className="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all cursor-pointer"
+                  onClick={() => onNavigate(`product-${product.id}`)}
+                >
+                  <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+                    {product.thumbnail_url ? (
+                      <img
+                        src={product.thumbnail_url}
+                        alt={productName || 'منتج'}
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
-                      <div className="flex items-center gap-1 text-sm text-gray-600">
-                        <span className="font-medium">{product.seller?.name}</span>
-                      </div>
-                    )}
-                    {product.category && (
-                      <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-lg">
-                        <Tag className="w-3 h-3 inline mr-1" />
-                        {product.category}
-                      </span>
+                      <Download className="w-16 h-16 text-blue-600" />
                     )}
                   </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-1">
-                    {product.name}
-                  </h3>
-                  <p className="text-gray-600 mb-4 line-clamp-2 text-sm">
-                    {product.description || 'منتج رقمي عالي الجودة'}
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-2xl font-bold text-blue-600">
-                        {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
-                      </div>
-                      {product.is_subscription && (
-                        <span className="text-xs text-gray-500">
-                          / {product.subscription_period === 'monthly' ? 'شهرياً' : product.subscription_period === 'yearly' ? 'سنوياً' : 'أسبوعياً'}
+
+                  <div className="p-6">
+                    <div className="flex items-center gap-2 mb-3">
+                      {product.store ? (
+                        <div className="flex items-center gap-1 text-sm text-gray-600">
+                          <StoreIcon className="w-4 h-4" />
+                          <span className="font-medium">{product.store.name}</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-sm text-gray-600">
+                          <span className="font-medium">{product.seller?.name}</span>
+                        </div>
+                      )}
+
+                      {(product.category || product.store?.category) && (
+                        <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-lg">
+                          <Tag className="w-3 h-3 inline mr-1" />
+                          {product.category || product.store?.category}
                         </span>
                       )}
                     </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <div className="flex items-center gap-1">
-                        <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                        <span className="text-sm font-semibold">4.8</span>
+
+                    <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-1">
+                      {productName || 'منتج'}
+                    </h3>
+
+                    <p className="text-gray-600 mb-4 line-clamp-2 text-sm">
+                      {productDesc || 'منتج رقمي عالي الجودة'}
+                    </p>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-2xl font-bold text-blue-600">
+                          {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
+                        </div>
+                        {product.is_subscription && (
+                          <span className="text-xs text-gray-500">
+                            /{' '}
+                            {product.subscription_period === 'monthly'
+                              ? 'شهرياً'
+                              : product.subscription_period === 'yearly'
+                                ? 'سنوياً'
+                                : 'أسبوعياً'}
+                          </span>
+                        )}
                       </div>
-                      <span className="text-xs text-gray-500">{product.sales_count} مبيعات</span>
+
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-1">
+                          <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                          <span className="text-sm font-semibold">4.8</span>
+                        </div>
+                        <span className="text-xs text-gray-500">{product.sales_count} مبيعات</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
