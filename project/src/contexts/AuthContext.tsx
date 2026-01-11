@@ -70,46 +70,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signUp = async (email: string, password: string, name: string, role: 'customer' | 'seller') => {
+    // ملاحظة: في جدولك ظاهر عندك role = merchant/customer
+    // لو تبغى توحيد القيم في DB، خلها merchant بدل seller:
+    const dbRole = (role === 'seller' ? 'merchant' : 'customer') as any;
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          name,
+          role: dbRole, // يخزنها في user_metadata (مفيد لو عندك trigger)
+        },
+      },
     });
 
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    // ✅ مهم: تحويل role من الواجهة (seller/customer) إلى Role قاعدة البيانات (merchant/customer)
-    const dbRole = role === 'seller' ? 'merchant' : 'customer';
-
-    const { data: planRow } = await supabase
+    // حاول تجيب خطة "مجاني" - وإذا فشل لا توقف التسجيل
+    let planId: string | null = null;
+    const { data: plansData, error: plansError } = await supabase
       .from('plans')
       .select('id')
       .eq('name', 'مجاني')
       .maybeSingle();
 
-    // ✅ مهم: استخدم upsert بدل insert لتجاوز 409 conflict (لأن عندك Trigger ينشئ الصف تلقائيًا)
+    if (plansError) {
+      console.warn('Could not fetch free plan:', plansError);
+    } else {
+      planId = plansData?.id ?? null;
+    }
+
+    // ✅ التغيير المهم: upsert بدل insert
+    // إذا السطر موجود (بسبب trigger أو محاولة سابقة) راح يحدثه بدل ما يفشل
     const { error: profileError } = await supabase
       .from('users_profile')
       .upsert(
         {
           id: data.user.id,
           name,
-          email, // مفيد لو جدولك فيه عمود email
-          role: dbRole as any,
-          plan_id: planRow?.id ?? null,
+          role: dbRole,
+          plan_id: planId,
         },
-        { onConflict: 'id' }
+        {
+          onConflict: 'id',
+        }
       );
 
     if (profileError) throw profileError;
 
-    // ✅ تحديث الحالة محليًا مباشرة
-    setProfile({
-      id: data.user.id,
-      name,
-      role: dbRole as any,
-      plan_id: planRow?.id ?? null,
-    } as UserProfile);
+    // بعدها نسحب البروفايل الحقيقي من DB لضمان إنه اتحدث فعلاً
+    const profileData = await fetchProfile(data.user.id);
+    setProfile(profileData);
   };
 
   const signIn = async (email: string, password: string) => {
