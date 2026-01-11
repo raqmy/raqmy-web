@@ -78,29 +78,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    const { data: plans } = await supabase
+    // ✅ مهم: تحويل role من الواجهة (seller/customer) إلى Role قاعدة البيانات (merchant/customer)
+    const dbRole = role === 'seller' ? 'merchant' : 'customer';
+
+    const { data: planRow } = await supabase
       .from('plans')
       .select('id')
       .eq('name', 'مجاني')
       .maybeSingle();
 
+    // ✅ مهم: استخدم upsert بدل insert لتجاوز 409 conflict (لأن عندك Trigger ينشئ الصف تلقائيًا)
     const { error: profileError } = await supabase
       .from('users_profile')
-      .insert({
-        id: data.user.id,
-        name,
-        role,
-        plan_id: plans?.id,
-      });
+      .upsert(
+        {
+          id: data.user.id,
+          name,
+          email, // مفيد لو جدولك فيه عمود email
+          role: dbRole as any,
+          plan_id: planRow?.id ?? null,
+        },
+        { onConflict: 'id' }
+      );
 
     if (profileError) throw profileError;
 
-    // ✅ added: set profile locally immediately after successful insert
+    // ✅ تحديث الحالة محليًا مباشرة
     setProfile({
       id: data.user.id,
       name,
-      role,
-      plan_id: plans?.id ?? null,
+      role: dbRole as any,
+      plan_id: planRow?.id ?? null,
     } as UserProfile);
   };
 
@@ -144,4 +152,3 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
-
