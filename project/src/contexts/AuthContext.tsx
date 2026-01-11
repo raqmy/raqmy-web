@@ -2,11 +2,14 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase, UserProfile } from '../lib/supabase';
 
+type AppRole = 'customer' | 'seller';
+type DbRole = 'customer' | 'merchant';
+
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-  signUp: (email: string, password: string, name: string, role: 'customer' | 'seller') => Promise<void>;
+  signUp: (email: string, password: string, name: string, role: AppRole) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
@@ -16,9 +19,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
 };
 
@@ -69,68 +70,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string, name: string, role: 'customer' | 'seller') => {
-    // ملاحظة: في جدولك ظاهر عندك role = merchant/customer
-    // لو تبغى توحيد القيم في DB، خلها merchant بدل seller:
-    const dbRole = (role === 'seller' ? 'merchant' : 'customer') as any;
-
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          name,
-          role: dbRole, // يخزنها في user_metadata (مفيد لو عندك trigger)
-        },
-      },
-    });
-
+  const signUp = async (email: string, password: string, name: string, role: AppRole) => {
+    // 1) Create auth user
+    const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
-    if (!data.user) throw new Error('No user returned');
+    if (!data.user) throw new Error('No user returned from signUp');
 
-    // حاول تجيب خطة "مجاني" - وإذا فشل لا توقف التسجيل
-    let planId: string | null = null;
-    const { data: plansData, error: plansError } = await supabase
+    const userId = data.user.id;
+
+    // 2) Map role to DB role
+    const dbRole: DbRole = role === 'seller' ? 'merchant' : 'customer';
+
+    // 3) Fetch "free" plan id (optional)
+    const { data: planRow, error: planErr } = await supabase
       .from('plans')
       .select('id')
       .eq('name', 'مجاني')
       .maybeSingle();
 
-    if (plansError) {
-      console.warn('Could not fetch free plan:', plansError);
-    } else {
-      planId = plansData?.id ?? null;
+    // لو جدول plans غير موجود عندك، لا نخلي التسجيل يفشل بسببه
+    if (planErr) {
+      console.warn('Plans table lookup failed (will continue without plan_id):', planErr);
     }
 
-    // ✅ التغيير المهم: upsert بدل insert
-    // إذا السطر موجود (بسبب trigger أو محاولة سابقة) راح يحدثه بدل ما يفشل
-    const { error: profileError } = await supabase
+    // 4) Upsert profile (this fixes duplicate key conflict)
+    const { data: upserted, error: upsertErr } = await supabase
       .from('users_profile')
       .upsert(
         {
-          id: data.user.id,
+          id: userId,
           name,
-          role: dbRole,
-          plan_id: planId,
+          email,          // مهم: خلي الايميل ينحفظ
+          role: dbRole,   // customer | merchant
+          plan_id: planRow?.id ?? null,
         },
-        {
-          onConflict: 'id',
-        }
-      );
+        { onConflict: 'id' }
+      )
+      .select('*')
+      .maybeSingle();
 
-    if (profileError) throw profileError;
+    if (upsertErr) throw upsertErr;
 
-    // بعدها نسحب البروفايل الحقيقي من DB لضمان إنه اتحدث فعلاً
-    const profileData = await fetchProfile(data.user.id);
-    setProfile(profileData);
+    // 5) Set profile locally immediately
+    setProfile((upserted ?? {
+      id: userId,
+      name,
+      email,
+      role: dbRole,
+      plan_id: planRow?.id ?? null,
+    }) as UserProfile);
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   };
 
@@ -153,7 +145,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(updatedProfile);
   };
 
-  const value = {
+  const value: AuthContextType = {
     user,
     profile,
     loading,
