@@ -36,6 +36,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
     setLoading(true);
 
     try {
+      // ✅ Step 1: log the selected role right before calling signUp
+      console.log('ROLE BEFORE signUp =', role);
+
       await signUp(email, password, name, role);
       await signIn(email, password);
     } catch (err: any) {
@@ -43,7 +46,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
       setLoading(false);
     }
   };
-
 
   return (
     <div className="w-full max-w-md mx-auto bg-white rounded-2xl shadow-xl p-8">
@@ -61,9 +63,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            نوع الحساب
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">نوع الحساب</label>
           <div className="grid grid-cols-2 gap-4">
             <button
               type="button"
@@ -79,6 +79,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
                 عميل
               </span>
             </button>
+
             <button
               type="button"
               onClick={() => setRole('seller')}
@@ -97,9 +98,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            الاسم الكامل
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">الاسم الكامل</label>
           <div className="relative">
             <User className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -114,9 +113,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            البريد الإلكتروني
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
           <div className="relative">
             <Mail className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -132,9 +129,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            كلمة المرور
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">كلمة المرور</label>
           <div className="relative">
             <Lock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -157,9 +152,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            تأكيد كلمة المرور
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">تأكيد كلمة المرور</label>
           <div className="relative">
             <Lock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -193,10 +186,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
       <div className="mt-6 text-center">
         <p className="text-gray-600">
           لديك حساب بالفعل؟{' '}
-          <button
-            onClick={onSwitchToLogin}
-            className="text-blue-600 font-semibold hover:text-blue-700"
-          >
+          <button onClick={onSwitchToLogin} className="text-blue-600 font-semibold hover:text-blue-700">
             تسجيل الدخول
           </button>
         </p>
