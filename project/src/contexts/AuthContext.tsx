@@ -2,14 +2,14 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase, UserProfile } from '../lib/supabase';
 
-type AppRole = 'customer' | 'seller';
-type DbRole = 'customer' | 'merchant';
-
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-  signUp: (email: string, password: string, name: string, role: AppRole) => Promise<void>;
+
+  // NOTE: UI may send 'seller' but DB uses 'merchant'
+  signUp: (email: string, password: string, name: string, role: 'customer' | 'seller') => Promise<void>;
+
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
@@ -39,7 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Error fetching profile:', error);
       return null;
     }
-    return data;
+    return data as UserProfile | null;
   };
 
   useEffect(() => {
@@ -70,54 +70,66 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string, name: string, role: AppRole) => {
-    // 1) Create auth user
-    const { data, error } = await supabase.auth.signUp({ email, password });
+  const signUp = async (
+    email: string,
+    password: string,
+    name: string,
+    role: 'customer' | 'seller'
+  ) => {
+    // ✅ map UI role -> DB role
+    const dbRole = role === 'seller' ? 'merchant' : 'customer';
+
+    // ✅ store role also in auth metadata (useful if you have DB trigger)
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name,
+          role: dbRole,
+        },
+      },
+    });
+
     if (error) throw error;
-    if (!data.user) throw new Error('No user returned from signUp');
+    if (!data.user) throw new Error('No user returned');
 
-    const userId = data.user.id;
-
-    // 2) Map role to DB role
-    const dbRole: DbRole = role === 'seller' ? 'merchant' : 'customer';
-
-    // 3) Fetch "free" plan id (optional)
-    const { data: planRow, error: planErr } = await supabase
+    // Get free plan id (optional)
+    const { data: plans, error: planError } = await supabase
       .from('plans')
       .select('id')
       .eq('name', 'مجاني')
       .maybeSingle();
 
-    // لو جدول plans غير موجود عندك، لا نخلي التسجيل يفشل بسببه
-    if (planErr) {
-      console.warn('Plans table lookup failed (will continue without plan_id):', planErr);
+    // If your "plans" table sometimes missing in prod, don't break signup
+    if (planError) {
+      console.warn('Plans lookup failed, continuing without plan_id:', planError);
     }
 
-    // 4) Upsert profile (this fixes duplicate key conflict)
-    const { data: upserted, error: upsertErr } = await supabase
+    // ✅ IMPORTANT FIX:
+    // Use UPSERT to avoid 409 duplicate key (profile may already exist)
+    const { data: upserted, error: profileError } = await supabase
       .from('users_profile')
       .upsert(
         {
-          id: userId,
+          id: data.user.id,
           name,
-          email,          // مهم: خلي الايميل ينحفظ
-          role: dbRole,   // customer | merchant
-          plan_id: planRow?.id ?? null,
+          role: dbRole,
+          plan_id: plans?.id ?? null,
         },
         { onConflict: 'id' }
       )
       .select('*')
       .maybeSingle();
 
-    if (upsertErr) throw upsertErr;
+    if (profileError) throw profileError;
 
-    // 5) Set profile locally immediately
+    // ✅ Set profile locally from returned row (or fallback)
     setProfile((upserted ?? {
-      id: userId,
+      id: data.user.id,
       name,
-      email,
       role: dbRole,
-      plan_id: planRow?.id ?? null,
+      plan_id: plans?.id ?? null,
     }) as UserProfile);
   };
 
