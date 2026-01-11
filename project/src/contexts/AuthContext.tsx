@@ -16,7 +16,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
   return context;
 };
 
@@ -36,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Error fetching profile:', error);
       return null;
     }
-    return data as UserProfile | null;
+    return data;
   };
 
   useEffect(() => {
@@ -46,8 +48,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (session?.user) {
           const profileData = await fetchProfile(session.user.id);
           setProfile(profileData);
-        } else {
-          setProfile(null);
         }
         setLoading(false);
       })();
@@ -70,40 +70,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signUp = async (email: string, password: string, name: string, role: 'customer' | 'seller') => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    // 1) جلب plan_id (قد يكون null لو ما فيه مجاني)
-    const { data: freePlan, error: planErr } = await supabase
+    const { data: plans } = await supabase
       .from('plans')
       .select('id')
       .eq('name', 'مجاني')
       .maybeSingle();
 
-    if (planErr) console.warn('Plan lookup error:', planErr);
-
-    // 2) بدل insert استخدم upsert عشان ما يصير duplicate
-    const profileRow: Partial<UserProfile> = {
-      id: data.user.id,
-      name,
-      role,                 // <- هنا يثبت seller/ customer
-      plan_id: freePlan?.id ?? null,
-    };
-
     const { error: profileError } = await supabase
       .from('users_profile')
-      .upsert(profileRow, { onConflict: 'id' });
+      .insert({
+        id: data.user.id,
+        name,
+        role,
+        plan_id: plans?.id,
+      });
 
     if (profileError) throw profileError;
 
-    // 3) ثبت البروفايل مباشرة محليًا عشان ما “يرجع عميل” بسبب fetch قديم/فارغ
-    setProfile(profileRow as UserProfile);
-    setUser(data.user);
+    // ✅ added: set profile locally immediately after successful insert
+    setProfile({
+      id: data.user.id,
+      name,
+      role,
+      plan_id: plans?.id ?? null,
+    } as UserProfile);
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
     if (error) throw error;
   };
 
@@ -126,7 +132,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(updatedProfile);
   };
 
-  const value = { user, profile, loading, signUp, signIn, signOut, updateProfile };
+  const value = {
+    user,
+    profile,
+    loading,
+    signUp,
+    signIn,
+    signOut,
+    updateProfile,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
+
