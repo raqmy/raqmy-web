@@ -6,10 +6,7 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-
-  // NOTE: UI may send 'seller' but DB uses 'merchant'
   signUp: (email: string, password: string, name: string, role: 'customer' | 'seller') => Promise<void>;
-
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
@@ -19,7 +16,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
   return context;
 };
 
@@ -39,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Error fetching profile:', error);
       return null;
     }
-    return data as UserProfile | null;
+    return data;
   };
 
   useEffect(() => {
@@ -70,71 +69,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (
-    email: string,
-    password: string,
-    name: string,
-    role: 'customer' | 'seller'
-  ) => {
-    // ✅ map UI role -> DB role
-    const dbRole = role === 'seller' ? 'merchant' : 'customer';
-
-    // ✅ store role also in auth metadata (useful if you have DB trigger)
+  const signUp = async (email: string, password: string, name: string, role: 'customer' | 'seller') => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: {
-          name,
-          role: dbRole,
-        },
-      },
     });
 
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    // Get free plan id (optional)
-    const { data: plans, error: planError } = await supabase
+    const { data: plans } = await supabase
       .from('plans')
       .select('id')
       .eq('name', 'مجاني')
       .maybeSingle();
 
-    // If your "plans" table sometimes missing in prod, don't break signup
-    if (planError) {
-      console.warn('Plans lookup failed, continuing without plan_id:', planError);
-    }
-
-    // ✅ IMPORTANT FIX:
-    // Use UPSERT to avoid 409 duplicate key (profile may already exist)
-    const { data: upserted, error: profileError } = await supabase
+    const { error: profileError } = await supabase
       .from('users_profile')
-      .upsert(
-        {
-          id: data.user.id,
-          name,
-          role: dbRole,
-          plan_id: plans?.id ?? null,
-        },
-        { onConflict: 'id' }
-      )
-      .select('*')
-      .maybeSingle();
+      .insert({
+        id: data.user.id,
+        name,
+        role,
+        plan_id: plans?.id,
+      });
 
     if (profileError) throw profileError;
-
-    // ✅ Set profile locally from returned row (or fallback)
-    setProfile((upserted ?? {
-      id: data.user.id,
-      name,
-      role: dbRole,
-      plan_id: plans?.id ?? null,
-    }) as UserProfile);
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
     if (error) throw error;
   };
 
@@ -157,7 +124,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(updatedProfile);
   };
 
-  const value: AuthContextType = {
+  const value = {
     user,
     profile,
     loading,
