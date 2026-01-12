@@ -84,14 +84,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .eq('name', 'مجاني')
       .maybeSingle();
 
-    const { error: profileError } = await supabase
-      .from('users_profile')
-      .insert({
-        id: data.user.id,
-        name,
-        role,
-        plan_id: plans?.id,
-      });
+  const { error: profileError } = await supabase
+  .from('users_profile')
+  .upsert(
+    {
+      id: data.user.id,
+      name,
+      role,
+      plan_id: plans?.id ?? null,
+    },
+    { onConflict: 'id' }
+  );
+;
 
     if (profileError) throw profileError;
   };
