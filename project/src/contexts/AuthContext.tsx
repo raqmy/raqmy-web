@@ -27,6 +27,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ✅ تحويل الأدوار بين "التطبيق" و "الداتابيس"
+  // DB uses: merchant | customer | admin (حسب triggers/constraints عندك)
+  // App uses: seller | customer | admin (حسب كود الواجهة عندك)
+  const mapDbRoleToAppRole = (p: any) => {
+    if (!p) return p;
+    if (p.role === 'merchant') return { ...p, role: 'seller' };
+    return p;
+  };
+
+  const mapAppUpdatesToDbUpdates = (updates: Partial<UserProfile>) => {
+    if (!updates) return updates;
+    if ((updates as any).role === 'seller') {
+      return { ...updates, role: 'merchant' } as Partial<UserProfile>;
+    }
+    return updates;
+  };
+
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
       .from('users_profile')
@@ -38,7 +55,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Error fetching profile:', error);
       return null;
     }
-    return data;
+
+    // ✅ رجّع للتطبيق role = seller بدل merchant
+    return mapDbRoleToAppRole(data);
   };
 
   useEffect(() => {
@@ -78,7 +97,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    // ✅ توحيد الدور مع الداتابيس (عندك الداتابيس تعتمد merchant)
+    const { data: plans } = await supabase
+      .from('plans')
+      .select('id')
+      .eq('name', 'مجاني')
+      .maybeSingle();
+
+    // ✅ خزّن في الداتابيس role = merchant بدل seller
     const dbRole = role === 'seller' ? 'merchant' : role;
 
     const { error: profileError } = await supabase
@@ -87,12 +112,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         {
           id: data.user.id,
           name,
-          role: dbRole,
+          role: dbRole as any,
+          plan_id: plans?.id ?? null,
         },
         { onConflict: 'id' }
       );
 
     if (profileError) throw profileError;
+
+    // ✅ حدّث حالة البروفايل فوراً داخل التطبيق (عشان الواجهة ما تعتبره عميل)
+    const profileData = await fetchProfile(data.user.id);
+    setProfile(profileData);
   };
 
   const signIn = async (email: string, password: string) => {
@@ -112,9 +142,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) throw new Error('No user logged in');
 
+    // ✅ لو التطبيق قال seller، خلها merchant في الداتابيس
+    const dbUpdates = mapAppUpdatesToDbUpdates(updates);
+
     const { error } = await supabase
       .from('users_profile')
-      .update(updates)
+      .update(dbUpdates)
       .eq('id', user.id);
 
     if (error) throw error;
