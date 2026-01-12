@@ -32,8 +32,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  const isSeller = profile?.role === 'seller' || profile?.role === 'merchant';
-
   const handleUpdateProfile = async () => {
     setLoading(true);
     setMessage('');
@@ -48,14 +46,15 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   };
 
   const handleUpgradeToSeller = async () => {
-    if (isSeller) return;
+    // ✅ الداتا بيس تعتمد merchant
+    if (profile?.role === 'merchant') return;
 
     const confirm = window.confirm('هل تريد ترقية حسابك إلى حساب تاجر؟ ستتمكن من إنشاء متاجر وبيع المنتجات.');
     if (!confirm) return;
 
     setLoading(true);
     try {
-      await updateProfile({ role: 'seller' });
+      await updateProfile({ role: 'merchant' });
       setMessage('تم ترقية حسابك إلى تاجر بنجاح! يمكنك الآن إنشاء متجرك الأول.');
       setTimeout(() => {
         onNavigate('seller-dashboard');
@@ -73,7 +72,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       `تحذير: هذا الإجراء لا يمكن التراجع عنه!\n\n` +
       `سيتم حذف:\n` +
       `- حسابك وجميع بياناتك الشخصية\n` +
-      (isSeller ? `- جميع متاجرك ومنتجاتك\n- جميع مبيعاتك وعمولاتك\n` : '') +
+      (profile?.role === 'merchant' ? `- جميع متاجرك ومنتجاتك\n- جميع مبيعاتك وعمولاتك\n` : '') +
       `\nاكتب "${confirmText}" للتأكيد:`
     );
 
@@ -115,6 +114,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     );
   }
 
+  const isMerchant = profile.role === 'merchant';
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -123,7 +124,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
             <div className="absolute -bottom-16 right-8">
               <div className="relative">
                 <div className="w-32 h-32 bg-white rounded-full border-4 border-white flex items-center justify-center text-4xl font-bold text-blue-600">
-                  {profile.name.charAt(0).toUpperCase()}
+                  {(profile.name?.charAt(0) || '?').toUpperCase()}
                 </div>
                 <button className="absolute bottom-0 left-0 w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white hover:bg-blue-700 shadow-lg">
                   <Camera className="w-5 h-5" />
@@ -142,15 +143,16 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     className={`font-semibold ${
                       profile.role === 'admin'
                         ? 'text-red-600'
-                        : isSeller
+                        : isMerchant
                         ? 'text-blue-600'
                         : 'text-green-600'
                     }`}
                   >
-                    {profile.role === 'admin' ? 'مدير' : isSeller ? 'تاجر' : 'عميل'}
+                    {profile.role === 'admin' ? 'مدير' : isMerchant ? 'تاجر' : 'عميل'}
                   </span>
                 </p>
               </div>
+
               {profile.role === 'customer' && (
                 <button
                   onClick={handleUpgradeToSeller}
@@ -213,7 +215,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 <span>تمت مشاهدتها</span>
               </button>
 
-              {isSeller && (
+              {isMerchant && (
                 <>
                   <div className="border-t border-gray-200 my-2"></div>
 
@@ -308,7 +310,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     </div>
                   </div>
 
-                  {isSeller && (
+                  {isMerchant && (
                     <div className="mt-8">
                       <h3 className="text-xl font-bold text-gray-900 mb-4">إحصائيات التاجر</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -350,7 +352,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 </div>
               )}
 
-              {activeTab === 'stores' && isSeller && (
+              {activeTab === 'stores' && isMerchant && (
                 <div>
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-2xl font-bold text-gray-900">متاجري</h2>
@@ -369,7 +371,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 </div>
               )}
 
-              {activeTab === 'products' && isSeller && (
+              {activeTab === 'products' && isMerchant && (
                 <div>
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-2xl font-bold text-gray-900">منتجاتي</h2>
@@ -388,7 +390,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 </div>
               )}
 
-              {activeTab === 'analytics' && isSeller && (
+              {activeTab === 'analytics' && isMerchant && (
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 mb-6">لوحة التحليلات</h2>
                   <div className="text-center py-12">
@@ -404,9 +406,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                   <h2 className="text-2xl font-bold text-gray-900 mb-6">إعدادات الحساب</h2>
                   <div className="space-y-6">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        الاسم
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
                       <div className="relative">
                         <User className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                         <input
@@ -419,9 +419,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        البريد الإلكتروني
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
                       <div className="relative">
                         <Mail className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                         <input
@@ -451,7 +449,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <h3 className="font-semibold text-red-900 mb-1">منطقة الخطر</h3>
                           <p className="text-sm text-red-700">
                             حذف الحساب نهائي ولا يمكن التراجع عنه. سيتم حذف جميع بياناتك
-                            {isSeller && ' ومتاجرك ومنتجاتك'}.
+                            {isMerchant && ' ومتاجرك ومنتجاتك'}.
                           </p>
                         </div>
                       </div>
