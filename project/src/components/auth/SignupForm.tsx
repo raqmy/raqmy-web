@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Mail, Lock, User, AlertCircle, Store, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -8,36 +8,20 @@ interface SignupFormProps {
 
 export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
   const { signUp, signIn } = useAuth();
-
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  // ✅ role state
   const [role, setRole] = useState<'customer' | 'seller'>('customer');
-
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // ✅ Debug: show when role changes
-  useEffect(() => {
-    console.log('[SignupForm] role changed =>', role);
-  }, [role]);
+  const [success, setSuccess] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    // ✅ Debug: log BEFORE any request
-    console.log('[SignupForm] SUBMIT clicked (before signUp)', {
-      name,
-      email,
-      role,
-      passwordLength: password.length,
-    });
 
     if (password !== confirmPassword) {
       setError('كلمات المرور غير متطابقة');
@@ -52,35 +36,20 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
     setLoading(true);
 
     try {
-      // ✅ Debug: explicitly log right before signUp call
-      console.log('[SignupForm] calling signUp with role =>', role);
-
       await signUp(email, password, name, role);
-
-      console.log('[SignupForm] signUp success, now signing in...');
       await signIn(email, password);
-
-      console.log('[SignupForm] signIn success');
     } catch (err: any) {
-      console.error('[SignupForm] ERROR during signUp/signIn:', err);
-      setError(err?.message || 'فشل إنشاء الحساب');
+      setError(err.message || 'فشل إنشاء الحساب');
       setLoading(false);
     }
   };
+
 
   return (
     <div className="w-full max-w-md mx-auto bg-white rounded-2xl shadow-xl p-8">
       <div className="text-center mb-8">
         <h2 className="text-3xl font-bold text-gray-900 mb-2">إنشاء حساب جديد</h2>
         <p className="text-gray-600">انضم إلى منصة رقمي اليوم</p>
-
-        {/* ✅ Debug badge: shows selected role clearly */}
-        <div className="mt-3 inline-flex items-center gap-2 text-sm">
-          <span className="text-gray-500">الرول الحالي:</span>
-          <span className="px-2 py-1 rounded-md border">
-            {role === 'customer' ? 'customer (عميل)' : 'seller (تاجر)'}
-          </span>
-        </div>
       </div>
 
       {error && (
@@ -92,41 +61,45 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">نوع الحساب</label>
-
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            نوع الحساب
+          </label>
           <div className="grid grid-cols-2 gap-4">
             <button
               type="button"
-              onClick={() => {
-                console.log('[SignupForm] user selected role => customer');
-                setRole('customer');
-              }}
+              onClick={() => setRole('customer')}
               className={`p-4 border-2 rounded-lg flex flex-col items-center gap-2 transition-all ${
-                role === 'customer' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                role === 'customer'
+                  ? 'border-blue-600 bg-blue-50'
+                  : 'border-gray-200 hover:border-gray-300'
               }`}
             >
               <User className={`w-6 h-6 ${role === 'customer' ? 'text-blue-600' : 'text-gray-400'}`} />
-              <span className={`font-semibold ${role === 'customer' ? 'text-blue-600' : 'text-gray-600'}`}>عميل</span>
+              <span className={`font-semibold ${role === 'customer' ? 'text-blue-600' : 'text-gray-600'}`}>
+                عميل
+              </span>
             </button>
-
             <button
               type="button"
-              onClick={() => {
-                console.log('[SignupForm] user selected role => seller');
-                setRole('seller');
-              }}
+              onClick={() => setRole('seller')}
               className={`p-4 border-2 rounded-lg flex flex-col items-center gap-2 transition-all ${
-                role === 'seller' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                role === 'seller'
+                  ? 'border-blue-600 bg-blue-50'
+                  : 'border-gray-200 hover:border-gray-300'
               }`}
             >
               <Store className={`w-6 h-6 ${role === 'seller' ? 'text-blue-600' : 'text-gray-400'}`} />
-              <span className={`font-semibold ${role === 'seller' ? 'text-blue-600' : 'text-gray-600'}`}>تاجر</span>
+              <span className={`font-semibold ${role === 'seller' ? 'text-blue-600' : 'text-gray-600'}`}>
+                تاجر
+              </span>
             </button>
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">الاسم الكامل</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            الاسم الكامل
+          </label>
           <div className="relative">
             <User className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -141,7 +114,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            البريد الإلكتروني
+          </label>
           <div className="relative">
             <Mail className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -157,7 +132,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">كلمة المرور</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            كلمة المرور
+          </label>
           <div className="relative">
             <Lock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -180,7 +157,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">تأكيد كلمة المرور</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            تأكيد كلمة المرور
+          </label>
           <div className="relative">
             <Lock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -214,7 +193,10 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
       <div className="mt-6 text-center">
         <p className="text-gray-600">
           لديك حساب بالفعل؟{' '}
-          <button onClick={onSwitchToLogin} className="text-blue-600 font-semibold hover:text-blue-700">
+          <button
+            onClick={onSwitchToLogin}
+            className="text-blue-600 font-semibold hover:text-blue-700"
+          >
             تسجيل الدخول
           </button>
         </p>
