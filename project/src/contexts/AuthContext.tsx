@@ -78,24 +78,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    const { data: plans } = await supabase
-      .from('plans')
-      .select('id')
-      .eq('name', 'مجاني')
-      .maybeSingle();
+    // ✅ توحيد الدور مع الداتابيس (عندك الداتابيس تعتمد merchant)
+    const dbRole = role === 'seller' ? 'merchant' : role;
 
-  const { error: profileError } = await supabase
-  .from('users_profile')
-  .upsert(
-    {
-      id: data.user.id,
-      name,
-      role,
-      plan_id: plans?.id ?? null,
-    },
-    { onConflict: 'id' }
-  );
-;
+    const { error: profileError } = await supabase
+      .from('users_profile')
+      .upsert(
+        {
+          id: data.user.id,
+          name,
+          role: dbRole,
+        },
+        { onConflict: 'id' }
+      );
 
     if (profileError) throw profileError;
   };
