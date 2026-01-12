@@ -32,6 +32,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
+  const isSeller = profile?.role === 'seller' || profile?.role === 'merchant';
+
   const handleUpdateProfile = async () => {
     setLoading(true);
     setMessage('');
@@ -46,7 +48,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   };
 
   const handleUpgradeToSeller = async () => {
-    if (profile?.role === 'seller') return;
+    if (isSeller) return;
 
     const confirm = window.confirm('هل تريد ترقية حسابك إلى حساب تاجر؟ ستتمكن من إنشاء متاجر وبيع المنتجات.');
     if (!confirm) return;
@@ -71,7 +73,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       `تحذير: هذا الإجراء لا يمكن التراجع عنه!\n\n` +
       `سيتم حذف:\n` +
       `- حسابك وجميع بياناتك الشخصية\n` +
-      (profile?.role === 'seller' ? `- جميع متاجرك ومنتجاتك\n- جميع مبيعاتك وعمولاتك\n` : '') +
+      (isSeller ? `- جميع متاجرك ومنتجاتك\n- جميع مبيعاتك وعمولاتك\n` : '') +
       `\nاكتب "${confirmText}" للتأكيد:`
     );
 
@@ -140,12 +142,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     className={`font-semibold ${
                       profile.role === 'admin'
                         ? 'text-red-600'
-                        : profile.role === 'seller'
+                        : isSeller
                         ? 'text-blue-600'
                         : 'text-green-600'
                     }`}
                   >
-                    {profile.role === 'admin' ? 'مدير' : profile.role === 'seller' ? 'تاجر' : 'عميل'}
+                    {profile.role === 'admin' ? 'مدير' : isSeller ? 'تاجر' : 'عميل'}
                   </span>
                 </p>
               </div>
@@ -211,7 +213,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 <span>تمت مشاهدتها</span>
               </button>
 
-              {profile.role === 'seller' && (
+              {isSeller && (
                 <>
                   <div className="border-t border-gray-200 my-2"></div>
 
@@ -306,7 +308,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     </div>
                   </div>
 
-                  {profile.role === 'seller' && (
+                  {isSeller && (
                     <div className="mt-8">
                       <h3 className="text-xl font-bold text-gray-900 mb-4">إحصائيات التاجر</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -348,8 +350,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 </div>
               )}
 
-
-              {activeTab === 'stores' && profile.role === 'seller' && (
+              {activeTab === 'stores' && isSeller && (
                 <div>
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-2xl font-bold text-gray-900">متاجري</h2>
@@ -368,7 +369,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 </div>
               )}
 
-              {activeTab === 'products' && profile.role === 'seller' && (
+              {activeTab === 'products' && isSeller && (
                 <div>
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-2xl font-bold text-gray-900">منتجاتي</h2>
@@ -387,7 +388,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 </div>
               )}
 
-              {activeTab === 'analytics' && profile.role === 'seller' && (
+              {activeTab === 'analytics' && isSeller && (
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 mb-6">لوحة التحليلات</h2>
                   <div className="text-center py-12">
@@ -450,7 +451,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <h3 className="font-semibold text-red-900 mb-1">منطقة الخطر</h3>
                           <p className="text-sm text-red-700">
                             حذف الحساب نهائي ولا يمكن التراجع عنه. سيتم حذف جميع بياناتك
-                            {profile?.role === 'seller' && ' ومتاجرك ومنتجاتك'}.
+                            {isSeller && ' ومتاجرك ومنتجاتك'}.
                           </p>
                         </div>
                       </div>
