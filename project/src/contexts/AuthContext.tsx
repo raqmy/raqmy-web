@@ -16,33 +16,28 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
+};
+
+/**
+ * DB expects: customer | merchant | admin
+ * UI expects: customer | seller | admin
+ */
+const toDbRole = (role: any) => {
+  if (role === 'seller') return 'merchant';
+  return role ?? 'customer';
+};
+
+const fromDbRole = (role: any) => {
+  if (role === 'merchant') return 'seller';
+  return role ?? 'customer';
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // ✅ تحويل الأدوار بين "التطبيق" و "الداتابيس"
-  // DB uses: merchant | customer | admin (حسب triggers/constraints عندك)
-  // App uses: seller | customer | admin (حسب كود الواجهة عندك)
-  const mapDbRoleToAppRole = (p: any) => {
-    if (!p) return p;
-    if (p.role === 'merchant') return { ...p, role: 'seller' };
-    return p;
-  };
-
-  const mapAppUpdatesToDbUpdates = (updates: Partial<UserProfile>) => {
-    if (!updates) return updates;
-    if ((updates as any).role === 'seller') {
-      return { ...updates, role: 'merchant' } as Partial<UserProfile>;
-    }
-    return updates;
-  };
 
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
@@ -56,8 +51,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return null;
     }
 
-    // ✅ رجّع للتطبيق role = seller بدل merchant
-    return mapDbRoleToAppRole(data);
+    if (!data) return null;
+
+    // Translate DB role -> UI role
+    return { ...data, role: fromDbRole((data as any).role) } as UserProfile;
   };
 
   useEffect(() => {
@@ -89,22 +86,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signUp = async (email: string, password: string, name: string, role: 'customer' | 'seller') => {
+    // 1) Create auth user
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          name,
+          role, // metadata only (optional)
+        },
+      },
     });
 
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    const { data: plans } = await supabase
-      .from('plans')
-      .select('id')
-      .eq('name', 'مجاني')
-      .maybeSingle();
-
-    // ✅ خزّن في الداتابيس role = merchant بدل seller
-    const dbRole = role === 'seller' ? 'merchant' : role;
+    // 2) Insert profile row (IMPORTANT: send merchant to DB when user chose seller)
+    const dbRole = toDbRole(role);
 
     const { error: profileError } = await supabase
       .from('users_profile')
@@ -112,25 +110,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         {
           id: data.user.id,
           name,
-          role: dbRole as any,
-          plan_id: plans?.id ?? null,
-        },
+          role: dbRole,
+          // لا نرسل plan_id حالياً لتفادي أخطاء plans/plan_id عندك
+        } as any,
         { onConflict: 'id' }
       );
 
     if (profileError) throw profileError;
 
-    // ✅ حدّث حالة البروفايل فوراً داخل التطبيق (عشان الواجهة ما تعتبره عميل)
+    // 3) Refresh profile in state
     const profileData = await fetchProfile(data.user.id);
     setProfile(profileData);
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   };
 
@@ -142,12 +136,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) throw new Error('No user logged in');
 
-    // ✅ لو التطبيق قال seller، خلها merchant في الداتابيس
-    const dbUpdates = mapAppUpdatesToDbUpdates(updates);
+    // Translate UI role -> DB role before update
+    const updatesForDb: any = { ...updates };
+    if ('role' in updatesForDb) {
+      updatesForDb.role = toDbRole(updatesForDb.role);
+    }
 
     const { error } = await supabase
       .from('users_profile')
-      .update(dbUpdates)
+      .update(updatesForDb)
       .eq('id', user.id);
 
     if (error) throw error;
@@ -156,15 +153,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(updatedProfile);
   };
 
-  const value = {
-    user,
-    profile,
-    loading,
-    signUp,
-    signIn,
-    signOut,
-    updateProfile,
-  };
+  const value = { user, profile, loading, signUp, signIn, signOut, updateProfile };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
