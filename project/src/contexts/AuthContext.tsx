@@ -20,20 +20,6 @@ export const useAuth = () => {
   return context;
 };
 
-/**
- * DB expects: customer | merchant | admin
- * UI expects: customer | seller | admin
- */
-const toDbRole = (role: any) => {
-  if (role === 'seller') return 'merchant';
-  return role ?? 'customer';
-};
-
-const fromDbRole = (role: any) => {
-  if (role === 'merchant') return 'seller';
-  return role ?? 'customer';
-};
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -51,10 +37,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return null;
     }
 
-    if (!data) return null;
-
-    // Translate DB role -> UI role
-    return { ...data, role: fromDbRole((data as any).role) } as UserProfile;
+    return data as UserProfile | null;
   };
 
   useEffect(() => {
@@ -69,9 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       })();
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       (async () => {
         setUser(session?.user ?? null);
         if (session?.user) {
@@ -88,20 +69,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signUp = async (email: string, password: string, name: string, role: 'customer' | 'seller') => {
-    // IMPORTANT:
-    // We do NOT write to users_profile here.
-    // The database trigger should create users_profile from auth.users metadata.
-    // This avoids RLS/session issues during signUp (especially when email confirmation is enabled).
-
-    const dbRole = toDbRole(role);
-
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           name,
-          role: dbRole, // store role in metadata as DB role
+          role, // metadata فقط
         },
       },
     });
@@ -109,7 +83,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    // Try to refresh profile (may be null if email confirmation is required and no session yet)
+    const { error: profileError } = await supabase
+      .from('users_profile')
+      .upsert(
+        {
+          id: data.user.id,
+          name,
+          role, // نخزن seller كما هو (بدون merchant)
+          // لا نرسل plan_id حاليا
+        } as any,
+        { onConflict: 'id' }
+      );
+
+    if (profileError) throw profileError;
+
     const profileData = await fetchProfile(data.user.id);
     setProfile(profileData);
   };
@@ -127,15 +114,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) throw new Error('No user logged in');
 
-    // Translate UI role -> DB role before update
-    const updatesForDb: any = { ...updates };
-    if ('role' in updatesForDb) {
-      updatesForDb.role = toDbRole(updatesForDb.role);
-    }
-
     const { error } = await supabase
       .from('users_profile')
-      .update(updatesForDb)
+      .update(updates as any)
       .eq('id', user.id);
 
     if (error) throw error;
