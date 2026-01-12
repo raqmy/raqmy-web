@@ -69,7 +69,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       })();
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       (async () => {
         setUser(session?.user ?? null);
         if (session?.user) {
@@ -86,14 +88,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signUp = async (email: string, password: string, name: string, role: 'customer' | 'seller') => {
-    // 1) Create auth user
+    // IMPORTANT:
+    // We do NOT write to users_profile here.
+    // The database trigger should create users_profile from auth.users metadata.
+    // This avoids RLS/session issues during signUp (especially when email confirmation is enabled).
+
+    const dbRole = toDbRole(role);
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           name,
-          role, // metadata only (optional)
+          role: dbRole, // store role in metadata as DB role
         },
       },
     });
@@ -101,24 +109,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    // 2) Insert profile row (IMPORTANT: send merchant to DB when user chose seller)
-    const dbRole = toDbRole(role);
-
-    const { error: profileError } = await supabase
-      .from('users_profile')
-      .upsert(
-        {
-          id: data.user.id,
-          name,
-          role: dbRole,
-          // لا نرسل plan_id حالياً لتفادي أخطاء plans/plan_id عندك
-        } as any,
-        { onConflict: 'id' }
-      );
-
-    if (profileError) throw profileError;
-
-    // 3) Refresh profile in state
+    // Try to refresh profile (may be null if email confirmation is required and no session yet)
     const profileData = await fetchProfile(data.user.id);
     setProfile(profileData);
   };
