@@ -46,15 +46,15 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   };
 
   const handleUpgradeToSeller = async () => {
-    // ✅ الداتا بيس تعتمد merchant
-    if (profile?.role === 'merchant') return;
+    // ✅ الواجهة تعتمد seller (و AuthContext يحول merchant -> seller)
+    if (profile?.role === 'seller') return;
 
     const confirm = window.confirm('هل تريد ترقية حسابك إلى حساب تاجر؟ ستتمكن من إنشاء متاجر وبيع المنتجات.');
     if (!confirm) return;
 
     setLoading(true);
     try {
-      await updateProfile({ role: 'merchant' });
+      await updateProfile({ role: 'seller' } as any);
       setMessage('تم ترقية حسابك إلى تاجر بنجاح! يمكنك الآن إنشاء متجرك الأول.');
       setTimeout(() => {
         onNavigate('seller-dashboard');
@@ -72,7 +72,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       `تحذير: هذا الإجراء لا يمكن التراجع عنه!\n\n` +
       `سيتم حذف:\n` +
       `- حسابك وجميع بياناتك الشخصية\n` +
-      (profile?.role === 'merchant' ? `- جميع متاجرك ومنتجاتك\n- جميع مبيعاتك وعمولاتك\n` : '') +
+      (profile?.role === 'seller' ? `- جميع متاجرك ومنتجاتك\n- جميع مبيعاتك وعمولاتك\n` : '') +
       `\nاكتب "${confirmText}" للتأكيد:`
     );
 
@@ -85,6 +85,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     setLoading(true);
     try {
+      // ملاحظة: هذا يحتاج Service Role Key على السيرفر.
+      // إذا ما كان عندك Backend/Admin API، هذا السطر غالباً ما راح يشتغل على المتصفح.
       const { error } = await supabase.auth.admin.deleteUser(user!.id);
       if (error) throw error;
 
@@ -114,7 +116,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     );
   }
 
-  const isMerchant = profile.role === 'merchant';
+  // ✅ المهم: التاجر = seller
+  const isMerchant = profile.role === 'seller';
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -132,6 +135,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
               </div>
             </div>
           </div>
+
           <div className="pt-20 pb-6 px-8">
             <div className="flex items-start justify-between">
               <div>
