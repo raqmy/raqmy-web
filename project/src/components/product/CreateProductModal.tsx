@@ -36,6 +36,8 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setError('');
+      setLimits(null);
       fetchStores();
       fetchCategories();
       fetchUserLimits();
@@ -53,6 +55,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
     if (error) {
       console.error('fetchStores error:', error);
+      setError('تعذر تحميل المتاجر. حاول مرة أخرى.');
       return;
     }
     if (data) setStores(data);
@@ -66,6 +69,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
     if (error) {
       console.error('fetchCategories error:', error);
+      // لا نوقف إنشاء المنتج لو التصنيفات فشلت
       return;
     }
     if (data) setCategories(data);
@@ -73,25 +77,46 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
   const fetchUserLimits = async () => {
     if (!profile) return;
+
     const { data, error } = await supabase.rpc('get_user_limits', {
       p_user_id: profile.id,
     });
 
     if (error) {
       console.error('fetchUserLimits error:', error);
+      setError('تعذر جلب حدود حسابك (limits). تأكد من RPC get_user_limits.');
       return;
     }
 
-    if (data && Array.isArray(data) && data.length > 0) {
-      setLimits(data[0]);
+    // ✅ بعض الـ RPC ترجع array وبعضها object
+    if (Array.isArray(data)) {
+      if (data.length > 0) setLimits(data[0] as UserLimits);
+      else setError('لم يتم العثور على limits لهذا المستخدم.');
+      return;
     }
+
+    if (data && typeof data === 'object') {
+      setLimits(data as UserLimits);
+      return;
+    }
+
+    setError('تعذر قراءة limits من السيرفر.');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!profile || !limits) return;
+    if (!profile) {
+      setError('يجب تسجيل الدخول أولاً.');
+      return;
+    }
+
+    // ✅ بدل ما نسكت، نعرض سبب المشكلة
+    if (!limits) {
+      setError('لم يتم تحميل حدود الحساب (limits) بعد. أعد فتح النافذة أو حدّث الصفحة.');
+      return;
+    }
 
     if (!limits.can_create_product) {
       setError(
@@ -121,27 +146,27 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
         throw new Error('السعر غير صالح');
       }
 
-      // ✅ مهم: جدولك فيه title + merchant_id، ومنتجاتك الحالية user_id = null
-      // فهنا نحفظ الاثنين عشان كل الشاشات تشتغل
+      // ✅ جدول products عندك واضح أنه يستخدم: title + merchant_id + visibility ...
+      // وبما أن منتجاتك القديمة user_id=null، نملأ الاثنين.
       const payload: any = {
-        title: formData.name,
-        description: formData.description || null,
+        title: formData.name.trim(),
+        description: formData.description?.trim() || null,
         price,
         visibility: formData.visibility,
         is_active: true,
 
-        // مهمين لحل المشكلة
         user_id: profile.id,
         merchant_id: profile.id,
 
-        // إذا العمود موجود عندك بيأخذ القيمة، وإذا غير موجود بيطلع خطأ
-        // فخلينا نخليه فقط لو تختار متجر (وغالباً عندك store_id لأنه ظاهر في response)
         store_id: formData.store_id || null,
       };
 
       const { error: insertError } = await supabase.from('products').insert(payload);
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('insertError:', insertError);
+        throw insertError;
+      }
 
       onSuccess();
       onClose();
@@ -292,11 +317,15 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.name}>
-                    {cat.icon} {cat.name_ar}
-                  </option>
-                ))}
+                {categories.length === 0 ? (
+                  <option value="other">📦 أخرى</option>
+                ) : (
+                  categories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>
+                      {cat.icon} {cat.name_ar}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
@@ -388,7 +417,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={loading || (limits && !limits.can_create_product)}
+              disabled={loading || (limits ? !limits.can_create_product : false)}
               className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
