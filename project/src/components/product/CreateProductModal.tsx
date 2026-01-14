@@ -40,6 +40,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       fetchCategories();
       fetchUserLimits();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const fetchStores = async () => {
@@ -53,10 +54,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
   };
 
   const fetchCategories = async () => {
-    const { data } = await supabase
-      .from('store_categories')
-      .select('*')
-      .order('name_ar');
+    const { data } = await supabase.from('store_categories').select('*').order('name_ar');
     if (data) setCategories(data);
   };
 
@@ -68,15 +66,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     if (data && data.length > 0) {
       setLimits(data[0]);
     }
-  };
-
-  const generateSlug = (name: string) => {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .trim();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -92,10 +81,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       return;
     }
 
-    if (
-      formData.is_subscription &&
-      !limits.can_create_subscription_product
-    ) {
+    if (formData.is_subscription && !limits.can_create_subscription_product) {
       setError(
         `لقد وصلت للحد الأقصى من منتجات الاشتراك (${limits.max_subscription_products}). قم بترقية باقتك للحصول على المزيد.`
       );
@@ -110,29 +96,20 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     setLoading(true);
 
     try {
-      const slug = generateSlug(formData.name);
       const price = parseFloat(formData.price);
 
       if (isNaN(price) || price < 0) {
         throw new Error('السعر غير صالح');
       }
 
+      // ✅ إدخال متوافق مع جدول products عندك (حسب الـResponse اللي أرسلته)
       const { error: insertError } = await supabase.from('products').insert({
-        user_id: profile.id,
+        merchant_id: profile.id,
         store_id: formData.store_id || null,
-        name: formData.name,
-        slug: `${profile.id.slice(0, 8)}-${slug}-${Date.now()}`,
+        title: formData.name.trim(),
         description: formData.description || null,
         price,
-        currency: formData.currency,
-        category: formData.category,
-        is_subscription: formData.is_subscription,
-        subscription_period: formData.is_subscription
-          ? formData.subscription_period
-          : null,
         visibility: formData.visibility,
-        delivery_method: formData.delivery_method,
-        coupons_enabled: formData.coupons_enabled,
         is_active: true,
       } as any);
 
@@ -140,6 +117,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
       onSuccess();
       onClose();
+
       setFormData({
         name: '',
         description: '',
@@ -173,10 +151,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             </div>
             <h2 className="text-2xl font-bold text-gray-900">إضافة منتج جديد</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-          >
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -220,9 +195,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              وصف المنتج
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">وصف المنتج</label>
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -266,9 +239,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                المتجر التابع له
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">المتجر التابع له</label>
               <select
                 value={formData.store_id}
                 onChange={(e) => setFormData({ ...formData, store_id: e.target.value })}
@@ -304,9 +275,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
               type="checkbox"
               id="is_subscription"
               checked={formData.is_subscription}
-              onChange={(e) =>
-                setFormData({ ...formData, is_subscription: e.target.checked })
-              }
+              onChange={(e) => setFormData({ ...formData, is_subscription: e.target.checked })}
               className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
             />
             <label htmlFor="is_subscription" className="text-sm text-gray-700 cursor-pointer">
@@ -316,14 +285,10 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           {formData.is_subscription && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                مدة التجديد
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">مدة التجديد</label>
               <select
                 value={formData.subscription_period}
-                onChange={(e) =>
-                  setFormData({ ...formData, subscription_period: e.target.value })
-                }
+                onChange={(e) => setFormData({ ...formData, subscription_period: e.target.value })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="weekly">أسبوعي</option>
@@ -347,9 +312,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              طريقة التسليم
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">طريقة التسليم</label>
             <select
               value={formData.delivery_method}
               onChange={(e) => setFormData({ ...formData, delivery_method: e.target.value })}
@@ -365,9 +328,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
               type="checkbox"
               id="coupons_enabled"
               checked={formData.coupons_enabled}
-              onChange={(e) =>
-                setFormData({ ...formData, coupons_enabled: e.target.checked })
-              }
+              onChange={(e) => setFormData({ ...formData, coupons_enabled: e.target.checked })}
               className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
             />
             <label htmlFor="coupons_enabled" className="text-sm text-gray-700 cursor-pointer">
