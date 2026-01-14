@@ -45,25 +45,44 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
   const fetchStores = async () => {
     if (!profile) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('stores')
       .select('*')
       .eq('user_id', profile.id)
       .eq('is_active', true);
+
+    if (error) {
+      console.error('fetchStores error:', error);
+      return;
+    }
     if (data) setStores(data);
   };
 
   const fetchCategories = async () => {
-    const { data } = await supabase.from('store_categories').select('*').order('name_ar');
+    const { data, error } = await supabase
+      .from('store_categories')
+      .select('*')
+      .order('name_ar');
+
+    if (error) {
+      console.error('fetchCategories error:', error);
+      return;
+    }
     if (data) setCategories(data);
   };
 
   const fetchUserLimits = async () => {
     if (!profile) return;
-    const { data } = await supabase.rpc('get_user_limits', {
+    const { data, error } = await supabase.rpc('get_user_limits', {
       p_user_id: profile.id,
     });
-    if (data && data.length > 0) {
+
+    if (error) {
+      console.error('fetchUserLimits error:', error);
+      return;
+    }
+
+    if (data && Array.isArray(data) && data.length > 0) {
       setLimits(data[0]);
     }
   };
@@ -102,16 +121,25 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
         throw new Error('السعر غير صالح');
       }
 
-      // ✅ إدخال متوافق مع جدول products عندك (حسب الـResponse اللي أرسلته)
-      const { error: insertError } = await supabase.from('products').insert({
-        merchant_id: profile.id,
-        store_id: formData.store_id || null,
-        title: formData.name.trim(),
+      // ✅ مهم: جدولك فيه title + merchant_id، ومنتجاتك الحالية user_id = null
+      // فهنا نحفظ الاثنين عشان كل الشاشات تشتغل
+      const payload: any = {
+        title: formData.name,
         description: formData.description || null,
         price,
         visibility: formData.visibility,
         is_active: true,
-      } as any);
+
+        // مهمين لحل المشكلة
+        user_id: profile.id,
+        merchant_id: profile.id,
+
+        // إذا العمود موجود عندك بيأخذ القيمة، وإذا غير موجود بيطلع خطأ
+        // فخلينا نخليه فقط لو تختار متجر (وغالباً عندك store_id لأنه ظاهر في response)
+        store_id: formData.store_id || null,
+      };
+
+      const { error: insertError } = await supabase.from('products').insert(payload);
 
       if (insertError) throw insertError;
 
@@ -133,7 +161,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       });
     } catch (err: any) {
       console.error('Error creating product:', err);
-      setError(err.message || 'حدث خطأ أثناء إنشاء المنتج');
+      setError(err?.message || 'حدث خطأ أثناء إنشاء المنتج');
     } finally {
       setLoading(false);
     }
@@ -151,7 +179,10 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             </div>
             <h2 className="text-2xl font-bold text-gray-900">إضافة منتج جديد</h2>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -288,7 +319,9 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
               <label className="block text-sm font-medium text-gray-700 mb-2">مدة التجديد</label>
               <select
                 value={formData.subscription_period}
-                onChange={(e) => setFormData({ ...formData, subscription_period: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, subscription_period: e.target.value })
+                }
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="weekly">أسبوعي</option>
