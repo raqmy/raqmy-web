@@ -13,7 +13,6 @@ import {
   Share2,
   Users,
   Link as LinkIcon,
-  Copy,
   Check,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -46,6 +45,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [activeTab, setActiveTab] = useState<
     'overview' | 'products' | 'stores' | 'marketing' | 'analytics' | 'settings' | 'orders'
   >('overview');
+
   const [stores, setStores] = useState<Store[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [stats, setStats] = useState({
@@ -54,45 +54,65 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     totalViews: 0,
     activeProducts: 0,
   });
+
   const [loading, setLoading] = useState(true);
   const [showCreateStoreModal, setShowCreateStoreModal] = useState(false);
   const [showCreateProductModal, setShowCreateProductModal] = useState(false);
   const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+
   const [affiliateLinks, setAffiliateLinks] = useState<AffiliateLink[]>([]);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   useEffect(() => {
     if (profile) {
       fetchDashboardData();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
+
+  const normalizeProduct = (p: any) => {
+    // ✅ مهم: عندك بالجدول الاسم موجود كـ title وليس name
+    const name = (p.name ?? p.title ?? '').toString();
+
+    return {
+      ...p,
+      name,
+      // بعض المشاريع تحتاج title لاحقاً (اختياري)
+      title: p.title ?? p.name ?? name,
+      views_count: Number(p.views_count ?? 0),
+      sales_count: Number(p.sales_count ?? 0),
+      currency: p.currency ?? 'SAR',
+      is_active: p.is_active ?? true,
+    };
+  };
 
   const fetchDashboardData = async () => {
     try {
+      if (!profile?.id) return;
+
+      // المتاجر عندك مربوطة بـ user_id (واضح من الكود السابق)
       const { data: storesData } = await supabase
         .from('stores')
         .select('*')
-        .eq('user_id', profile!.id);
+        .eq('user_id', profile.id);
 
-      // ✅ FIX: جلب المنتجات سواء كانت محفوظة بـ user_id (الجديد) أو merchant_id (القديم)
-      const { data: productsData } = await supabase
+      // ✅ FIX: المنتجات عندك مربوطة بـ merchant_id (واضح من الـ response اللي أرسلته)
+      // بدل eq('user_id', ...) لأنها ترجع []
+      const { data: rawProductsData } = await supabase
         .from('products')
         .select('*')
-        .or(`user_id.eq.${profile!.id},merchant_id.eq.${profile!.id}`);
+        .eq('merchant_id', profile.id);
+
+      const normalizedProducts = (rawProductsData || []).map(normalizeProduct);
 
       const { data: ordersData } = await supabase
         .from('orders')
         .select('seller_amount, status')
-        .eq('seller_id', profile!.id)
+        .eq('seller_id', profile.id)
         .eq('status', 'completed');
 
-      const safeProducts = (productsData || []) as any[];
+      const productIds = normalizedProducts.map((p: any) => p.id).filter(Boolean);
 
-      const productIds = safeProducts.map((p) => p.id).filter(Boolean);
-
-      // ✅ FIX: لا تسوي in() على قائمة فاضية لأن هذا يولد product_id=in.() ويعطي 400
+      // ✅ FIX: لا تسوي in() على قائمة فاضية
       let affiliateLinksData: any[] = [];
       if (productIds.length > 0) {
         const { data } = await supabase
@@ -106,8 +126,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           .in('product_id', productIds);
 
         affiliateLinksData = data || [];
-      } else {
-        affiliateLinksData = [];
       }
 
       const linksWithStats = await Promise.all(
@@ -131,20 +149,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         })
       );
 
-      // ✅ FIX: توحيد اسم المنتج (لو الجدول عندك title بدل name)
-      const normalizedProducts = safeProducts.map((p: any) => ({
-        ...p,
-        name: p.name ?? p.title ?? '',
-        views_count: p.views_count ?? 0,
-        sales_count: p.sales_count ?? 0,
-      }));
-
       setStores(storesData || []);
       setProducts(normalizedProducts as any);
-      setAffiliateLinks(linksWithStats);
+      setAffiliateLinks(linksWithStats as any);
 
       const revenue =
-        ordersData?.reduce((sum, order) => sum + Number(order.seller_amount), 0) || 0;
+        ordersData?.reduce((sum, order) => sum + Number(order.seller_amount || 0), 0) || 0;
       const sales = ordersData?.length || 0;
       const views =
         normalizedProducts.reduce((sum: number, p: any) => sum + Number(p.views_count || 0), 0) ||
@@ -197,6 +207,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               <LayoutDashboard className="w-5 h-5" />
               <span>نظرة عامة</span>
             </button>
+
             <button
               onClick={() => setActiveTab('products')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -208,6 +219,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               <Package className="w-5 h-5" />
               <span>المنتجات</span>
             </button>
+
             <button
               onClick={() => setActiveTab('stores')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -219,6 +231,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               <StoreIcon className="w-5 h-5" />
               <span>المتاجر</span>
             </button>
+
             <button
               onClick={() => setActiveTab('marketing')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -230,6 +243,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               <Share2 className="w-5 h-5" />
               <span>التسويق</span>
             </button>
+
             <button
               onClick={() => setActiveTab('orders')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -241,6 +255,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               <ShoppingBag className="w-5 h-5" />
               <span>الطلبات</span>
             </button>
+
             <button
               onClick={() => setActiveTab('analytics')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -252,6 +267,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               <BarChart3 className="w-5 h-5" />
               <span>التحليلات</span>
             </button>
+
             <button
               onClick={() => setActiveTab('settings')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -412,12 +428,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     </div>
                     <div className="p-6">
                       <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-1">
-                        {product.name ?? product.title ?? ''}
+                        {product.name}
                       </h3>
+
                       <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
-                        <span>{product.sales_count || 0} مبيعات</span>
-                        <span>{product.views_count || 0} مشاهدة</span>
+                        <span>{Number(product.sales_count || 0)} مبيعات</span>
+                        <span>{Number(product.views_count || 0)} مشاهدة</span>
                       </div>
+
                       <div className="flex items-center justify-between mb-4">
                         <span className="text-xl font-bold text-blue-600">
                           {product.price} {product.currency}
@@ -432,6 +450,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                           {product.is_active ? 'نشط' : 'غير نشط'}
                         </span>
                       </div>
+
                       <button
                         onClick={() => setEditingProductId(product.id)}
                         className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
@@ -486,9 +505,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         </p>
                       </div>
                     </div>
+
                     {store.description && (
                       <p className="text-gray-600 mb-4 line-clamp-2">{store.description}</p>
                     )}
+
                     <div className="flex items-center justify-between mb-4">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -500,6 +521,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         {store.is_active ? 'نشط' : 'غير نشط'}
                       </span>
                     </div>
+
                     <div className="flex gap-2">
                       <button
                         onClick={() => onNavigate(`store-detail-${store.id}`)}
@@ -541,6 +563,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <p className="text-blue-100">إدارة المسوقين والروابط</p>
                   </div>
                 </div>
+
                 <div className="space-y-3 mb-6">
                   <div className="flex items-center justify-between">
                     <span className="text-blue-100">المسوقين النشطين</span>
@@ -559,6 +582,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     </span>
                   </div>
                 </div>
+
                 <button
                   onClick={() => onNavigate('affiliate-management')}
                   className="w-full px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-50 transition-colors flex items-center justify-center gap-2"
@@ -578,6 +602,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <p className="text-purple-100">إدارة كوبونات الخصم</p>
                   </div>
                 </div>
+
                 <div className="space-y-3 mb-6">
                   <p className="text-purple-100">قم بإنشاء وإدارة كوبونات الخصم لمنتجاتك ومتاجرك</p>
                   <ul className="space-y-2 text-sm text-purple-100">
@@ -595,6 +620,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     </li>
                   </ul>
                 </div>
+
                 <button
                   onClick={() => onNavigate('coupons-management')}
                   className="w-full px-6 py-3 bg-white text-purple-600 rounded-lg font-semibold hover:bg-purple-50 transition-colors flex items-center justify-center gap-2"
@@ -610,7 +636,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <h3 className="text-xl font-bold text-gray-900 mb-4">آخر الروابط التسويقية</h3>
                 <div className="space-y-4">
                   {affiliateLinks.slice(0, 5).map((link) => {
-                    const product = products.find((p: any) => p.id === link.product_id) as any;
+                    const product = (products as any[]).find((p) => p.id === link.product_id);
                     return (
                       <div
                         key={link.id}
@@ -625,7 +651,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                               {link.affiliate?.name || 'مسوق'}
                             </p>
                             <p className="text-sm text-gray-600">
-                              {(product?.name ?? product?.title ?? 'منتج')} - {link.code}
+                              {product?.name || 'منتج'} - {link.code}
                             </p>
                           </div>
                         </div>
@@ -633,7 +659,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                           <p className="text-sm font-semibold text-gray-900">
                             {link.clicks_count || 0} نقرة
                           </p>
-                          <p className="text-sm text-green-600">{link.sales_count || 0} مبيعات</p>
+                          <p className="text-sm text-green-600">
+                            {link.sales_count || 0} مبيعات
+                          </p>
                         </div>
                       </div>
                     );
