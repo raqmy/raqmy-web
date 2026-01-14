@@ -37,7 +37,10 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setError('');
+      setLoading(false);
+      // ما نخلي limits تتحكم بالزر لو كانت ناقصة/غير دقيقة
       setLimits(null);
+
       fetchStores();
       fetchCategories();
       fetchUserLimits();
@@ -47,6 +50,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
   const fetchStores = async () => {
     if (!profile) return;
+
     const { data, error } = await supabase
       .from('stores')
       .select('*')
@@ -55,7 +59,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
     if (error) {
       console.error('fetchStores error:', error);
-      setError('تعذر تحميل المتاجر. حاول مرة أخرى.');
       return;
     }
     if (data) setStores(data);
@@ -69,7 +72,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
     if (error) {
       console.error('fetchCategories error:', error);
-      // لا نوقف إنشاء المنتج لو التصنيفات فشلت
       return;
     }
     if (data) setCategories(data);
@@ -84,14 +86,13 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
     if (error) {
       console.error('fetchUserLimits error:', error);
-      setError('تعذر جلب حدود حسابك (limits). تأكد من RPC get_user_limits.');
+      // لا نوقف إنشاء المنتج بسبب limits — نخليها اختيارية
       return;
     }
 
-    // ✅ بعض الـ RPC ترجع array وبعضها object
+    // ✅ بعض RPC ترجع array وبعضها object
     if (Array.isArray(data)) {
       if (data.length > 0) setLimits(data[0] as UserLimits);
-      else setError('لم يتم العثور على limits لهذا المستخدم.');
       return;
     }
 
@@ -99,9 +100,18 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       setLimits(data as UserLimits);
       return;
     }
-
-    setError('تعذر قراءة limits من السيرفر.');
   };
+
+  // ✅ الزر ما يتعطل إلا إذا الفورم ناقص أو loading
+  const isFormValid =
+    formData.name.trim().length > 0 && formData.price.trim().length > 0;
+
+  // ✅ limits: لا نعطل إذا الحقل غير موجود (undefined)
+  const canCreateProduct =
+    limits?.can_create_product === false ? false : true;
+
+  const canCreateSubscriptionProduct =
+    limits?.can_create_subscription_product === false ? false : true;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,27 +122,18 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       return;
     }
 
-    // ✅ بدل ما نسكت، نعرض سبب المشكلة
-    if (!limits) {
-      setError('لم يتم تحميل حدود الحساب (limits) بعد. أعد فتح النافذة أو حدّث الصفحة.');
+    // ✅ تحقق حدود الباقة فقط إذا كانت limits فعلاً تعطيك false بشكل صريح
+    if (!canCreateProduct) {
+      setError('لا يمكنك إنشاء منتج جديد حسب حدود باقتك الحالية.');
       return;
     }
 
-    if (!limits.can_create_product) {
-      setError(
-        `لقد وصلت للحد الأقصى من المنتجات (${limits.max_products}). قم بترقية باقتك للحصول على المزيد.`
-      );
+    if (formData.is_subscription && !canCreateSubscriptionProduct) {
+      setError('لا يمكنك إنشاء منتج اشتراك جديد حسب حدود باقتك الحالية.');
       return;
     }
 
-    if (formData.is_subscription && !limits.can_create_subscription_product) {
-      setError(
-        `لقد وصلت للحد الأقصى من منتجات الاشتراك (${limits.max_subscription_products}). قم بترقية باقتك للحصول على المزيد.`
-      );
-      return;
-    }
-
-    if (!formData.name.trim() || !formData.price) {
+    if (!formData.name.trim() || !formData.price.trim()) {
       setError('يرجى إدخال جميع الحقول المطلوبة');
       return;
     }
@@ -146,8 +147,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
         throw new Error('السعر غير صالح');
       }
 
-      // ✅ جدول products عندك واضح أنه يستخدم: title + merchant_id + visibility ...
-      // وبما أن منتجاتك القديمة user_id=null، نملأ الاثنين.
       const payload: any = {
         title: formData.name.trim(),
         description: formData.description?.trim() || null,
@@ -155,6 +154,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
         visibility: formData.visibility,
         is_active: true,
 
+        // نخلي الاثنين عشان كل الشاشات تشتغل
         user_id: profile.id,
         merchant_id: profile.id,
 
@@ -217,22 +217,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
               <AlertCircle className="w-5 h-5 flex-shrink-0" />
               <span className="text-sm">{error}</span>
-            </div>
-          )}
-
-          {limits && (
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-1">
-              <p className="text-sm text-blue-900">
-                <strong>المنتجات:</strong> {limits.current_products} من {limits.max_products}
-              </p>
-              <p className="text-sm text-blue-900">
-                <strong>منتجات الاشتراك:</strong> {limits.current_subscription_products} من{' '}
-                {limits.max_subscription_products}
-              </p>
-              <p className="text-sm text-blue-700">
-                <strong>العمولة:</strong> {limits.commission_rate}% (عادي) |{' '}
-                {limits.marketplace_commission_rate}% (سوق عام)
-              </p>
             </div>
           )}
 
@@ -417,7 +401,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={loading || (limits ? !limits.can_create_product : false)}
+              disabled={loading || !isFormValid}
               className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
