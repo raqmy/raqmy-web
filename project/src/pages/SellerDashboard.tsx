@@ -43,7 +43,9 @@ interface AffiliateLink {
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'stores' | 'marketing' | 'analytics' | 'settings' | 'orders'>('overview');
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'products' | 'stores' | 'marketing' | 'analytics' | 'settings' | 'orders'
+  >('overview');
   const [stores, setStores] = useState<Store[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [stats, setStats] = useState({
@@ -64,6 +66,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     if (profile) {
       fetchDashboardData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   const fetchDashboardData = async () => {
@@ -73,10 +76,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         .select('*')
         .eq('user_id', profile!.id);
 
+      // ✅ FIX: جلب المنتجات سواء كانت محفوظة بـ user_id (الجديد) أو merchant_id (القديم)
       const { data: productsData } = await supabase
         .from('products')
         .select('*')
-        .eq('user_id', profile!.id);
+        .or(`user_id.eq.${profile!.id},merchant_id.eq.${profile!.id}`);
 
       const { data: ordersData } = await supabase
         .from('orders')
@@ -84,17 +88,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         .eq('seller_id', profile!.id)
         .eq('status', 'completed');
 
-      const productIds = productsData?.map((p) => p.id) || [];
+      const safeProducts = (productsData || []) as any[];
+
+      const productIds = safeProducts.map((p) => p.id).filter(Boolean);
 
       // ✅ FIX: لا تسوي in() على قائمة فاضية لأن هذا يولد product_id=in.() ويعطي 400
       let affiliateLinksData: any[] = [];
       if (productIds.length > 0) {
         const { data } = await supabase
           .from('affiliate_links')
-          .select(`
+          .select(
+            `
             *,
             users_profile!affiliate_links_user_id_fkey(id, name)
-          `)
+          `
+          )
           .in('product_id', productIds);
 
         affiliateLinksData = data || [];
@@ -123,14 +131,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         })
       );
 
+      // ✅ FIX: توحيد اسم المنتج (لو الجدول عندك title بدل name)
+      const normalizedProducts = safeProducts.map((p: any) => ({
+        ...p,
+        name: p.name ?? p.title ?? '',
+        views_count: p.views_count ?? 0,
+        sales_count: p.sales_count ?? 0,
+      }));
+
       setStores(storesData || []);
-      setProducts(productsData || []);
+      setProducts(normalizedProducts as any);
       setAffiliateLinks(linksWithStats);
 
-      const revenue = ordersData?.reduce((sum, order) => sum + Number(order.seller_amount), 0) || 0;
+      const revenue =
+        ordersData?.reduce((sum, order) => sum + Number(order.seller_amount), 0) || 0;
       const sales = ordersData?.length || 0;
-      const views = productsData?.reduce((sum, p) => sum + p.views_count, 0) || 0;
-      const active = productsData?.filter((p) => p.is_active).length || 0;
+      const views =
+        normalizedProducts.reduce((sum: number, p: any) => sum + Number(p.views_count || 0), 0) ||
+        0;
+      const active =
+        normalizedProducts.filter((p: any) => Boolean(p.is_active)).length || 0;
 
       setStats({
         totalRevenue: revenue,
@@ -385,18 +405,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {products.map((product) => (
+                {products.map((product: any) => (
                   <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
                     <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
                       <Package className="w-12 h-12 text-blue-600" />
                     </div>
                     <div className="p-6">
                       <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-1">
-                        {product.name}
+                        {product.name ?? product.title ?? ''}
                       </h3>
                       <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
-                        <span>{product.sales_count} مبيعات</span>
-                        <span>{product.views_count} مشاهدة</span>
+                        <span>{product.sales_count || 0} مبيعات</span>
+                        <span>{product.views_count || 0} مشاهدة</span>
                       </div>
                       <div className="flex items-center justify-between mb-4">
                         <span className="text-xl font-bold text-blue-600">
@@ -461,7 +481,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       </div>
                       <div className="flex-1">
                         <h3 className="text-xl font-bold text-gray-900">{store.name}</h3>
-                        <p className="text-sm text-gray-500" dir="ltr">/{store.slug}</p>
+                        <p className="text-sm text-gray-500" dir="ltr">
+                          /{store.slug}
+                        </p>
                       </div>
                     </div>
                     {store.description && (
@@ -503,7 +525,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           <div>
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-2">التسويق والعمولات</h2>
-              <p className="text-gray-600">إدارة المسوقين والكوبونات وتتبع أداء الحملات التسويقية</p>
+              <p className="text-gray-600">
+                إدارة المسوقين والكوبونات وتتبع أداء الحملات التسويقية
+              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -555,9 +579,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   </div>
                 </div>
                 <div className="space-y-3 mb-6">
-                  <p className="text-purple-100">
-                    قم بإنشاء وإدارة كوبونات الخصم لمنتجاتك ومتاجرك
-                  </p>
+                  <p className="text-purple-100">قم بإنشاء وإدارة كوبونات الخصم لمنتجاتك ومتاجرك</p>
                   <ul className="space-y-2 text-sm text-purple-100">
                     <li className="flex items-center gap-2">
                       <Check className="w-4 h-4" />
@@ -588,9 +610,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <h3 className="text-xl font-bold text-gray-900 mb-4">آخر الروابط التسويقية</h3>
                 <div className="space-y-4">
                   {affiliateLinks.slice(0, 5).map((link) => {
-                    const product = products.find((p) => p.id === link.product_id);
+                    const product = products.find((p: any) => p.id === link.product_id) as any;
                     return (
-                      <div key={link.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                      <div
+                        key={link.id}
+                        className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                      >
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
                             <LinkIcon className="w-5 h-5 text-blue-600" />
@@ -600,7 +625,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                               {link.affiliate?.name || 'مسوق'}
                             </p>
                             <p className="text-sm text-gray-600">
-                              {product?.name || 'منتج'} - {link.code}
+                              {(product?.name ?? product?.title ?? 'منتج')} - {link.code}
                             </p>
                           </div>
                         </div>
@@ -608,9 +633,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                           <p className="text-sm font-semibold text-gray-900">
                             {link.clicks_count || 0} نقرة
                           </p>
-                          <p className="text-sm text-green-600">
-                            {link.sales_count || 0} مبيعات
-                          </p>
+                          <p className="text-sm text-green-600">{link.sales_count || 0} مبيعات</p>
                         </div>
                       </div>
                     );
@@ -651,9 +674,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <h2 className="text-2xl font-bold text-gray-900 mb-6">الإعدادات</h2>
             <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  الاسم
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
                 <input
                   type="text"
                   defaultValue={profile?.name}
@@ -661,9 +682,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  رقم الجوال
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">رقم الجوال</label>
                 <input
                   type="tel"
                   defaultValue={profile?.phone}
