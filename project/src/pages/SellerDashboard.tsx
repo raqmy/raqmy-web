@@ -54,68 +54,60 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     totalViews: 0,
     activeProducts: 0,
   });
-
   const [loading, setLoading] = useState(true);
   const [showCreateStoreModal, setShowCreateStoreModal] = useState(false);
   const [showCreateProductModal, setShowCreateProductModal] = useState(false);
   const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
-
   const [affiliateLinks, setAffiliateLinks] = useState<AffiliateLink[]>([]);
 
   useEffect(() => {
     if (profile) {
       fetchDashboardData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
-  const normalizeProduct = (p: any) => {
-    // ✅ مهم: عندك بالجدول الاسم موجود كـ title وليس name
-    const name = (p.name ?? p.title ?? '').toString();
-
-    return {
-      ...p,
-      name,
-      // بعض المشاريع تحتاج title لاحقاً (اختياري)
-      title: p.title ?? p.name ?? name,
-      views_count: Number(p.views_count ?? 0),
-      sales_count: Number(p.sales_count ?? 0),
-      currency: p.currency ?? 'SAR',
-      is_active: p.is_active ?? true,
-    };
-  };
-
   const fetchDashboardData = async () => {
-    try {
-      if (!profile?.id) return;
+    if (!profile) return;
 
-      // المتاجر عندك مربوطة بـ user_id (واضح من الكود السابق)
-      const { data: storesData } = await supabase
+    setLoading(true);
+
+    try {
+      // ✅ Stores غالبًا مربوطة بـ user_id عندك
+      const { data: storesData, error: storesError } = await supabase
         .from('stores')
         .select('*')
         .eq('user_id', profile.id);
 
-      // ✅ FIX: المنتجات عندك مربوطة بـ merchant_id (واضح من الـ response اللي أرسلته)
-      // بدل eq('user_id', ...) لأنها ترجع []
-      const { data: rawProductsData } = await supabase
+      if (storesError) throw storesError;
+
+      /**
+       * ✅ Products عندك مربوطة بـ merchant_id (واضح من الـ Network Response)
+       * ونخليها تدعم أيضًا user_id للتوافق لو عندك بيانات قديمة.
+       */
+      const { data: productsData, error: productsError } = await supabase
         .from('products')
         .select('*')
-        .eq('merchant_id', profile.id);
+        .or(`merchant_id.eq.${profile.id},user_id.eq.${profile.id}`);
 
-      const normalizedProducts = (rawProductsData || []).map(normalizeProduct);
+      if (productsError) throw productsError;
 
-      const { data: ordersData } = await supabase
+      // ✅ Orders كما هو
+      const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select('seller_amount, status')
         .eq('seller_id', profile.id)
         .eq('status', 'completed');
 
-      const productIds = normalizedProducts.map((p: any) => p.id).filter(Boolean);
+      if (ordersError) throw ordersError;
 
-      // ✅ FIX: لا تسوي in() على قائمة فاضية
+      const productIds = productsData?.map((p: any) => p.id) || [];
+
+      // ✅ FIX: لا تسوي in() على قائمة فاضية لأن هذا يولد product_id=in.() ويعطي 400
       let affiliateLinksData: any[] = [];
       if (productIds.length > 0) {
-        const { data } = await supabase
+        const { data, error: affError } = await supabase
           .from('affiliate_links')
           .select(
             `
@@ -125,7 +117,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           )
           .in('product_id', productIds);
 
+        if (affError) throw affError;
+
         affiliateLinksData = data || [];
+      } else {
+        affiliateLinksData = [];
       }
 
       const linksWithStats = await Promise.all(
@@ -150,17 +146,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       );
 
       setStores(storesData || []);
-      setProducts(normalizedProducts as any);
+      setProducts((productsData || []) as any);
       setAffiliateLinks(linksWithStats as any);
 
       const revenue =
-        ordersData?.reduce((sum, order) => sum + Number(order.seller_amount || 0), 0) || 0;
-      const sales = ordersData?.length || 0;
-      const views =
-        normalizedProducts.reduce((sum: number, p: any) => sum + Number(p.views_count || 0), 0) ||
+        ordersData?.reduce((sum: number, order: any) => sum + Number(order.seller_amount || 0), 0) ||
         0;
+
+      const sales = ordersData?.length || 0;
+
+      // ✅ لأن جدولك قد ما فيه views_count / sales_count (حسب اللي ظهر بالصورة)
+      // نخليها آمنة: لو موجودة نستخدمها، لو مو موجودة = 0
+      const views =
+        (productsData || []).reduce((sum: number, p: any) => sum + Number(p.views_count || 0), 0) ||
+        0;
+
       const active =
-        normalizedProducts.filter((p: any) => Boolean(p.is_active)).length || 0;
+        (productsData || []).filter((p: any) => Boolean(p.is_active)).length || 0;
 
       setStats({
         totalRevenue: revenue,
@@ -367,9 +369,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 text-white">
               <h2 className="text-2xl font-bold mb-4">ابدأ البيع الآن!</h2>
               <p className="text-blue-100 mb-6">
-                {stores.length === 0
-                  ? 'أنشئ متجرك الأول وابدأ بإضافة المنتجات'
-                  : 'أضف منتجات جديدة لزيادة مبيعاتك'}
+                {stores.length === 0 ? 'أنشئ متجرك الأول وابدأ بإضافة المنتجات' : 'أضف منتجات جديدة لزيادة مبيعاتك'}
               </p>
               <div className="flex flex-wrap gap-4">
                 {stores.length === 0 ? (
@@ -421,45 +421,48 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {products.map((product: any) => (
-                  <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                    <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                      <Package className="w-12 h-12 text-blue-600" />
-                    </div>
-                    <div className="p-6">
-                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-1">
-                        {product.name}
-                      </h3>
+                {products.map((product: any) => {
+                  const title = product.title ?? product.name ?? 'منتج';
+                  const salesCount = Number(product.sales_count || 0);
+                  const viewsCount = Number(product.views_count || 0);
+                  const currency = product.currency ?? 'SAR';
 
-                      <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
-                        <span>{Number(product.sales_count || 0)} مبيعات</span>
-                        <span>{Number(product.views_count || 0)} مشاهدة</span>
+                  return (
+                    <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
+                      <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+                        <Package className="w-12 h-12 text-blue-600" />
                       </div>
+                      <div className="p-6">
+                        <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-1">{title}</h3>
 
-                      <div className="flex items-center justify-between mb-4">
-                        <span className="text-xl font-bold text-blue-600">
-                          {product.price} {product.currency}
-                        </span>
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                            product.is_active
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-gray-100 text-gray-700'
-                          }`}
+                        <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
+                          <span>{salesCount} مبيعات</span>
+                          <span>{viewsCount} مشاهدة</span>
+                        </div>
+
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="text-xl font-bold text-blue-600">
+                            {product.price} {currency}
+                          </span>
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                              product.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {product.is_active ? 'نشط' : 'غير نشط'}
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => setEditingProductId(product.id)}
+                          className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
                         >
-                          {product.is_active ? 'نشط' : 'غير نشط'}
-                        </span>
+                          تعديل المنتج
+                        </button>
                       </div>
-
-                      <button
-                        onClick={() => setEditingProductId(product.id)}
-                        className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                      >
-                        تعديل المنتج
-                      </button>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -500,28 +503,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       </div>
                       <div className="flex-1">
                         <h3 className="text-xl font-bold text-gray-900">{store.name}</h3>
-                        <p className="text-sm text-gray-500" dir="ltr">
-                          /{store.slug}
-                        </p>
+                        <p className="text-sm text-gray-500" dir="ltr">/{store.slug}</p>
                       </div>
                     </div>
-
                     {store.description && (
                       <p className="text-gray-600 mb-4 line-clamp-2">{store.description}</p>
                     )}
-
                     <div className="flex items-center justify-between mb-4">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          store.is_active
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-gray-100 text-gray-700'
+                          store.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
                         }`}
                       >
                         {store.is_active ? 'نشط' : 'غير نشط'}
                       </span>
                     </div>
-
                     <div className="flex gap-2">
                       <button
                         onClick={() => onNavigate(`store-detail-${store.id}`)}
@@ -547,9 +543,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           <div>
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-2">التسويق والعمولات</h2>
-              <p className="text-gray-600">
-                إدارة المسوقين والكوبونات وتتبع أداء الحملات التسويقية
-              </p>
+              <p className="text-gray-600">إدارة المسوقين والكوبونات وتتبع أداء الحملات التسويقية</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -636,7 +630,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <h3 className="text-xl font-bold text-gray-900 mb-4">آخر الروابط التسويقية</h3>
                 <div className="space-y-4">
                   {affiliateLinks.slice(0, 5).map((link) => {
-                    const product = (products as any[]).find((p) => p.id === link.product_id);
+                    const product: any = (products as any[]).find((p) => p.id === link.product_id);
+                    const productTitle = product?.title ?? product?.name ?? 'منتج';
+
                     return (
                       <div
                         key={link.id}
@@ -647,21 +643,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                             <LinkIcon className="w-5 h-5 text-blue-600" />
                           </div>
                           <div>
-                            <p className="font-semibold text-gray-900">
-                              {link.affiliate?.name || 'مسوق'}
-                            </p>
+                            <p className="font-semibold text-gray-900">{link.affiliate?.name || 'مسوق'}</p>
                             <p className="text-sm text-gray-600">
-                              {product?.name || 'منتج'} - {link.code}
+                              {productTitle} - {link.code}
                             </p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-semibold text-gray-900">
-                            {link.clicks_count || 0} نقرة
-                          </p>
-                          <p className="text-sm text-green-600">
-                            {link.sales_count || 0} مبيعات
-                          </p>
+                          <p className="text-sm font-semibold text-gray-900">{link.clicks_count || 0} نقرة</p>
+                          <p className="text-sm text-green-600">{link.sales_count || 0} مبيعات</p>
                         </div>
                       </div>
                     );
@@ -683,9 +673,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 عرض جميع الطلبات
               </button>
             </div>
-            <p className="text-gray-600">
-              تتبع وإدارة طلبات عملائك، تحديث حالة الطلبات، والتواصل مع المشترين
-            </p>
+            <p className="text-gray-600">تتبع وإدارة طلبات عملائك، تحديث حالة الطلبات، والتواصل مع المشترين</p>
           </div>
         )}
 
