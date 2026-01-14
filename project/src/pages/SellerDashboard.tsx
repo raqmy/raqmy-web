@@ -86,13 +86,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       const productIds = productsData?.map((p) => p.id) || [];
 
-      const { data: affiliateLinksData } = await supabase
-        .from('affiliate_links')
-        .select(`
-          *,
-          users_profile!affiliate_links_user_id_fkey(id, name)
-        `)
-        .in('product_id', productIds);
+      // ✅ FIX: لا تسوي in() على قائمة فاضية لأن هذا يولد product_id=in.() ويعطي 400
+      let affiliateLinksData: any[] = [];
+      if (productIds.length > 0) {
+        const { data } = await supabase
+          .from('affiliate_links')
+          .select(`
+            *,
+            users_profile!affiliate_links_user_id_fkey(id, name)
+          `)
+          .in('product_id', productIds);
+
+        affiliateLinksData = data || [];
+      } else {
+        affiliateLinksData = [];
+      }
 
       const linksWithStats = await Promise.all(
         (affiliateLinksData || []).map(async (link: any) => {
