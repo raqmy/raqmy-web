@@ -37,16 +37,13 @@ const PRODUCT_IMAGES_BUCKET = 'product-images';
 const PRODUCT_ATTACHMENTS_BUCKET = 'product-attachments';
 
 function safeFileName(name: string) {
-  // Keep it simple & safe for storage paths
   return name
-    .replace(/[^\w.\- ]+/g, '') // remove weird chars
+    .replace(/[^\w.\- ]+/g, '')
     .replace(/\s+/g, '_')
     .slice(0, 120);
 }
 
 function randomId() {
-  // crypto.randomUUID available on modern browsers
-  // fallback for older environments
   // @ts-ignore
   return (typeof crypto !== 'undefined' && crypto.randomUUID)
     // @ts-ignore
@@ -183,7 +180,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     );
   };
 
-  // Detect available columns in products table
   const detectProductColumns = async (): Promise<string[]> => {
     if (detectedProductColumns) {
       console.log('📦 Using cached product columns:', detectedProductColumns);
@@ -265,13 +261,11 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     let createdProductId: string | null = null;
 
     try {
-      // Step 1: Detect available columns in products table
       const availableColumns = await detectProductColumns();
 
       console.group('🔍 Building Product Payload');
       console.log('Available columns:', availableColumns);
 
-      // Step 2: Determine the correct column for product name
       let nameColumn: string | null = null;
       if (availableColumns.includes('title')) nameColumn = 'title';
       else if (availableColumns.includes('name')) nameColumn = 'name';
@@ -282,12 +276,10 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
         throw new Error('لا يوجد عمود لاسم المنتج في جدول products.');
       }
 
-      // Step 3: Determine description column (optional)
       let descriptionColumn: string | null = null;
       if (availableColumns.includes('description')) descriptionColumn = 'description';
       else if (availableColumns.includes('details')) descriptionColumn = 'details';
 
-      // Step 4: Determine price column
       let priceColumn: string | null = null;
       if (availableColumns.includes('price')) priceColumn = 'price';
       else if (availableColumns.includes('amount')) priceColumn = 'amount';
@@ -297,14 +289,12 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
         throw new Error('لا يوجد عمود للسعر في جدول products.');
       }
 
-      // Step 5: Determine merchant column
       const merchantColumn = await detectProductMerchantColumn();
       if (!merchantColumn) {
         console.groupEnd();
         throw new Error('تعذر تحديد عمود التاجر في products.');
       }
 
-      // Step 6: Build payload
       const productPayload: any = {};
       productPayload[nameColumn] = formData.name.trim();
       if (descriptionColumn && formData.description?.trim()) {
@@ -323,7 +313,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       console.log('✅ Final payload:', productPayload);
       console.groupEnd();
 
-      // Step 7: Insert product
       const { data: newProduct, error: insertError } = await supabase
         .from('products')
         .insert(productPayload)
@@ -336,7 +325,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       createdProductId = newProduct.id;
       console.log('✅ Product created:', createdProductId);
 
-      // Step 8: Upload images to storage then insert rows
       const preparedImages = images.map((img, idx) => ({
         ...img,
         display_order: typeof img.display_order === 'number' ? img.display_order : idx,
@@ -358,7 +346,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           const { publicUrl } = await uploadToStorage({
             bucket: PRODUCT_IMAGES_BUCKET,
-            userId: authUserId, // ✅ use auth uid for folder policy
+            userId: authUserId,
             productId: createdProductId!,
             file: img.file,
           });
@@ -384,7 +372,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
       if (imagesError) throw imagesError;
 
-      // Step 9: Upload attachments then insert rows
       const uploadedAttachments = await Promise.all(
         attachments.map(async (att, index) => {
           if (att.attachment_type === 'text') {
@@ -413,7 +400,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           const { publicUrl } = await uploadToStorage({
             bucket: PRODUCT_ATTACHMENTS_BUCKET,
-            userId: authUserId, // ✅ use auth uid for folder policy
+            userId: authUserId,
             productId: createdProductId!,
             file: att.file,
           });
@@ -436,7 +423,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
       if (attachmentsError) throw attachmentsError;
 
-      // Step 10: Link coupon (optional)
       if (selectedCouponId && selectedCouponId !== 'none') {
         const { error: couponError } = await supabase
           .from('coupon_products')
@@ -491,6 +477,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
+            type="button"
           >
             <X className="w-6 h-6" />
           </button>
@@ -614,8 +601,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">الظهور</label>
-
-              {/* ✅ FIXED: the onChange was cut and broke the build */}
               <select
                 value={formData.visibility}
                 onChange={(e) => setFormData({ ...formData, visibility: e.target.value })}
@@ -684,7 +669,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             >
               إلغاء
             </button>
-
             <button
               type="submit"
               disabled={loading || !isFormValid()}
