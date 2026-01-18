@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Image, X, Star, Upload } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 export interface ProductImage {
   id?: string;
-  image_url: string; // preview (blob) in UI
+  image_url: string; // ✅ Supabase public URL (يُحفظ في DB)
+  preview_url?: string; // 👀 للعرض فقط داخل الصفحة
   is_primary: boolean;
   display_order: number;
-  file?: File; // real file used for upload
+  file?: File;
 }
 
 interface ProductImagesManagerProps {
@@ -21,8 +23,34 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
   maxImages = 8,
 }) => {
   const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
-  const addImages = (files: File[]) => {
+  // 🔹 رفع الصورة إلى Supabase Storage وإرجاع الرابط العام
+  const uploadImageToStorage = async (file: File): Promise<string> => {
+    const ext = file.name.split('.').pop();
+    const fileName = `${crypto.randomUUID()}.${ext}`;
+    const filePath = `products/${fileName}`;
+
+    const { error } = await supabase.storage
+      .from('product-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (error) {
+      console.error('Image upload error:', error);
+      throw error;
+    }
+
+    const { data } = supabase.storage
+      .from('product-images')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  };
+
+  const addImages = async (files: File[]) => {
     if (images.length >= maxImages) {
       alert(`يمكنك إضافة ${maxImages} صور كحد أقصى`);
       return;
@@ -31,20 +59,35 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
     const remainingSlots = maxImages - images.length;
     const filesToAdd = files.slice(0, remainingSlots);
 
-    const newImages: ProductImage[] = filesToAdd.map((file, index) => ({
-      image_url: URL.createObjectURL(file),
-      is_primary: images.length === 0 && index === 0,
-      display_order: images.length + index,
-      file,
-    }));
+    setUploading(true);
 
-    onChange([...images, ...newImages]);
+    try {
+      const uploadedImages: ProductImage[] = [];
+
+      for (let i = 0; i < filesToAdd.length; i++) {
+        const file = filesToAdd[i];
+
+        const publicUrl = await uploadImageToStorage(file);
+
+        uploadedImages.push({
+          image_url: publicUrl, // ✅ يُحفظ في قاعدة البيانات
+          preview_url: URL.createObjectURL(file), // 👀 للعرض فقط
+          is_primary: images.length === 0 && i === 0,
+          display_order: images.length + i,
+        });
+      }
+
+      onChange([...images, ...uploadedImages]);
+    } catch (err) {
+      alert('فشل رفع الصورة، حاول مرة أخرى');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     addImages(files);
-    // allow selecting the same file again
     e.target.value = '';
   };
 
@@ -59,8 +102,8 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
 
   const removeImage = (index: number) => {
     const removed = images[index];
-    if (removed?.image_url?.startsWith('blob:')) {
-      URL.revokeObjectURL(removed.image_url);
+    if (removed?.preview_url?.startsWith('blob:')) {
+      URL.revokeObjectURL(removed.preview_url);
     }
 
     const newImages = images.filter((_, i) => i !== index);
@@ -122,13 +165,14 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
               </p>
             </div>
             <label className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors cursor-pointer">
-              اختر الصور
+              {uploading ? 'جاري رفع الصور...' : 'اختر الصور'}
               <input
                 type="file"
                 accept="image/*"
                 multiple
                 onChange={handleFileSelect}
                 className="hidden"
+                disabled={uploading}
               />
             </label>
           </div>
@@ -142,7 +186,7 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
                 className="relative group aspect-square bg-gray-100 rounded-lg overflow-hidden border-2 border-gray-200 hover:border-blue-500 transition-colors"
               >
                 <img
-                  src={image.image_url}
+                  src={image.preview_url || image.image_url}
                   alt={`صورة المنتج ${index + 1}`}
                   className="w-full h-full object-cover"
                 />
@@ -160,7 +204,6 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
                       type="button"
                       onClick={() => setPrimary(index)}
                       className="p-2 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
-                      title="جعلها الصورة الرئيسية"
                     >
                       <Star className="w-5 h-5" />
                     </button>
@@ -169,7 +212,6 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
                     type="button"
                     onClick={() => removeImage(index)}
                     className="p-2 bg-white text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-                    title="حذف الصورة"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -181,13 +223,16 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
           {images.length < maxImages && (
             <label className="flex items-center justify-center gap-2 px-6 py-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors cursor-pointer">
               <Image className="w-5 h-5 text-gray-400" />
-              <span className="text-gray-600 font-medium">إضافة المزيد من الصور</span>
+              <span className="text-gray-600 font-medium">
+                {uploading ? 'جاري الرفع...' : 'إضافة المزيد من الصور'}
+              </span>
               <input
                 type="file"
                 accept="image/*"
                 multiple
                 onChange={handleFileSelect}
                 className="hidden"
+                disabled={uploading}
               />
             </label>
           )}
