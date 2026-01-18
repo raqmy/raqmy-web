@@ -3,10 +3,10 @@ import { Image, X, Star, Upload } from 'lucide-react';
 
 export interface ProductImage {
   id?: string;
-  image_url: string;
+  image_url: string; // preview (blob) in UI
   is_primary: boolean;
   display_order: number;
-  file?: File;
+  file?: File; // real file used for upload
 }
 
 interface ProductImagesManagerProps {
@@ -21,20 +21,6 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
   maxImages = 8,
 }) => {
   const [dragOver, setDragOver] = useState(false);
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    addImages(files);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const files = Array.from(e.dataTransfer.files).filter(file =>
-      file.type.startsWith('image/')
-    );
-    addImages(files);
-  };
 
   const addImages = (files: File[]) => {
     if (images.length >= maxImages) {
@@ -55,15 +41,34 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
     onChange([...images, ...newImages]);
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    addImages(files);
+    // allow selecting the same file again
+    e.target.value = '';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files).filter(file =>
+      file.type.startsWith('image/')
+    );
+    addImages(files);
+  };
+
   const removeImage = (index: number) => {
+    const removed = images[index];
+    if (removed?.image_url?.startsWith('blob:')) {
+      URL.revokeObjectURL(removed.image_url);
+    }
+
     const newImages = images.filter((_, i) => i !== index);
 
-    // If we removed the primary image, make the first image primary
     if (images[index].is_primary && newImages.length > 0) {
       newImages[0].is_primary = true;
     }
 
-    // Reorder display_order
     newImages.forEach((img, i) => {
       img.display_order = i;
     });
