@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
-import { FileText, Image, Type, X, Upload, File } from 'lucide-react';
+import { FileText, Image, Type, X, File } from 'lucide-react';
 
 export interface ProductAttachment {
   id?: string;
   title: string;
   attachment_type: 'file' | 'image' | 'text';
-  file_url?: string;
+  file_url?: string; // preview (blob) in UI
   text_content?: string;
   file_size?: number;
   display_order: number;
-  file?: File;
+  file?: File; // real file used for upload
 }
 
 interface ProductAttachmentsManagerProps {
@@ -25,19 +25,25 @@ export const ProductAttachmentsManager: React.FC<ProductAttachmentsManagerProps>
   const [textTitle, setTextTitle] = useState('');
   const [textContent, setTextContent] = useState('');
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, type: 'file' | 'image') => {
+  const handleFileSelect = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    type: 'file' | 'image'
+  ) => {
     const files = Array.from(e.target.files || []);
 
     const newAttachments: ProductAttachment[] = files.map((file, index) => ({
       title: file.name,
       attachment_type: type,
-      file_url: URL.createObjectURL(file),
+      file_url: URL.createObjectURL(file), // preview only
       file_size: file.size,
       display_order: attachments.length + index,
       file,
     }));
 
     onChange([...attachments, ...newAttachments]);
+
+    // allow selecting same file again
+    e.target.value = '';
   };
 
   const handleAddText = () => {
@@ -60,6 +66,11 @@ export const ProductAttachmentsManager: React.FC<ProductAttachmentsManagerProps>
   };
 
   const removeAttachment = (index: number) => {
+    const removed = attachments[index];
+    if (removed?.file_url?.startsWith('blob:')) {
+      URL.revokeObjectURL(removed.file_url);
+    }
+
     const newAttachments = attachments.filter((_, i) => i !== index);
     newAttachments.forEach((att, i) => {
       att.display_order = i;
