@@ -32,6 +32,26 @@ const FALLBACK_COLUMNS = [
   'user_id', 'merchant_id', 'seller_id'
 ];
 
+const PRODUCT_IMAGES_BUCKET = 'product-images';
+const PRODUCT_ATTACHMENTS_BUCKET = 'product-attachments';
+
+const sanitizeFileName = (name: string) => {
+  // keep it safe for URLs/paths
+  return name
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w.\-()]+/g, '_');
+};
+
+const getUuid = () => {
+  // modern browsers
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  // fallback
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
 export const CreateProductModal: React.FC<CreateProductModalProps> = ({
   isOpen,
   onClose,
@@ -133,7 +153,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     console.group('🔍 Detecting Products Table Columns');
 
     try {
-      // Try to fetch one product to detect available columns
       const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -148,7 +167,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       }
 
       if (data && data.length > 0) {
-        // Extract columns from first row
         const availableColumns = Object.keys(data[0]);
         console.log('✅ Products table has existing rows');
         console.log('Available columns:', availableColumns);
@@ -156,7 +174,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
         detectedProductColumns = availableColumns;
         return availableColumns;
       } else {
-        // Table is empty, use fallback
         console.warn('⚠️ Products table is empty, using fallback column list');
         console.groupEnd();
         detectedProductColumns = FALLBACK_COLUMNS;
@@ -168,6 +185,30 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       detectedProductColumns = FALLBACK_COLUMNS;
       return FALLBACK_COLUMNS;
     }
+  };
+
+  const uploadToBucket = async (
+    bucket: string,
+    path: string,
+    file: File
+  ): Promise<string> => {
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(path, file, {
+        upsert: false,
+        contentType: file.type || undefined,
+      });
+
+    if (uploadError) {
+      console.error(`❌ Upload failed [${bucket}]`, uploadError);
+      throw new Error(`فشل رفع الملف: ${file.name}`);
+    }
+
+    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+    if (!data?.publicUrl) {
+      throw new Error('تعذر إنشاء رابط الملف بعد الرفع');
+    }
+    return data.publicUrl;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -210,16 +251,11 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       }
 
       if (!nameColumn) {
-        console.error('❌ No product name column found');
-        console.error('Available columns:', availableColumns);
-        console.error('Expected one of: title, name, product_name');
         console.groupEnd();
         throw new Error('لا يوجد عمود لاسم المنتج في جدول products. يرجى التواصل مع الدعم.');
       }
 
-      console.log('✅ Product name column:', nameColumn);
-
-      // Step 3: Determine the correct column for description (optional)
+      // Step 3: Determine description column
       let descriptionColumn: string | null = null;
       if (availableColumns.includes('description')) {
         descriptionColumn = 'description';
@@ -227,13 +263,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
         descriptionColumn = 'details';
       }
 
-      if (descriptionColumn) {
-        console.log('✅ Description column:', descriptionColumn);
-      } else {
-        console.log('⚠️ No description column found, will skip description');
-      }
-
-      // Step 4: Determine the correct column for price
+      // Step 4: Determine price column
       let priceColumn: string | null = null;
       if (availableColumns.includes('price')) {
         priceColumn = 'price';
@@ -242,132 +272,157 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       }
 
       if (!priceColumn) {
-        console.error('❌ No price column found');
         console.groupEnd();
         throw new Error('لا يوجد عمود للسعر في جدول products. يرجى التواصل مع الدعم.');
       }
 
-      console.log('✅ Price column:', priceColumn);
-
-      // Step 5: Determine the correct merchant column
+      // Step 5: Determine merchant column
       const merchantColumn = await detectProductMerchantColumn();
-
       if (!merchantColumn) {
-        console.error('❌ No merchant column found');
         console.groupEnd();
         throw new Error('تعذر تحديد بنية قاعدة البيانات. يرجى التواصل مع الدعم.');
       }
 
-      console.log('✅ Merchant column:', merchantColumn);
-
-      // Step 6: Build dynamic payload with only existing columns
+      // Step 6: Build payload
       const productPayload: any = {};
-
-      // Add product name
       productPayload[nameColumn] = formData.name.trim();
 
-      // Add description if column exists and value is provided
       if (descriptionColumn && formData.description?.trim()) {
         productPayload[descriptionColumn] = formData.description.trim();
       }
 
-      // Add price
       productPayload[priceColumn] = price;
 
-      // Add currency if column exists
       if (availableColumns.includes('currency')) {
         productPayload['currency'] = formData.currency;
       }
-
-      // Add visibility if column exists
       if (availableColumns.includes('visibility')) {
         productPayload['visibility'] = formData.visibility;
       }
-
-      // Add is_active if column exists
       if (availableColumns.includes('is_active')) {
         productPayload['is_active'] = true;
       }
-
-      // Add store_id if column exists
       if (availableColumns.includes('store_id')) {
         productPayload['store_id'] = formData.store_id || null;
       }
 
-      // Add merchant reference
       productPayload[merchantColumn] = profile.id;
 
       console.log('✅ Final payload:', productPayload);
       console.groupEnd();
 
-      // Step 7: Insert product
+      // Step 7: Insert product first (to get product_id)
       const { data: newProduct, error: insertError } = await supabase
         .from('products')
         .insert(productPayload)
         .select()
         .single();
 
-      // Debug: Log detailed error if exists
       if (insertError) {
-        console.group('❌ Supabase Insert Error - Products Table');
-        console.error('Error Message:', insertError.message);
-        console.error('Error Code:', insertError.code);
-        console.error('Error Details:', insertError.details);
-        console.error('Error Hint:', insertError.hint);
-        console.error('Full Error Object:', JSON.stringify(insertError, null, 2));
-        console.error('Available Columns:', availableColumns);
-        console.error('Name Column Used:', nameColumn);
-        console.error('Description Column Used:', descriptionColumn);
-        console.error('Price Column Used:', priceColumn);
-        console.error('Merchant Column Used:', merchantColumn);
-        console.error('Payload Sent:', productPayload);
-        console.groupEnd();
+        console.error('❌ Insert product error:', insertError);
         throw insertError;
       }
-
       if (!newProduct) {
-        console.error('❌ No product returned after insert');
         throw new Error('فشل إنشاء المنتج');
       }
 
-      console.log('✅ Product created successfully:', newProduct.id);
+      console.log('✅ Product created:', newProduct.id);
 
-      // 2. Upload and insert product images
-      const imageInserts = images.map((img, index) => ({
-        product_id: newProduct.id,
-        image_url: img.image_url,
-        is_primary: img.is_primary,
-        display_order: index,
-      }));
+      // ✅ Step 8: Upload images to storage + insert into product_images
+      const uploadedImageRows: Array<{
+        product_id: string;
+        image_url: string;
+        is_primary: boolean;
+        display_order: number;
+      }> = [];
 
-      const { error: imagesError } = await supabase
-        .from('product_images')
-        .insert(imageInserts);
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        if (!img.file) {
+          // if somehow no file exists, skip (but usually always exists)
+          continue;
+        }
 
-      if (imagesError) {
-        console.error('Error inserting images:', imagesError);
+        const ext = img.file.name.split('.').pop() || 'jpg';
+        const fileName = `${getUuid()}.${ext}`;
+        const path = `${profile.id}/${newProduct.id}/${fileName}`;
+
+        const publicUrl = await uploadToBucket(PRODUCT_IMAGES_BUCKET, path, img.file);
+
+        uploadedImageRows.push({
+          product_id: newProduct.id,
+          image_url: publicUrl, // ✅ REAL URL not blob:
+          is_primary: img.is_primary,
+          display_order: i,
+        });
       }
 
-      // 3. Insert product attachments
-      const attachmentInserts = attachments.map((att, index) => ({
-        product_id: newProduct.id,
-        title: att.title,
-        attachment_type: att.attachment_type,
-        file_url: att.file_url || null,
-        text_content: att.text_content || null,
-        file_size: att.file_size || null,
-        display_order: index,
-      }));
+      if (uploadedImageRows.length > 0) {
+        const { error: imagesError } = await supabase
+          .from('product_images')
+          .insert(uploadedImageRows);
 
-      const { error: attachmentsError } = await supabase
-        .from('product_attachments')
-        .insert(attachmentInserts);
-
-      if (attachmentsError) {
-        console.error('Error inserting attachments:', attachmentsError);
+        if (imagesError) {
+          console.error('❌ Error inserting images rows:', imagesError);
+          throw new Error('تم إنشاء المنتج لكن فشل حفظ الصور في قاعدة البيانات');
+        }
       }
 
-      // 4. Link coupon if selected
+      // ✅ Step 9: Upload attachments (file/image) + insert into product_attachments
+      const uploadedAttachmentRows: Array<any> = [];
+
+      for (let i = 0; i < attachments.length; i++) {
+        const att = attachments[i];
+
+        // Text attachment: no upload needed
+        if (att.attachment_type === 'text') {
+          uploadedAttachmentRows.push({
+            product_id: newProduct.id,
+            title: att.title,
+            attachment_type: att.attachment_type,
+            file_url: null,
+            text_content: att.text_content || null,
+            file_size: null,
+            display_order: i,
+          });
+          continue;
+        }
+
+        // File/Image attachment: upload required
+        if (!att.file) {
+          // fallback: if no file exists, treat as error
+          throw new Error(`المرفق "${att.title}" لا يحتوي ملف للرفع`);
+        }
+
+        const safeName = sanitizeFileName(att.file.name || att.title || 'attachment');
+        const fileName = `${getUuid()}-${safeName}`;
+        const path = `${profile.id}/${newProduct.id}/${fileName}`;
+
+        const publicUrl = await uploadToBucket(PRODUCT_ATTACHMENTS_BUCKET, path, att.file);
+
+        uploadedAttachmentRows.push({
+          product_id: newProduct.id,
+          title: att.title,
+          attachment_type: att.attachment_type,
+          file_url: publicUrl, // ✅ REAL URL not blob:
+          text_content: null,
+          file_size: att.file.size || att.file_size || null,
+          display_order: i,
+        });
+      }
+
+      if (uploadedAttachmentRows.length > 0) {
+        const { error: attachmentsError } = await supabase
+          .from('product_attachments')
+          .insert(uploadedAttachmentRows);
+
+        if (attachmentsError) {
+          console.error('❌ Error inserting attachments rows:', attachmentsError);
+          throw new Error('تم إنشاء المنتج لكن فشل حفظ المرفقات في قاعدة البيانات');
+        }
+      }
+
+      // Step 10: Link coupon if selected
       if (selectedCouponId && selectedCouponId !== 'none') {
         const { error: couponError } = await supabase
           .from('coupon_products')
@@ -384,53 +439,16 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       onSuccess();
       onClose();
     } catch (err: any) {
-      // Detailed error logging
       console.group('❌ Product Creation Failed');
-      console.error('Error Type:', err?.constructor?.name);
-      console.error('Error Message:', err?.message);
-
-      if (err?.code) {
-        console.error('Error Code:', err.code);
-      }
-      if (err?.details) {
-        console.error('Error Details:', err.details);
-      }
-      if (err?.hint) {
-        console.error('Error Hint:', err.hint);
-      }
-      if (err?.status) {
-        console.error('HTTP Status:', err.status);
-      }
-
-      // Log full error object
-      console.error('Full Error:', err);
-
-      // Log detected columns for debugging
-      if (detectedProductColumns) {
-        console.error('Detected Columns:', detectedProductColumns);
-      }
-
-      // Check for specific error types
-      if (err?.message?.includes('violates') || err?.message?.includes('constraint')) {
-        console.error('⚠️ Database Constraint Violation Detected');
-      }
-      if (err?.message?.includes('permission') || err?.message?.includes('policy')) {
-        console.error('⚠️ RLS Policy or Permission Issue Detected');
-      }
-      if (err?.message?.includes('column') || err?.message?.includes('does not exist') || err?.code === 'PGRST204') {
-        console.error('⚠️ Column/Schema Mismatch Detected (PGRST204)');
-        console.error('This usually means the column name in the payload does not match the database schema');
-      }
-      if (err?.message?.includes('null value')) {
-        console.error('⚠️ NULL Value Constraint Violation');
-      }
-
+      console.error('Error:', err);
       console.groupEnd();
 
-      // User-friendly error message
-      const userMessage = err?.message?.includes('schema') || err?.message?.includes('column') || err?.code === 'PGRST204'
-        ? 'تعذر إضافة المنتج بسبب إعدادات قاعدة البيانات. حاول مرة أخرى أو تواصل مع الدعم.'
-        : err?.message || 'حدث خطأ أثناء إنشاء المنتج';
+      const userMessage =
+        err?.message?.includes('schema') ||
+        err?.message?.includes('column') ||
+        err?.code === 'PGRST204'
+          ? 'تعذر إضافة المنتج بسبب إعدادات قاعدة البيانات. حاول مرة أخرى أو تواصل مع الدعم.'
+          : err?.message || 'حدث خطأ أثناء إنشاء المنتج';
 
       setError(userMessage);
     } finally {
