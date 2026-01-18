@@ -56,7 +56,7 @@ function randomId() {
 
 async function uploadToStorage(params: {
   bucket: string;
-  userId: string;
+  userId: string;     // MUST be auth.uid() (session.user.id)
   productId: string;
   file: File;
 }) {
@@ -66,7 +66,7 @@ async function uploadToStorage(params: {
   const base = safeFileName(file.name.replace(/\.[^/.]+$/, '')) || 'file';
   const fileName = `${base}-${randomId()}.${ext}`;
 
-  // IMPORTANT: first folder = userId (matches your "own folder" policy)
+  // IMPORTANT: first folder = auth user id (matches "own folder" policy)
   const path = `${userId}/${productId}/${fileName}`;
 
   const { error: uploadError } = await supabase.storage
@@ -235,6 +235,19 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       return;
     }
 
+    // ✅ IMPORTANT: get the AUTH user id (auth.uid()) for Storage folder policies
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    if (sessionErr) {
+      console.error('getSession error:', sessionErr);
+      setError('تعذر التحقق من جلسة تسجيل الدخول. حاول تسجيل الخروج ثم الدخول مرة أخرى.');
+      return;
+    }
+    const authUserId = sessionData?.session?.user?.id;
+    if (!authUserId) {
+      setError('جلسة الدخول غير موجودة. الرجاء تسجيل الدخول مرة أخرى.');
+      return;
+    }
+
     if (!isFormValid()) {
       setError('يرجى إدخال جميع الحقول المطلوبة وإضافة صورة ومرفق واحد على الأقل');
       return;
@@ -303,6 +316,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       if (availableColumns.includes('is_active')) productPayload['is_active'] = true;
       if (availableColumns.includes('store_id')) productPayload['store_id'] = formData.store_id || null;
 
+      // NOTE: keep merchant/profile id for your app logic
       productPayload[merchantColumn] = profile.id;
 
       console.log('✅ Final payload:', productPayload);
@@ -324,11 +338,9 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       // Step 8: Upload images to storage then insert rows
       const preparedImages = images.map((img, idx) => ({
         ...img,
-        // ensure display_order stable
         display_order: typeof img.display_order === 'number' ? img.display_order : idx,
       }));
 
-      // ensure one primary
       if (!preparedImages.some(i => i.is_primary) && preparedImages.length > 0) {
         preparedImages[0].is_primary = true;
       }
@@ -336,19 +348,20 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       const uploadedImages = await Promise.all(
         preparedImages.map(async (img, index) => {
           if (!img.file) {
-            // In case user had a URL (rare) - but we prefer storage upload
             return {
               image_url: img.image_url,
               is_primary: img.is_primary,
               display_order: index,
             };
           }
+
           const { publicUrl } = await uploadToStorage({
             bucket: PRODUCT_IMAGES_BUCKET,
-            userId: profile.id,
+            userId: authUserId, // ✅ use auth uid for folder policy
             productId: createdProductId!,
             file: img.file,
           });
+
           return {
             image_url: publicUrl,
             is_primary: img.is_primary,
@@ -370,10 +383,9 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
       if (imagesError) throw imagesError;
 
-      // Step 9: Upload attachments (file/image) then insert rows
+      // Step 9: Upload attachments then insert rows
       const uploadedAttachments = await Promise.all(
         attachments.map(async (att, index) => {
-          // text attachment: no upload
           if (att.attachment_type === 'text') {
             return {
               product_id: createdProductId,
@@ -386,9 +398,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             };
           }
 
-          // file/image attachment
           if (!att.file) {
-            // fallback (shouldn't happen normally)
             return {
               product_id: createdProductId,
               title: att.title,
@@ -402,7 +412,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           const { publicUrl } = await uploadToStorage({
             bucket: PRODUCT_ATTACHMENTS_BUCKET,
-            userId: profile.id,
+            userId: authUserId, // ✅ use auth uid for folder policy
             productId: createdProductId!,
             file: att.file,
           });
@@ -436,7 +446,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
         if (couponError) {
           console.error('Error linking coupon:', couponError);
-          // ما نوقف العملية بسبب كوبون
         }
       }
 
@@ -447,7 +456,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       console.error('Error:', err);
       console.groupEnd();
 
-      // محاولة تنظيف المنتج إذا انصنع ثم فشلنا في الرفع/الإدخال
       if (createdProductId) {
         try {
           await supabase.from('products').delete().eq('id', createdProductId);
@@ -607,86 +615,4 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
               <label className="block text-sm font-medium text-gray-700 mb-2">الظهور</label>
               <select
                 value={formData.visibility}
-                onChange={(e) => setFormData({ ...formData, visibility: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="marketplace">عرض في السوق العام</option>
-                <option value="public">عام (يظهر في متجري فقط)</option>
-                <option value="private">خاص (رابط مباشر فقط)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* 5. كوبونات الخصم */}
-          <div className="space-y-6">
-            <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">5. كوبونات الخصم</h3>
-              <p className="text-sm text-gray-500 mt-1">اختر كوبون خصم لربطه بهذا المنتج (اختياري)</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                كوبون الخصم
-              </label>
-              <select
-                value={selectedCouponId}
-                onChange={(e) => setSelectedCouponId(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">عدم إضافة كوبونات خصم</option>
-                {coupons.map((coupon) => (
-                  <option key={coupon.id} value={coupon.id}>
-                    {coupon.code} - {coupon.discount_type === 'percentage' ? `${coupon.discount_value}%` : `${coupon.discount_value} ريال`}
-                  </option>
-                ))}
-              </select>
-              {coupons.length === 0 && (
-                <p className="text-xs text-gray-500 mt-2">
-                  لا توجد كوبونات خصم نشطة. يمكنك إنشاء كوبونات من صفحة إدارة الكوبونات
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Validation Messages */}
-          {!isFormValid() && (
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm font-medium text-blue-900 mb-2">لإتمام إنشاء المنتج، يجب:</p>
-              <ul className="text-sm text-blue-800 space-y-1 mr-4">
-                {!formData.name.trim() && <li>• إدخال اسم المنتج</li>}
-                {!formData.price.trim() && <li>• إدخال السعر</li>}
-                {images.length === 0 && <li>• إضافة صورة واحدة على الأقل</li>}
-                {attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل</li>}
-              </ul>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex items-center gap-4 pt-6 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
-            >
-              إلغاء
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !isFormValid()}
-              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>جاري الإضافة...</span>
-                </>
-              ) : (
-                'إضافة المنتج'
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
+                onChange={(e
