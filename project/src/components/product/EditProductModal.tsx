@@ -5,7 +5,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { CopyLinkButton } from '../shared/CopyLinkButton';
 import { ProductImagesManager, ProductImage } from './ProductImagesManager';
 import { ProductAttachmentsManager, ProductAttachment } from './ProductAttachmentsManager';
-import { detectProductMerchantColumn } from '../../lib/productSchema';
 
 interface EditProductModalProps {
   isOpen: boolean;
@@ -55,118 +54,182 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const [existingImageIds, setExistingImageIds] = useState<string[]>([]);
   const [existingAttachmentIds, setExistingAttachmentIds] = useState<string[]>([]);
 
+  const safeStr = (v: any) => (v === null || v === undefined ? '' : String(v));
+  const safeTrim = (v: any) => safeStr(v).trim();
+
   useEffect(() => {
     if (isOpen && productId) {
+      // reset transient states on open
+      setError('');
+      setLoading(false);
+      setDeleting(false);
+
       fetchProduct();
       fetchStores();
       fetchCoupons();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, productId]);
 
   const fetchProduct = async () => {
-    const { data } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', productId)
-      .maybeSingle();
+    try {
+      setError('');
 
-    if (data) {
+      const { data, error: productError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', productId)
+        .maybeSingle();
+
+      if (productError) {
+        console.error('fetchProduct error:', productError);
+        setError('تعذر جلب بيانات المنتج. حاول تحديث الصفحة.');
+        return;
+      }
+
+      if (!data) {
+        setError('المنتج غير موجود أو تم حذفه.');
+        return;
+      }
+
       setProduct(data);
+
+      const dbName = (data as any)?.name ?? (data as any)?.title ?? '';
+      const dbCurrency = (data as any)?.currency ?? 'SAR';
+      const dbVisibility = (data as any)?.visibility ?? 'marketplace';
+
       setFormData({
-        name: data.name,
-        description: data.description || '',
-        price: data.price.toString(),
-        currency: data.currency,
-        store_id: data.store_id || '',
-        visibility: data.visibility,
-        is_active: data.is_active,
+        name: safeStr(dbName),
+        description: safeStr((data as any)?.description),
+        price: safeStr((data as any)?.price ?? ''),
+        currency: safeStr(dbCurrency) || 'SAR',
+        store_id: safeStr((data as any)?.store_id),
+        visibility: safeStr(dbVisibility) || 'marketplace',
+        is_active: Boolean((data as any)?.is_active),
       });
 
       // Fetch product images
-      const { data: imagesData } = await supabase
+      const { data: imagesData, error: imagesError } = await supabase
         .from('product_images')
         .select('*')
         .eq('product_id', productId)
         .order('display_order');
 
-      if (imagesData) {
+      if (imagesError) {
+        console.error('fetch product_images error:', imagesError);
+        // لا نوقف المودال عشان الصور فشلت
+        setImages([]);
+        setExistingImageIds([]);
+      } else if (imagesData) {
         setImages(
-          imagesData.map((img) => ({
+          imagesData.map((img: any) => ({
             id: img.id,
             image_url: img.image_url,
-            is_primary: img.is_primary,
-            display_order: img.display_order,
+            is_primary: Boolean(img.is_primary),
+            display_order: Number(img.display_order ?? 0),
           }))
         );
-        setExistingImageIds(imagesData.map((img) => img.id));
+        setExistingImageIds(imagesData.map((img: any) => img.id));
+      } else {
+        setImages([]);
+        setExistingImageIds([]);
       }
 
       // Fetch product attachments
-      const { data: attachmentsData } = await supabase
+      const { data: attachmentsData, error: attachmentsError } = await supabase
         .from('product_attachments')
         .select('*')
         .eq('product_id', productId)
         .order('display_order');
 
-      if (attachmentsData) {
+      if (attachmentsError) {
+        console.error('fetch product_attachments error:', attachmentsError);
+        setAttachments([]);
+        setExistingAttachmentIds([]);
+      } else if (attachmentsData) {
         setAttachments(
-          attachmentsData.map((att) => ({
+          attachmentsData.map((att: any) => ({
             id: att.id,
-            title: att.title,
-            attachment_type: att.attachment_type,
+            title: safeStr(att.title),
+            attachment_type: safeStr(att.attachment_type),
             file_url: att.file_url || undefined,
             text_content: att.text_content || undefined,
             file_size: att.file_size || undefined,
-            display_order: att.display_order,
+            display_order: Number(att.display_order ?? 0),
           }))
         );
-        setExistingAttachmentIds(attachmentsData.map((att) => att.id));
+        setExistingAttachmentIds(attachmentsData.map((att: any) => att.id));
+      } else {
+        setAttachments([]);
+        setExistingAttachmentIds([]);
       }
 
-      // Fetch linked coupon
-      const { data: couponLink } = await supabase
+      // Fetch linked coupon (optional)
+      const { data: couponLink, error: couponLinkError } = await supabase
         .from('coupon_products')
         .select('coupon_id')
         .eq('product_id', productId)
         .maybeSingle();
 
-      if (couponLink) {
-        setSelectedCouponId(couponLink.coupon_id);
+      if (couponLinkError) {
+        // لا نوقف المودال
+        console.error('fetch coupon_products error:', couponLinkError);
+        setSelectedCouponId('');
+      } else if (couponLink?.coupon_id) {
+        setSelectedCouponId(safeStr(couponLink.coupon_id));
+      } else {
+        setSelectedCouponId('');
       }
+    } catch (e) {
+      console.error('fetchProduct unexpected error:', e);
+      setError('حدث خطأ غير متوقع أثناء تحميل المنتج.');
     }
   };
 
   const fetchStores = async () => {
-    if (!profile) return;
-    const { data } = await supabase
-      .from('stores')
-      .select('*')
-      .eq('user_id', profile.id)
-      .eq('is_active', true);
-    if (data) setStores(data);
+    try {
+      if (!profile) return;
+      const { data, error } = await supabase
+        .from('stores')
+        .select('*')
+        .eq('user_id', profile.id)
+        .eq('is_active', true);
+
+      if (error) {
+        console.error('fetchStores error:', error);
+        return;
+      }
+      if (data) setStores(data);
+    } catch (e) {
+      console.error('fetchStores unexpected error:', e);
+    }
   };
 
   const fetchCoupons = async () => {
-    if (!profile) return;
+    try {
+      if (!profile) return;
 
-    const { data, error } = await supabase
-      .from('discount_coupons')
-      .select('id, code, discount_type, discount_value, is_active')
-      .eq('user_id', profile.id)
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('discount_coupons')
+        .select('id, code, discount_type, discount_value, is_active')
+        .eq('user_id', profile.id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('fetchCoupons error:', error);
-      return;
+      if (error) {
+        console.error('fetchCoupons error:', error);
+        return;
+      }
+      if (data) setCoupons(data);
+    } catch (e) {
+      console.error('fetchCoupons unexpected error:', e);
     }
-    if (data) setCoupons(data);
   };
 
   const isFormValid = () => {
     return (
-      formData.name.trim().length > 0 &&
-      formData.price.trim().length > 0 &&
+      safeTrim(formData.name).length > 0 &&
+      safeTrim(formData.price).length > 0 &&
       images.length > 0 &&
       attachments.length > 0
     );
@@ -183,7 +246,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       return;
     }
 
-    const price = parseFloat(formData.price);
+    const price = parseFloat(safeStr(formData.price));
     if (isNaN(price) || price < 0) {
       setError('السعر غير صالح');
       return;
@@ -192,104 +255,118 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     setLoading(true);
 
     try {
-      // 1. Update product
+      // 1) Update product
+      // ✅ name يمكن يكون title في بعض السكيمات، لكن هنا نفترض name موجود (مثل بقية مشروعك)
+      // ولو ما كان موجود، سيظهر خطأ schema وسيتم عرضه للمستخدم بدل شاشة بيضاء.
       const { error: updateError } = await supabase
         .from('products')
         .update({
-          name: formData.name,
-          description: formData.description || null,
+          name: safeStr(formData.name),
+          description: safeStr(formData.description) ? safeStr(formData.description) : null,
           price,
-          currency: formData.currency,
-          store_id: formData.store_id || null,
-          visibility: formData.visibility,
-          is_active: formData.is_active,
+          currency: safeStr(formData.currency) || 'SAR',
+          store_id: safeStr(formData.store_id) ? safeStr(formData.store_id) : null,
+          visibility: safeStr(formData.visibility) || 'marketplace',
+          is_active: Boolean(formData.is_active),
           updated_at: new Date().toISOString(),
         } as any)
         .eq('id', productId);
 
       if (updateError) throw updateError;
 
-      // 2. Update product images
-      // Delete removed images
+      // 2) Update product images
       const currentImageIds = images.filter((img) => img.id).map((img) => img.id!);
       const imagesToDelete = existingImageIds.filter((id) => !currentImageIds.includes(id));
 
       if (imagesToDelete.length > 0) {
-        await supabase.from('product_images').delete().in('id', imagesToDelete);
+        const { error: delImgErr } = await supabase.from('product_images').delete().in('id', imagesToDelete);
+        if (delImgErr) console.error('delete images error:', delImgErr);
       }
 
-      // Update existing images
       for (const img of images.filter((img) => img.id)) {
-        await supabase
+        const { error: updImgErr } = await supabase
           .from('product_images')
           .update({
-            is_primary: img.is_primary,
-            display_order: img.display_order,
+            is_primary: Boolean(img.is_primary),
+            display_order: Number(img.display_order ?? 0),
           })
           .eq('id', img.id!);
+        if (updImgErr) console.error('update image error:', updImgErr);
       }
 
-      // Insert new images
       const newImages = images.filter((img) => !img.id);
       if (newImages.length > 0) {
-        const imageInserts = newImages.map((img, index) => ({
+        const imageInserts = newImages.map((img) => ({
           product_id: productId,
           image_url: img.image_url,
-          is_primary: img.is_primary,
-          display_order: img.display_order,
+          is_primary: Boolean(img.is_primary),
+          display_order: Number(img.display_order ?? 0),
         }));
 
-        await supabase.from('product_images').insert(imageInserts);
+        const { error: insImgErr } = await supabase.from('product_images').insert(imageInserts);
+        if (insImgErr) console.error('insert images error:', insImgErr);
       }
 
-      // 3. Update product attachments
-      // Delete removed attachments
+      // 3) Update product attachments
       const currentAttachmentIds = attachments.filter((att) => att.id).map((att) => att.id!);
       const attachmentsToDelete = existingAttachmentIds.filter(
         (id) => !currentAttachmentIds.includes(id)
       );
 
       if (attachmentsToDelete.length > 0) {
-        await supabase.from('product_attachments').delete().in('id', attachmentsToDelete);
+        const { error: delAttErr } = await supabase
+          .from('product_attachments')
+          .delete()
+          .in('id', attachmentsToDelete);
+        if (delAttErr) console.error('delete attachments error:', delAttErr);
       }
 
-      // Update existing attachments
       for (const att of attachments.filter((att) => att.id)) {
-        await supabase
+        const { error: updAttErr } = await supabase
           .from('product_attachments')
           .update({
-            title: att.title,
-            display_order: att.display_order,
+            title: safeStr(att.title),
+            display_order: Number(att.display_order ?? 0),
           })
           .eq('id', att.id!);
+        if (updAttErr) console.error('update attachment error:', updAttErr);
       }
 
-      // Insert new attachments
       const newAttachments = attachments.filter((att) => !att.id);
       if (newAttachments.length > 0) {
         const attachmentInserts = newAttachments.map((att) => ({
           product_id: productId,
-          title: att.title,
-          attachment_type: att.attachment_type,
+          title: safeStr(att.title),
+          attachment_type: safeStr(att.attachment_type),
           file_url: att.file_url || null,
           text_content: att.text_content || null,
           file_size: att.file_size || null,
-          display_order: att.display_order,
+          display_order: Number(att.display_order ?? 0),
         }));
 
-        await supabase.from('product_attachments').insert(attachmentInserts);
+        const { error: insAttErr } = await supabase.from('product_attachments').insert(attachmentInserts);
+        if (insAttErr) console.error('insert attachments error:', insAttErr);
       }
 
-      // 4. Update coupon link
-      // Delete existing link
-      await supabase.from('coupon_products').delete().eq('product_id', productId);
+      // 4) Update coupon link
+      const { error: delCouponLinkErr } = await supabase
+        .from('coupon_products')
+        .delete()
+        .eq('product_id', productId);
 
-      // Insert new link if selected
-      if (selectedCouponId && selectedCouponId !== '') {
-        await supabase.from('coupon_products').insert({
+      if (delCouponLinkErr) {
+        console.error('delete coupon_products error:', delCouponLinkErr);
+      }
+
+      if (safeStr(selectedCouponId)) {
+        const { error: insCouponLinkErr } = await supabase.from('coupon_products').insert({
           coupon_id: selectedCouponId,
           product_id: productId,
         });
+
+        if (insCouponLinkErr) {
+          console.error('insert coupon_products error:', insCouponLinkErr);
+        }
       }
 
       onSuccess();
@@ -297,10 +374,12 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     } catch (err: any) {
       console.error('Error updating product:', err);
 
-      // User-friendly error message
-      const userMessage = err?.message?.includes('schema') || err?.message?.includes('column')
-        ? 'تعذر تحديث المنتج بسبب إعدادات قاعدة البيانات. حاول مرة أخرى أو تواصل مع الدعم.'
-        : err?.message || 'حدث خطأ أثناء تحديث المنتج';
+      const msg = safeStr(err?.message);
+
+      const userMessage =
+        msg.includes('schema') || msg.includes('column')
+          ? 'تعذر تحديث المنتج بسبب إعدادات قاعدة البيانات/الأعمدة. تأكد من الأعمدة المطلوبة أو تواصل مع الدعم.'
+          : msg || 'حدث خطأ أثناء تحديث المنتج';
 
       setError(userMessage);
     } finally {
@@ -315,18 +394,14 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
     setDeleting(true);
     try {
-      const { error: deleteError } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', productId);
-
+      const { error: deleteError } = await supabase.from('products').delete().eq('id', productId);
       if (deleteError) throw deleteError;
 
       onDelete();
       onClose();
     } catch (err: any) {
       console.error('Error deleting product:', err);
-      setError(err.message || 'حدث خطأ أثناء حذف المنتج');
+      setError(safeStr(err?.message) || 'حدث خطأ أثناء حذف المنتج');
     } finally {
       setDeleting(false);
     }
@@ -345,13 +420,11 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
               </div>
               <h2 className="text-2xl font-bold text-gray-900">تعديل المنتج</h2>
             </div>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-            >
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
               <X className="w-6 h-6" />
             </button>
           </div>
+
           {product && (
             <CopyLinkButton
               url={`${window.location.origin}/#/product-${product.id}`}
@@ -361,7 +434,10 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-8 max-h-[calc(100vh-200px)] overflow-y-auto">
+        <form
+          onSubmit={handleSubmit}
+          className="p-6 space-y-8 max-h-[calc(100vh-200px)] overflow-y-auto"
+        >
           {error && (
             <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
               <AlertCircle className="w-5 h-5 flex-shrink-0" />
@@ -390,9 +466,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                وصف المنتج
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">وصف المنتج</label>
               <textarea
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -461,9 +535,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                المتجر التابع له
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">المتجر التابع له</label>
               <select
                 value={formData.store_id}
                 onChange={(e) => setFormData({ ...formData, store_id: e.target.value })}
@@ -513,9 +585,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                كوبون الخصم
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">كوبون الخصم</label>
               <select
                 value={selectedCouponId}
                 onChange={(e) => setSelectedCouponId(e.target.value)}
@@ -524,7 +594,10 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 <option value="">عدم إضافة كوبونات خصم</option>
                 {coupons.map((coupon) => (
                   <option key={coupon.id} value={coupon.id}>
-                    {coupon.code} - {coupon.discount_type === 'percentage' ? `${coupon.discount_value}%` : `${coupon.discount_value} ريال`}
+                    {coupon.code} -{' '}
+                    {coupon.discount_type === 'percentage'
+                      ? `${coupon.discount_value}%`
+                      : `${coupon.discount_value} ريال`}
                   </option>
                 ))}
               </select>
@@ -536,8 +609,8 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-sm font-medium text-blue-900 mb-2">لحفظ التغييرات، يجب:</p>
               <ul className="text-sm text-blue-800 space-y-1 mr-4">
-                {!formData.name.trim() && <li>• إدخال اسم المنتج</li>}
-                {!formData.price.trim() && <li>• إدخال السعر</li>}
+                {!safeTrim(formData.name) && <li>• إدخال اسم المنتج</li>}
+                {!safeTrim(formData.price) && <li>• إدخال السعر</li>}
                 {images.length === 0 && <li>• إضافة صورة واحدة على الأقل</li>}
                 {attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل</li>}
               </ul>
@@ -564,7 +637,9 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 </>
               )}
             </button>
+
             <div className="flex-1"></div>
+
             <button
               type="button"
               onClick={onClose}
@@ -572,6 +647,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             >
               إلغاء
             </button>
+
             <button
               type="submit"
               disabled={loading || !isFormValid()}
