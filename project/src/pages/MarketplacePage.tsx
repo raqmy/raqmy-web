@@ -1,20 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search, Filter, Download, Star, Store as StoreIcon, Tag } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 
 interface ProductWithDetails extends Product {
   store?: Store | null;
   seller?: UserProfile | null;
-
-  // سنملأها من product_images
+  // نضيفها هنا لأن جدول products عندك غالباً ما فيه thumbnail_url
   thumbnail_url?: string | null;
-
-  // نحتفظ بها لو احتجتها لاحقًا
-  product_images?: Array<{
-    image_url: string;
-    is_primary: boolean | null;
-    display_order: number | null;
-  }>;
+  // للتعامل مع اختلاف الاسم (title vs name)
+  display_name?: string;
 }
 
 interface MarketplacePageProps {
@@ -43,22 +37,11 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
         sortBy === 'popular' ? 'sales_count' :
         'price';
 
-      const ascending =
-        sortBy === 'price_low' ? true :
-        sortBy === 'price_high' ? false :
-        false;
+      const ascending = sortBy === 'price_low';
 
-      // ✅ نجلب المنتجات + صورها (product_images)
       const { data, error } = await supabase
         .from('products')
-        .select(`
-          *,
-          product_images (
-            image_url,
-            is_primary,
-            display_order
-          )
-        `)
+        .select('*')
         .eq('is_active', true)
         .eq('visibility', 'marketplace')
         .order(orderColumn, { ascending });
@@ -77,23 +60,33 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
 
       console.log('✅ Found', data.length, 'products');
 
+      // ✅ 1) جيب صورة (primary) لكل منتج من product_images
+      const productIds = data.map((p: any) => p.id).filter(Boolean);
+
+      const { data: imagesData, error: imagesError } = await supabase
+        .from('product_images')
+        .select('product_id, image_url, is_primary, display_order')
+        .in('product_id', productIds)
+        .order('is_primary', { ascending: false })
+        .order('display_order', { ascending: true });
+
+      if (imagesError) {
+        console.warn('⚠️ Could not fetch product_images:', imagesError);
+      }
+
+      // map: product_id -> best image_url
+      const imageMap = new Map<string, string>();
+      (imagesData || []).forEach((img: any) => {
+        if (!imageMap.has(img.product_id) && img.image_url) {
+          imageMap.set(img.product_id, img.image_url);
+        }
+      });
+
+      // ✅ 2) enrich (store + seller) + ركب thumbnail_url + ركب display_name
       const enrichedProducts = await Promise.all(
         data.map(async (product: any) => {
           let store: Store | null = null;
           let seller: UserProfile | null = null;
-
-          // ✅ استخرج صورة الغلاف من product_images
-          const imgs = (product.product_images ?? []) as Array<{
-            image_url: string;
-            is_primary: boolean | null;
-            display_order: number | null;
-          }>;
-
-          const primary =
-            imgs.find(i => i.is_primary) ??
-            [...imgs].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))[0];
-
-          const thumbnail_url = primary?.image_url ?? null;
 
           if (product.store_id) {
             const { data: storeData } = await supabase
@@ -101,31 +94,32 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
               .select('id, name, slug, category')
               .eq('id', product.store_id)
               .maybeSingle();
-            store = storeData ?? null;
+            store = storeData || null;
           }
 
-          // ملاحظة: عندك في products يظهر أن العمود الأساسي هو merchant_id غالبًا
-          // لكن نخلي user_id مثل ما كان عندك حتى لا نكسر شيء آخر
           if (product.user_id) {
             const { data: userData } = await supabase
               .from('users_profile')
               .select('id, name')
               .eq('id', product.user_id)
               .maybeSingle();
-            seller = userData ?? null;
+            seller = userData || null;
           }
+
+          const displayName = product.title ?? product.name ?? 'منتج رقمي';
 
           return {
             ...product,
             store,
             seller,
-            thumbnail_url, // ✅ صار الآن موجود ويشتغل مع نفس الكارد
-          } as ProductWithDetails;
+            display_name: displayName,
+            thumbnail_url: product.thumbnail_url ?? imageMap.get(product.id) ?? null,
+          };
         })
       );
 
       console.log('✅ Enriched products:', enrichedProducts);
-      setProducts(enrichedProducts);
+      setProducts(enrichedProducts as any);
     } catch (error) {
       console.error('💥 Exception:', error);
       setProducts([]);
@@ -135,14 +129,12 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
     }
   };
 
-  const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
-      const name = (product.name || (product as any).title || '').toLowerCase();
-      const matchesSearch = name.includes(searchQuery.toLowerCase());
-      const matchesCategory = selectedCategory === 'all' || product.category === selectedCategory;
-      return matchesSearch && matchesCategory;
-    });
-  }, [products, searchQuery, selectedCategory]);
+  const filteredProducts = products.filter((product) => {
+    const name = (product.display_name ?? product.title ?? (product as any).name ?? '').toLowerCase();
+    const matchesSearch = name.includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || (product as any).category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -211,13 +203,9 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                   {product.thumbnail_url ? (
                     <img
                       src={product.thumbnail_url}
-                      alt={product.name || (product as any).title || 'product'}
+                      alt={product.display_name || (product as any).name || product.title}
                       className="w-full h-full object-cover"
                       loading="lazy"
-                      onError={(e) => {
-                        // لو صار خطأ بالرابط، نخليها ترجع للأيقونة
-                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                      }}
                     />
                   ) : (
                     <Download className="w-16 h-16 text-blue-600" />
@@ -237,16 +225,16 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                       </div>
                     )}
 
-                    {product.category && (
+                    {(product as any).category && (
                       <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-lg">
                         <Tag className="w-3 h-3 inline mr-1" />
-                        {product.category}
+                        {(product as any).category}
                       </span>
                     )}
                   </div>
 
                   <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-1">
-                    {product.name || (product as any).title}
+                    {product.display_name || product.title || (product as any).name}
                   </h3>
 
                   <p className="text-gray-600 mb-4 line-clamp-2 text-sm">
@@ -258,9 +246,13 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                       <div className="text-2xl font-bold text-blue-600">
                         {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
                       </div>
-                      {product.is_subscription && (
+                      {(product as any).is_subscription && (
                         <span className="text-xs text-gray-500">
-                          / {product.subscription_period === 'monthly' ? 'شهرياً' : product.subscription_period === 'yearly' ? 'سنوياً' : 'أسبوعياً'}
+                          / {(product as any).subscription_period === 'monthly'
+                            ? 'شهرياً'
+                            : (product as any).subscription_period === 'yearly'
+                            ? 'سنوياً'
+                            : 'أسبوعياً'}
                         </span>
                       )}
                     </div>
@@ -270,9 +262,10 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                         <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
                         <span className="text-sm font-semibold">4.8</span>
                       </div>
-                      <span className="text-xs text-gray-500">{product.sales_count} مبيعات</span>
+                      <span className="text-xs text-gray-500">{(product as any).sales_count ?? 0} مبيعات</span>
                     </div>
                   </div>
+
                 </div>
               </div>
             ))}
