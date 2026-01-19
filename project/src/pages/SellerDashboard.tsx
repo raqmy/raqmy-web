@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard,
   Package,
@@ -14,7 +14,6 @@ import {
   Users,
   Link as LinkIcon,
   Check,
-  Download,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Store, Product } from '../lib/supabase';
@@ -29,7 +28,7 @@ interface SellerDashboardProps {
 
 interface AffiliateLink {
   id: string;
-  user_id: string;
+  user_id: string; // affiliate user
   product_id: string;
   code: string;
   created_at: string;
@@ -48,7 +47,6 @@ type NormalizedProduct = Product & {
   views_count: number;
   sales_count: number;
   currency: string;
-  thumbnail_url?: string | null; // ✅ مهم لعرض الصورة
 };
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
@@ -79,19 +77,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   }, [profile]);
 
   const normalizeProduct = (row: any): NormalizedProduct => {
-    // بعض قواعد البيانات عندك تستخدم title + merchant_id
     const name = row?.name ?? row?.title ?? '';
     const user_id = row?.user_id ?? row?.merchant_id ?? null;
 
-    // لو الأعمدة غير موجودة نخليها 0 بدل undefined عشان الإحصائيات ما تتكسر
     const views_count = Number(row?.views_count ?? row?.views ?? 0) || 0;
     const sales_count = Number(row?.sales_count ?? 0) || 0;
 
-    // العملة يمكن ما تكون موجودة في السكيما الحالية
     const currency = row?.currency ?? 'SAR';
-
-    // بعض الجداول قد يكون فيها thumbnail_url مباشرة
-    const thumbnail_url = row?.thumbnail_url ?? null;
 
     return {
       ...(row as Product),
@@ -100,9 +92,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       views_count,
       sales_count,
       currency,
-      thumbnail_url,
     } as NormalizedProduct;
   };
+
+  // helper: safe code display (avoid trim crash anywhere)
+  const safeCode = (v: any) => (typeof v === 'string' ? v.trim() : '');
 
   const fetchDashboardData = async () => {
     if (!profile) return;
@@ -110,87 +104,118 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     try {
       setLoading(true);
 
-      const { data: storesData } = await supabase
+      // stores
+      const { data: storesData, error: storesError } = await supabase
         .from('stores')
         .select('*')
         .eq('user_id', profile.id);
 
-      // ✅ FIX: جلب المنتجات سواء كانت مربوطة بـ user_id أو merchant_id
-      const { data: rawProductsData } = await supabase
+      if (storesError) {
+        console.error('Error fetching stores:', storesError);
+      }
+
+      // products (support user_id or merchant_id)
+      const { data: rawProductsData, error: productsError } = await supabase
         .from('products')
         .select('*')
         .or(`user_id.eq.${profile.id},merchant_id.eq.${profile.id}`);
 
-      let normalizedProducts = (rawProductsData || []).map(normalizeProduct);
-
-      // ✅ جلب صور المنتجات من product_images وربطها بالمنتجات (للداشبورد)
-      const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
-
-      if (productIds.length > 0) {
-        const { data: imagesData, error: imagesError } = await supabase
-          .from('product_images')
-          .select('product_id, url, is_primary, created_at')
-          .in('product_id', productIds)
-          .order('is_primary', { ascending: false })
-          .order('created_at', { ascending: true });
-
-        if (!imagesError && imagesData && imagesData.length > 0) {
-          // خذ أفضل صورة لكل منتج: primary أولاً، وإلا أول صورة
-          const bestImageByProduct = new Map<string, string>();
-          for (const img of imagesData as any[]) {
-            if (!img?.product_id || !img?.url) continue;
-            if (!bestImageByProduct.has(img.product_id)) {
-              bestImageByProduct.set(img.product_id, img.url);
-            }
-          }
-
-          normalizedProducts = normalizedProducts.map((p) => ({
-            ...p,
-            thumbnail_url: p.thumbnail_url ?? bestImageByProduct.get(p.id as any) ?? null,
-          }));
-        }
+      if (productsError) {
+        console.error('Error fetching products:', productsError);
       }
 
-      const { data: ordersData } = await supabase
+      const normalizedProducts = (rawProductsData || []).map(normalizeProduct);
+
+      // completed orders
+      const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select('seller_amount, status')
         .eq('seller_id', profile.id)
         .eq('status', 'completed');
 
-      // ✅ FIX: لا تسوي in() على قائمة فاضية
-      let affiliateLinksData: any[] = [];
+      if (ordersError) {
+        console.error('Error fetching orders:', ordersError);
+      }
+
+      const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
+
+      // ✅ safer affiliate links fetch: NO join by FK name (prevents 400)
+      let affiliateLinksData: AffiliateLink[] = [];
       if (productIds.length > 0) {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('affiliate_links')
-          .select(
-            `
-            *,
-            users_profile!affiliate_links_user_id_fkey(id, name)
-          `
-          )
+          .select('id,user_id,product_id,code,created_at')
           .in('product_id', productIds);
 
-        affiliateLinksData = data || [];
+        if (error) {
+          console.error('Error fetching affiliate_links:', error);
+        } else {
+          affiliateLinksData = (data || []) as any;
+        }
+      }
+
+      // fetch affiliate names in one query (if any)
+      const affiliateUserIds = Array.from(
+        new Set((affiliateLinksData || []).map((l) => l.user_id).filter(Boolean))
+      );
+
+      let affiliateProfilesMap = new Map<string, { id: string; name: string }>();
+      if (affiliateUserIds.length > 0) {
+        const { data: profilesData, error: profilesError } = await supabase
+          .from('users_profile')
+          .select('id,name')
+          .in('id', affiliateUserIds);
+
+        if (profilesError) {
+          console.error('Error fetching affiliate profiles:', profilesError);
+        } else {
+          (profilesData || []).forEach((p: any) => {
+            affiliateProfilesMap.set(p.id, { id: p.id, name: p.name });
+          });
+        }
       }
 
       const linksWithStats = await Promise.all(
         (affiliateLinksData || []).map(async (link: any) => {
-          const { data: clicks } = await supabase
-            .from('affiliate_clicks')
-            .select('id')
-            .eq('affiliate_link_id', link.id);
+          try {
+            const { data: clicks, error: clicksError } = await supabase
+              .from('affiliate_clicks')
+              .select('id')
+              .eq('affiliate_link_id', link.id);
 
-          const { data: sales } = await supabase
-            .from('affiliate_sales')
-            .select('id')
-            .eq('affiliate_link_id', link.id);
+            if (clicksError) {
+              console.error('Error fetching affiliate_clicks:', clicksError);
+            }
 
-          return {
-            ...link,
-            affiliate: link.users_profile,
-            clicks_count: clicks?.length || 0,
-            sales_count: sales?.length || 0,
-          };
+            const { data: sales, error: salesError } = await supabase
+              .from('affiliate_sales')
+              .select('id')
+              .eq('affiliate_link_id', link.id);
+
+            if (salesError) {
+              console.error('Error fetching affiliate_sales:', salesError);
+            }
+
+            const affiliateProfile = affiliateProfilesMap.get(link.user_id);
+
+            return {
+              ...link,
+              code: safeCode(link.code),
+              affiliate: affiliateProfile ? affiliateProfile : undefined,
+              clicks_count: clicks?.length || 0,
+              sales_count: sales?.length || 0,
+            } as AffiliateLink;
+          } catch (e) {
+            console.error('Error enriching affiliate link:', e);
+            const affiliateProfile = affiliateProfilesMap.get(link.user_id);
+            return {
+              ...link,
+              code: safeCode(link.code),
+              affiliate: affiliateProfile ? affiliateProfile : undefined,
+              clicks_count: 0,
+              sales_count: 0,
+            } as AffiliateLink;
+          }
         })
       );
 
@@ -199,7 +224,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       setAffiliateLinks(linksWithStats);
 
       const revenue =
-        ordersData?.reduce((sum, order) => sum + Number(order.seller_amount), 0) || 0;
+        ordersData?.reduce((sum, order: any) => sum + Number(order.seller_amount || 0), 0) || 0;
 
       const sales = ordersData?.length || 0;
       const views = normalizedProducts.reduce((sum, p) => sum + (p.views_count || 0), 0);
@@ -217,6 +242,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       setLoading(false);
     }
   };
+
+  const affiliateTotals = useMemo(() => {
+    return {
+      activeAffiliates: affiliateLinks.length,
+      totalClicks: affiliateLinks.reduce((sum, link) => sum + (link.clicks_count || 0), 0),
+      totalSales: affiliateLinks.reduce((sum, link) => sum + (link.sales_count || 0), 0),
+    };
+  }, [affiliateLinks]);
 
   if (loading) {
     return (
@@ -466,16 +499,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {products.map((product) => (
-                  <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                    <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+                  <div
+                    key={product.id}
+                    className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow"
+                  >
+                    {/* ✅ صورة المنتج من thumbnail_url مثل السوق العام */}
+                    <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center overflow-hidden">
                       {product.thumbnail_url ? (
                         <img
                           src={product.thumbnail_url}
                           alt={product.name || 'Product'}
                           className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          }}
                         />
                       ) : (
-                        <Download className="w-12 h-12 text-blue-600" />
+                        <Package className="w-12 h-12 text-blue-600" />
                       )}
                     </div>
 
@@ -505,6 +545,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         </span>
                       </div>
 
+                      {/* ✅ زر عرض المنتج */}
+                      <button
+                        onClick={() => onNavigate(`product-${product.id}`)}
+                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors mb-2"
+                      >
+                        عرض المنتج
+                      </button>
+
+                      {/* تعديل المنتج */}
                       <button
                         onClick={() => setEditingProductId(product.id)}
                         className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
@@ -620,19 +669,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <div className="space-y-3 mb-6">
                   <div className="flex items-center justify-between">
                     <span className="text-blue-100">المسوقين النشطين</span>
-                    <span className="text-2xl font-bold">{affiliateLinks.length}</span>
+                    <span className="text-2xl font-bold">{affiliateTotals.activeAffiliates}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-blue-100">إجمالي النقرات</span>
-                    <span className="text-2xl font-bold">
-                      {affiliateLinks.reduce((sum, link) => sum + (link.clicks_count || 0), 0)}
-                    </span>
+                    <span className="text-2xl font-bold">{affiliateTotals.totalClicks}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-blue-100">المبيعات من المسوقين</span>
-                    <span className="text-2xl font-bold">
-                      {affiliateLinks.reduce((sum, link) => sum + (link.sales_count || 0), 0)}
-                    </span>
+                    <span className="text-2xl font-bold">{affiliateTotals.totalSales}</span>
                   </div>
                 </div>
 
@@ -700,15 +745,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                             <LinkIcon className="w-5 h-5 text-blue-600" />
                           </div>
                           <div>
-                            <p className="font-semibold text-gray-900">{link.affiliate?.name || 'مسوق'}</p>
+                            <p className="font-semibold text-gray-900">
+                              {link.affiliate?.name || 'مسوق'}
+                            </p>
                             <p className="text-sm text-gray-600">
-                              {product?.name || 'منتج'} - {link.code}
+                              {product?.name || 'منتج'} - {safeCode(link.code) || '—'}
                             </p>
                           </div>
                         </div>
 
                         <div className="text-right">
-                          <p className="text-sm font-semibold text-gray-900">{link.clicks_count || 0} نقرة</p>
+                          <p className="text-sm font-semibold text-gray-900">
+                            {link.clicks_count || 0} نقرة
+                          </p>
                           <p className="text-sm text-green-600">{link.sales_count || 0} مبيعات</p>
                         </div>
                       </div>
