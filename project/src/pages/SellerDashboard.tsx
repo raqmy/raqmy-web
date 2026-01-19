@@ -26,16 +26,16 @@ interface SellerDashboardProps {
   onNavigate: (page: string) => void;
 }
 
-interface AffiliateLink {
+interface AffiliateLinkRow {
   id: string;
-  user_id: string; // affiliate user
+  user_id: string;
   product_id: string;
   code: string;
   created_at: string;
-  affiliate?: {
-    id: string;
-    name: string;
-  };
+}
+
+interface AffiliateLinkUI extends AffiliateLinkRow {
+  affiliate?: { id: string; name: string };
   clicks_count?: number;
   sales_count?: number;
 }
@@ -47,6 +47,7 @@ type NormalizedProduct = Product & {
   views_count: number;
   sales_count: number;
   currency: string;
+  thumbnail_url?: string | null;
 };
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
@@ -69,7 +70,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [showCreateProductModal, setShowCreateProductModal] = useState(false);
   const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
-  const [affiliateLinks, setAffiliateLinks] = useState<AffiliateLink[]>([]);
+  const [affiliateLinks, setAffiliateLinks] = useState<AffiliateLinkUI[]>([]);
 
   useEffect(() => {
     if (profile) fetchDashboardData();
@@ -82,7 +83,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
     const views_count = Number(row?.views_count ?? row?.views ?? 0) || 0;
     const sales_count = Number(row?.sales_count ?? 0) || 0;
-
     const currency = row?.currency ?? 'SAR';
 
     return {
@@ -92,11 +92,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       views_count,
       sales_count,
       currency,
+      thumbnail_url: row?.thumbnail_url ?? null,
     } as NormalizedProduct;
   };
 
-  // helper: safe code display (avoid trim crash anywhere)
-  const safeCode = (v: any) => (typeof v === 'string' ? v.trim() : '');
+  const safeArray = <T,>(v: T[] | null | undefined): T[] => (Array.isArray(v) ? v : []);
 
   const fetchDashboardData = async () => {
     if (!profile) return;
@@ -104,131 +104,141 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     try {
       setLoading(true);
 
-      // stores
-      const { data: storesData, error: storesError } = await supabase
+      // 1) Stores
+      const { data: storesData, error: storesErr } = await supabase
         .from('stores')
         .select('*')
         .eq('user_id', profile.id);
 
-      if (storesError) {
-        console.error('Error fetching stores:', storesError);
-      }
+      if (storesErr) console.error('stores fetch error:', storesErr);
 
-      // products (support user_id or merchant_id)
-      const { data: rawProductsData, error: productsError } = await supabase
+      // 2) Products (user_id OR merchant_id)
+      const { data: rawProductsData, error: productsErr } = await supabase
         .from('products')
         .select('*')
         .or(`user_id.eq.${profile.id},merchant_id.eq.${profile.id}`);
 
-      if (productsError) {
-        console.error('Error fetching products:', productsError);
-      }
+      if (productsErr) console.error('products fetch error:', productsErr);
 
-      const normalizedProducts = (rawProductsData || []).map(normalizeProduct);
+      const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
 
-      // completed orders
-      const { data: ordersData, error: ordersError } = await supabase
+      // 3) Orders stats
+      const { data: ordersData, error: ordersErr } = await supabase
         .from('orders')
         .select('seller_amount, status')
         .eq('seller_id', profile.id)
         .eq('status', 'completed');
 
-      if (ordersError) {
-        console.error('Error fetching orders:', ordersError);
+      if (ordersErr) console.error('orders fetch error:', ordersErr);
+
+      // 4) Fetch product images to show thumbnails in dashboard
+      const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
+      let thumbMap: Record<string, string> = {};
+
+      if (productIds.length > 0) {
+        const { data: imgs, error: imgsErr } = await supabase
+          .from('product_images')
+          .select('product_id, image_url, is_primary, display_order, created_at')
+          .in('product_id', productIds)
+          .order('is_primary', { ascending: false })
+          .order('display_order', { ascending: true })
+          .order('created_at', { ascending: true });
+
+        if (imgsErr) {
+          console.error('product_images fetch error:', imgsErr);
+        } else {
+          for (const row of safeArray(imgs) as any[]) {
+            if (!thumbMap[row.product_id] && row.image_url) {
+              thumbMap[row.product_id] = row.image_url;
+            }
+          }
+        }
       }
 
-      const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
+      const productsWithThumbs = normalizedProducts.map((p) => ({
+        ...p,
+        thumbnail_url: p.thumbnail_url || thumbMap[p.id] || null,
+      }));
 
-      // ✅ safer affiliate links fetch: NO join by FK name (prevents 400)
-      let affiliateLinksData: AffiliateLink[] = [];
+      // 5) Affiliate links (بدون JOIN حساس باسم FK)
+      let affiliateRows: AffiliateLinkRow[] = [];
       if (productIds.length > 0) {
-        const { data, error } = await supabase
+        const { data: links, error: linksErr } = await supabase
           .from('affiliate_links')
-          .select('id,user_id,product_id,code,created_at')
+          .select('id, user_id, product_id, code, created_at')
           .in('product_id', productIds);
 
-        if (error) {
-          console.error('Error fetching affiliate_links:', error);
+        if (linksErr) {
+          // ✅ أهم شيء: لا نخلي الخطأ يطيح الصفحة
+          console.error('affiliate_links fetch error:', linksErr);
+          affiliateRows = [];
         } else {
-          affiliateLinksData = (data || []) as any;
+          affiliateRows = safeArray(links) as any[];
         }
       }
 
-      // fetch affiliate names in one query (if any)
-      const affiliateUserIds = Array.from(
-        new Set((affiliateLinksData || []).map((l) => l.user_id).filter(Boolean))
-      );
+      // 6) Get affiliate user names safely
+      const affiliateUserIds = Array.from(new Set(affiliateRows.map((l) => l.user_id).filter(Boolean)));
+      let userMap: Record<string, { id: string; name: string }> = {};
 
-      let affiliateProfilesMap = new Map<string, { id: string; name: string }>();
       if (affiliateUserIds.length > 0) {
-        const { data: profilesData, error: profilesError } = await supabase
+        const { data: usersData, error: usersErr } = await supabase
           .from('users_profile')
-          .select('id,name')
+          .select('id, name')
           .in('id', affiliateUserIds);
 
-        if (profilesError) {
-          console.error('Error fetching affiliate profiles:', profilesError);
+        if (usersErr) {
+          console.error('users_profile fetch error:', usersErr);
         } else {
-          (profilesData || []).forEach((p: any) => {
-            affiliateProfilesMap.set(p.id, { id: p.id, name: p.name });
-          });
+          for (const u of safeArray(usersData) as any[]) {
+            userMap[u.id] = { id: u.id, name: u.name };
+          }
         }
       }
 
-      const linksWithStats = await Promise.all(
-        (affiliateLinksData || []).map(async (link: any) => {
+      // 7) Add clicks/sales counts per link (safe)
+      const linksWithStats: AffiliateLinkUI[] = await Promise.all(
+        affiliateRows.map(async (link) => {
           try {
-            const { data: clicks, error: clicksError } = await supabase
+            const { data: clicks } = await supabase
               .from('affiliate_clicks')
               .select('id')
               .eq('affiliate_link_id', link.id);
 
-            if (clicksError) {
-              console.error('Error fetching affiliate_clicks:', clicksError);
-            }
-
-            const { data: sales, error: salesError } = await supabase
+            const { data: sales } = await supabase
               .from('affiliate_sales')
               .select('id')
               .eq('affiliate_link_id', link.id);
 
-            if (salesError) {
-              console.error('Error fetching affiliate_sales:', salesError);
-            }
-
-            const affiliateProfile = affiliateProfilesMap.get(link.user_id);
-
             return {
               ...link,
-              code: safeCode(link.code),
-              affiliate: affiliateProfile ? affiliateProfile : undefined,
-              clicks_count: clicks?.length || 0,
-              sales_count: sales?.length || 0,
-            } as AffiliateLink;
+              affiliate: userMap[link.user_id],
+              clicks_count: safeArray(clicks).length,
+              sales_count: safeArray(sales).length,
+            };
           } catch (e) {
-            console.error('Error enriching affiliate link:', e);
-            const affiliateProfile = affiliateProfilesMap.get(link.user_id);
+            console.error('affiliate stats error:', e);
             return {
               ...link,
-              code: safeCode(link.code),
-              affiliate: affiliateProfile ? affiliateProfile : undefined,
+              affiliate: userMap[link.user_id],
               clicks_count: 0,
               sales_count: 0,
-            } as AffiliateLink;
+            };
           }
         })
       );
 
+      // Set states
       setStores(storesData || []);
-      setProducts(normalizedProducts);
+      setProducts(productsWithThumbs);
       setAffiliateLinks(linksWithStats);
 
       const revenue =
-        ordersData?.reduce((sum, order: any) => sum + Number(order.seller_amount || 0), 0) || 0;
+        safeArray(ordersData)?.reduce((sum: number, order: any) => sum + Number(order.seller_amount || 0), 0) || 0;
 
-      const sales = ordersData?.length || 0;
-      const views = normalizedProducts.reduce((sum, p) => sum + (p.views_count || 0), 0);
-      const active = normalizedProducts.filter((p) => p.is_active).length || 0;
+      const sales = safeArray(ordersData)?.length || 0;
+      const views = productsWithThumbs.reduce((sum, p) => sum + (p.views_count || 0), 0);
+      const active = productsWithThumbs.filter((p) => p.is_active).length || 0;
 
       setStats({
         totalRevenue: revenue,
@@ -243,13 +253,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
   };
 
-  const affiliateTotals = useMemo(() => {
-    return {
-      activeAffiliates: affiliateLinks.length,
-      totalClicks: affiliateLinks.reduce((sum, link) => sum + (link.clicks_count || 0), 0),
-      totalSales: affiliateLinks.reduce((sum, link) => sum + (link.sales_count || 0), 0),
-    };
-  }, [affiliateLinks]);
+  const openProduct = (id: string) => {
+    // نفس طريقة السوق العام
+    onNavigate(`product-${id}`);
+  };
 
   if (loading) {
     return (
@@ -405,41 +412,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-              <button
-                onClick={() => onNavigate('merchant-withdraw')}
-                className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
-              >
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
-                  <DollarSign className="w-6 h-6 text-green-600" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">سحب الأرباح</h3>
-                <p className="text-sm text-gray-600">إدارة أرباحك وطلبات السحب</p>
-              </button>
-
-              <button
-                onClick={() => onNavigate('bank-account')}
-                className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
-              >
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-                  <Settings className="w-6 h-6 text-blue-600" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">الحسابات البنكية</h3>
-                <p className="text-sm text-gray-600">إدارة حساباتك البنكية</p>
-              </button>
-
-              <button
-                onClick={() => onNavigate('orders-management')}
-                className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
-              >
-                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
-                  <ShoppingBag className="w-6 h-6 text-purple-600" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">إدارة الطلبات</h3>
-                <p className="text-sm text-gray-600">عرض ومتابعة جميع الطلبات</p>
-              </button>
-            </div>
-
             <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 text-white">
               <h2 className="text-2xl font-bold mb-4">ابدأ البيع الآن!</h2>
               <p className="text-blue-100 mb-6">
@@ -501,18 +473,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 {products.map((product) => (
                   <div
                     key={product.id}
-                    className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow"
+                    className="bg-white rounded-xl shadow-sm overflow-hidden"
                   >
-                    {/* ✅ صورة المنتج من thumbnail_url مثل السوق العام */}
-                    <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center overflow-hidden">
+                    {/* ✅ مثل السوق العام: الضغط على الصورة يفتح المنتج */}
+                    <div
+                      className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center cursor-pointer"
+                      onClick={() => openProduct(product.id)}
+                      role="button"
+                      tabIndex={0}
+                    >
                       {product.thumbnail_url ? (
                         <img
                           src={product.thumbnail_url}
-                          alt={product.name || 'Product'}
+                          alt={product.name}
                           className="w-full h-full object-cover"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).style.display = 'none';
-                          }}
                         />
                       ) : (
                         <Package className="w-12 h-12 text-blue-600" />
@@ -520,7 +494,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     </div>
 
                     <div className="p-6">
-                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-1">
+                      {/* ✅ الضغط على الاسم يفتح المنتج */}
+                      <h3
+                        className="text-lg font-bold text-gray-900 mb-2 line-clamp-1 cursor-pointer hover:text-blue-600"
+                        onClick={() => openProduct(product.id)}
+                      >
                         {product.name || 'بدون اسم'}
                       </h3>
 
@@ -545,15 +523,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         </span>
                       </div>
 
-                      {/* ✅ زر عرض المنتج */}
-                      <button
-                        onClick={() => onNavigate(`product-${product.id}`)}
-                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors mb-2"
-                      >
-                        عرض المنتج
-                      </button>
-
-                      {/* تعديل المنتج */}
+                      {/* ✅ حذفنا زر "عرض المنتج" بالكامل */}
                       <button
                         onClick={() => setEditingProductId(product.id)}
                         className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
@@ -669,15 +639,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <div className="space-y-3 mb-6">
                   <div className="flex items-center justify-between">
                     <span className="text-blue-100">المسوقين النشطين</span>
-                    <span className="text-2xl font-bold">{affiliateTotals.activeAffiliates}</span>
+                    <span className="text-2xl font-bold">{affiliateLinks.length}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-blue-100">إجمالي النقرات</span>
-                    <span className="text-2xl font-bold">{affiliateTotals.totalClicks}</span>
+                    <span className="text-2xl font-bold">
+                      {affiliateLinks.reduce((sum, link) => sum + (link.clicks_count || 0), 0)}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-blue-100">المبيعات من المسوقين</span>
-                    <span className="text-2xl font-bold">{affiliateTotals.totalSales}</span>
+                    <span className="text-2xl font-bold">
+                      {affiliateLinks.reduce((sum, link) => sum + (link.sales_count || 0), 0)}
+                    </span>
                   </div>
                 </div>
 
@@ -749,7 +723,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                               {link.affiliate?.name || 'مسوق'}
                             </p>
                             <p className="text-sm text-gray-600">
-                              {product?.name || 'منتج'} - {safeCode(link.code) || '—'}
+                              {product?.name || 'منتج'} - {link.code}
                             </p>
                           </div>
                         </div>
