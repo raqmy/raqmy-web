@@ -1,13 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { TrendingUp, Shield, Zap, Star, ArrowLeft, Download } from 'lucide-react';
+import { Star, ArrowLeft, Download } from 'lucide-react';
 import { supabase, Product } from '../lib/supabase';
 
 interface HomePageProps {
   onNavigate: (page: string) => void;
 }
 
+type ProductCard = Product & {
+  thumbnail_url?: string | null;
+  display_name?: string;
+};
+
 export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
-  const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
+  const [featuredProducts, setFeaturedProducts] = useState<ProductCard[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -27,48 +32,42 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       if (error) {
         console.error('Error fetching featured products:', error);
         setFeaturedProducts([]);
-        setLoading(false);
         return;
       }
 
       if (!data || data.length === 0) {
         setFeaturedProducts([]);
-        setLoading(false);
         return;
       }
 
-      const enrichedProducts = await Promise.all(
-        data.map(async (product: any) => {
-          let store = null;
-          let seller = null;
+      // ✅ جيب صور المنتجات
+      const productIds = data.map((p: any) => p.id).filter(Boolean);
 
-          if (product.store_id) {
-            const { data: storeData } = await supabase
-              .from('stores')
-              .select('id, name, slug, category')
-              .eq('id', product.store_id)
-              .maybeSingle();
-            store = storeData;
-          }
+      const { data: imagesData, error: imagesError } = await supabase
+        .from('product_images')
+        .select('product_id, image_url, is_primary, display_order')
+        .in('product_id', productIds)
+        .order('is_primary', { ascending: false })
+        .order('display_order', { ascending: true });
 
-          if (product.user_id) {
-            const { data: userData } = await supabase
-              .from('users_profile')
-              .select('id, name')
-              .eq('id', product.user_id)
-              .maybeSingle();
-            seller = userData;
-          }
+      if (imagesError) {
+        console.warn('⚠️ Could not fetch product_images:', imagesError);
+      }
 
-          return {
-            ...product,
-            store,
-            seller,
-          };
-        })
-      );
+      const imageMap = new Map<string, string>();
+      (imagesData || []).forEach((img: any) => {
+        if (!imageMap.has(img.product_id) && img.image_url) {
+          imageMap.set(img.product_id, img.image_url);
+        }
+      });
 
-      setFeaturedProducts(enrichedProducts as any);
+      const merged = data.map((p: any) => ({
+        ...p,
+        display_name: p.title ?? p.name ?? 'منتج رقمي',
+        thumbnail_url: p.thumbnail_url ?? imageMap.get(p.id) ?? null,
+      }));
+
+      setFeaturedProducts(merged as any);
     } catch (error) {
       console.error('Error fetching featured products:', error);
       setFeaturedProducts([]);
@@ -130,43 +129,46 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {featuredProducts.map((product) => (
-                <div
-                  key={product.id}
-                  className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow cursor-pointer"
-                  onClick={() => onNavigate(`product-${product.id}`)}
-                >
-                  <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                    {product.thumbnail_url ? (
-                      <img
-                        src={product.thumbnail_url}
-                        alt={product.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <Download className="w-16 h-16 text-blue-600" />
-                    )}
-                  </div>
-                  <div className="p-6">
-                    <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-1">
-                      {product.name}
-                    </h3>
-                    <p className="text-gray-600 mb-4 line-clamp-2">
-                      {product.description || 'منتج رقمي عالي الجودة'}
-                    </p>
-                    <div className="flex items-center justify-between">
-                      <div className="text-2xl font-bold text-blue-600">
-                        {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
-                      </div>
-                      <div className="flex items-center gap-1 text-sm text-gray-500">
-                        <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                        <span>4.8</span>
-                      </div>
+            {featuredProducts.map((product: any) => (
+              <div
+                key={product.id}
+                className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow cursor-pointer"
+                onClick={() => onNavigate(`product-${product.id}`)}
+              >
+                <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+                  {product.thumbnail_url ? (
+                    <img
+                      src={product.thumbnail_url}
+                      alt={product.display_name || product.title || product.name}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <Download className="w-16 h-16 text-blue-600" />
+                  )}
+                </div>
+
+                <div className="p-6">
+                  <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-1">
+                    {product.display_name || product.title || product.name}
+                  </h3>
+                  <p className="text-gray-600 mb-4 line-clamp-2">
+                    {product.description || 'منتج رقمي عالي الجودة'}
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
+                    </div>
+                    <div className="flex items-center gap-1 text-sm text-gray-500">
+                      <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                      <span>4.8</span>
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
+
+              </div>
+            ))}
+          </div>
 
           <div className="text-center mt-12 md:hidden">
             <button
