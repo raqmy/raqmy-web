@@ -14,6 +14,7 @@ import {
   Users,
   Link as LinkIcon,
   Check,
+  Download,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Store, Product } from '../lib/supabase';
@@ -47,6 +48,7 @@ type NormalizedProduct = Product & {
   views_count: number;
   sales_count: number;
   currency: string;
+  thumbnail_url?: string | null; // ✅ مهم لعرض الصورة
 };
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
@@ -88,6 +90,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     // العملة يمكن ما تكون موجودة في السكيما الحالية
     const currency = row?.currency ?? 'SAR';
 
+    // بعض الجداول قد يكون فيها thumbnail_url مباشرة
+    const thumbnail_url = row?.thumbnail_url ?? null;
+
     return {
       ...(row as Product),
       name,
@@ -95,6 +100,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       views_count,
       sales_count,
       currency,
+      thumbnail_url,
     } as NormalizedProduct;
   };
 
@@ -115,15 +121,41 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         .select('*')
         .or(`user_id.eq.${profile.id},merchant_id.eq.${profile.id}`);
 
-      const normalizedProducts = (rawProductsData || []).map(normalizeProduct);
+      let normalizedProducts = (rawProductsData || []).map(normalizeProduct);
+
+      // ✅ جلب صور المنتجات من product_images وربطها بالمنتجات (للداشبورد)
+      const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
+
+      if (productIds.length > 0) {
+        const { data: imagesData, error: imagesError } = await supabase
+          .from('product_images')
+          .select('product_id, url, is_primary, created_at')
+          .in('product_id', productIds)
+          .order('is_primary', { ascending: false })
+          .order('created_at', { ascending: true });
+
+        if (!imagesError && imagesData && imagesData.length > 0) {
+          // خذ أفضل صورة لكل منتج: primary أولاً، وإلا أول صورة
+          const bestImageByProduct = new Map<string, string>();
+          for (const img of imagesData as any[]) {
+            if (!img?.product_id || !img?.url) continue;
+            if (!bestImageByProduct.has(img.product_id)) {
+              bestImageByProduct.set(img.product_id, img.url);
+            }
+          }
+
+          normalizedProducts = normalizedProducts.map((p) => ({
+            ...p,
+            thumbnail_url: p.thumbnail_url ?? bestImageByProduct.get(p.id as any) ?? null,
+          }));
+        }
+      }
 
       const { data: ordersData } = await supabase
         .from('orders')
         .select('seller_amount, status')
         .eq('seller_id', profile.id)
         .eq('status', 'completed');
-
-      const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
 
       // ✅ FIX: لا تسوي in() على قائمة فاضية
       let affiliateLinksData: any[] = [];
@@ -436,7 +468,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 {products.map((product) => (
                   <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
                     <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                      <Package className="w-12 h-12 text-blue-600" />
+                      {product.thumbnail_url ? (
+                        <img
+                          src={product.thumbnail_url}
+                          alt={product.name || 'Product'}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Download className="w-12 h-12 text-blue-600" />
+                      )}
                     </div>
 
                     <div className="p-6">
@@ -660,9 +700,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                             <LinkIcon className="w-5 h-5 text-blue-600" />
                           </div>
                           <div>
-                            <p className="font-semibold text-gray-900">
-                              {link.affiliate?.name || 'مسوق'}
-                            </p>
+                            <p className="font-semibold text-gray-900">{link.affiliate?.name || 'مسوق'}</p>
                             <p className="text-sm text-gray-600">
                               {product?.name || 'منتج'} - {link.code}
                             </p>
@@ -670,9 +708,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         </div>
 
                         <div className="text-right">
-                          <p className="text-sm font-semibold text-gray-900">
-                            {link.clicks_count || 0} نقرة
-                          </p>
+                          <p className="text-sm font-semibold text-gray-900">{link.clicks_count || 0} نقرة</p>
                           <p className="text-sm text-green-600">{link.sales_count || 0} مبيعات</p>
                         </div>
                       </div>
