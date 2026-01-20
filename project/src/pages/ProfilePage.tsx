@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   User,
   Mail,
@@ -23,6 +23,11 @@ interface ProfilePageProps {
   onNavigate: (page: string) => void;
 }
 
+type ProfileStats = {
+  favorites_count: number;
+  viewed_products_count: number;
+};
+
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const { user, profile, updateProfile } = useAuth();
   const [activeTab, setActiveTab] = useState<
@@ -31,6 +36,49 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [name, setName] = useState(profile?.name || '');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+
+  // ✅ NEW: stats
+  const [stats, setStats] = useState<ProfileStats>({
+    favorites_count: 0,
+    viewed_products_count: 0,
+  });
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  const fetchProfileStats = async () => {
+    if (!user) return;
+
+    setStatsLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('get_user_profile_stats', {
+        p_user_id: user.id,
+      });
+
+      if (error) {
+        console.error('Error fetching profile stats:', error);
+        return;
+      }
+
+      // Supabase RPC returning "table" غالباً يرجّع array
+      const row = Array.isArray(data) ? data?.[0] : data;
+
+      setStats({
+        favorites_count: Number(row?.favorites_count ?? 0),
+        viewed_products_count: Number(row?.viewed_products_count ?? 0),
+      });
+    } catch (e) {
+      console.error('Error fetching profile stats:', e);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  // ✅ Fetch stats when page loads (and after login)
+  useEffect(() => {
+    if (user?.id) {
+      fetchProfileStats();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const handleUpdateProfile = async () => {
     setLoading(true);
@@ -281,7 +329,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
             <div className="bg-white rounded-xl shadow-sm p-8">
               {activeTab === 'overview' && (
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">نظرة عامة</h2>
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-bold text-gray-900">نظرة عامة</h2>
+                    <button
+                      onClick={fetchProfileStats}
+                      disabled={statsLoading}
+                      className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {statsLoading ? 'جاري التحديث...' : 'تحديث الأرقام'}
+                    </button>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div className="bg-blue-50 rounded-xl p-6">
                       <div className="flex items-center justify-between mb-4">
@@ -299,7 +357,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <Heart className="w-6 h-6 text-purple-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900 mb-1">0</div>
+                      <div className="text-3xl font-bold text-gray-900 mb-1">
+                        {stats.favorites_count}
+                      </div>
                       <p className="text-sm text-gray-600">المنتجات المفضلة</p>
                     </div>
 
@@ -309,7 +369,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <Eye className="w-6 h-6 text-green-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900 mb-1">0</div>
+                      <div className="text-3xl font-bold text-gray-900 mb-1">
+                        {stats.viewed_products_count}
+                      </div>
                       <p className="text-sm text-gray-600">المنتجات المشاهدة</p>
                     </div>
                   </div>
