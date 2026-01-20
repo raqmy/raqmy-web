@@ -60,15 +60,18 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   useEffect(() => {
     fetchProduct();
     fetchProductImages();
+    // ✅ زيادة المشاهدات بمجرد فتح صفحة المنتج (حتى لو الزائر غير مسجل)
+    incrementViewCount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
 
   useEffect(() => {
     if (user && productId) {
-      recordView();
       checkFavoriteStatus();
       checkPurchaseStatus();
       fetchAttachments();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, productId]);
 
   const fetchProduct = async () => {
@@ -124,6 +127,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       // Check if current user is the owner
       if (user && data.user_id === user.id) {
         setIsOwner(true);
+      } else {
+        setIsOwner(false);
       }
     } catch (error) {
       console.error('Error fetching product:', error);
@@ -186,6 +191,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           (item: any) => item.order?.status === 'completed' || item.order?.status === 'delivered'
         );
         setHasPurchased(hasCompletedOrder);
+      } else {
+        setHasPurchased(false);
       }
     } catch (error) {
       console.error('Error checking purchase status:', error);
@@ -209,13 +216,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         .maybeSingle();
 
       if (!existingItem) {
-        await supabase
-          .from('cart_items')
-          .insert({
-            user_id: user.id,
-            product_id: productId,
-            quantity: 1
-          });
+        await supabase.from('cart_items').insert({
+          user_id: user.id,
+          product_id: productId,
+          quantity: 1,
+        });
       }
 
       onNavigate('checkout');
@@ -226,27 +231,28 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     }
   };
 
-  const recordView = async () => {
-    if (!user || !productId) return;
+  // ✅ NEW: زيادة المشاهدات باستخدام الدالة اللي سويتها increment_product_view
+  const incrementViewCount = async () => {
+    if (!productId) return;
 
     try {
-      // تسجيل المشاهدة باستخدام الدالة المساعدة
-      const { error } = await supabase.rpc('record_product_view', {
-        p_user_id: user.id,
+      const { error } = await supabase.rpc('increment_product_view', {
         p_product_id: productId,
       });
 
       if (error) {
-        console.error('Error recording view:', error);
+        console.error('Error incrementing view:', error);
+        return;
       }
 
-      // تحديث عداد المشاهدات
-      await supabase
-        .from('products')
-        .update({ views_count: (product?.views_count || 0) + 1 })
-        .eq('id', productId);
+      // تحديث الرقم في الواجهة مباشرة (بدون جلب جديد)
+      setProduct((prev) => {
+        if (!prev) return prev as any;
+        const current = Number((prev as any).views_count ?? 0) || 0;
+        return { ...prev, views_count: current + 1 } as any;
+      });
     } catch (error) {
-      console.error('Error recording view:', error);
+      console.error('Error incrementing view:', error);
     }
   };
 
@@ -255,14 +261,20 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
     try {
       const { data, error } = await supabase
+        .from;
+      // NOTE: تركت منطقك زي ما هو (favorites + toggle_favorite)
+      // إذا لاحقاً غيرنا لنظام product_favorites بنعدله معك.
+      const { data: favData, error: favError } = await supabase
         .from('favorites')
         .select('id')
         .eq('user_id', user.id)
         .eq('product_id', productId)
         .maybeSingle();
 
-      if (!error && data) {
+      if (!favError && favData) {
         setIsFavorite(true);
+      } else {
+        setIsFavorite(false);
       }
     } catch (error) {
       console.error('Error checking favorite status:', error);
@@ -286,7 +298,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       if (error) throw error;
 
       // data يحتوي على true إذا تمت الإضافة، false إذا تم الحذف
-      setIsFavorite(data);
+      setIsFavorite(!!data);
     } catch (error) {
       console.error('Error toggling favorite:', error);
       alert('حدث خطأ أثناء تحديث المفضلة');
@@ -315,13 +327,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           .update({ quantity: existingItem.quantity + 1 })
           .eq('id', existingItem.id);
       } else {
-        await supabase
-          .from('cart_items')
-          .insert({
-            user_id: user.id,
-            product_id: productId,
-            quantity: 1
-          });
+        await supabase.from('cart_items').insert({
+          user_id: user.id,
+          product_id: productId,
+          quantity: 1,
+        });
       }
 
       alert('تم إضافة المنتج إلى السلة بنجاح');
@@ -445,7 +455,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <div className="text-gray-500">|</div>
               <div className="text-gray-600">{product.sales_count} مبيعات</div>
               <div className="text-gray-500">|</div>
-              <div className="text-gray-600">{product.views_count} مشاهدة</div>
+              <div className="text-gray-600">{(product as any).views_count ?? 0} مشاهدة</div>
             </div>
 
             <div className="mb-6">
@@ -454,7 +464,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </div>
               {product.is_subscription && (
                 <span className="text-gray-500">
-                  / {product.subscription_period === 'monthly' ? 'شهرياً' : product.subscription_period === 'yearly' ? 'سنوياً' : 'أسبوعياً'}
+                  /{' '}
+                  {product.subscription_period === 'monthly'
+                    ? 'شهرياً'
+                    : product.subscription_period === 'yearly'
+                    ? 'سنوياً'
+                    : 'أسبوعياً'}
                 </span>
               )}
             </div>
@@ -510,7 +525,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <div className="flex items-center gap-2 text-green-700">
                 <CheckCircle className="w-5 h-5" />
                 <span className="font-medium">
-                  {product.delivery_method === 'instant' ? 'تسليم فوري بعد الدفع' : 'يتم الإرسال بالبريد الإلكتروني'}
+                  {product.delivery_method === 'instant'
+                    ? 'تسليم فوري بعد الدفع'
+                    : 'يتم الإرسال بالبريد الإلكتروني'}
                 </span>
               </div>
             </div>
@@ -528,8 +545,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <div className="mt-6 p-6 bg-blue-50 border border-blue-200 rounded-lg">
                 <h3 className="text-lg font-bold text-blue-900 mb-2">منتج اشتراك</h3>
                 <p className="text-blue-800">
-                  هذا المنتج يتطلب اشتراك {product.subscription_period === 'monthly' ? 'شهري' : product.subscription_period === 'yearly' ? 'سنوي' : 'أسبوعي'}.
-                  سيتم تجديد الاشتراك تلقائياً ما لم تقم بإلغائه.
+                  هذا المنتج يتطلب اشتراك{' '}
+                  {product.subscription_period === 'monthly'
+                    ? 'شهري'
+                    : product.subscription_period === 'yearly'
+                    ? 'سنوي'
+                    : 'أسبوعي'}
+                  . سيتم تجديد الاشتراك تلقائياً ما لم تقم بإلغائه.
                 </p>
               </div>
             )}
@@ -554,8 +576,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-gray-900 truncate">{attachment.title}</p>
                         <p className="text-xs text-gray-500">
-                          {attachment.attachment_type === 'text' ? 'محتوى نصي' : 'ملف قابل للتحميل'}
-                          {attachment.file_size && ` • ${(attachment.file_size / 1024 / 1024).toFixed(2)} MB`}
+                          {attachment.attachment_type === 'text'
+                            ? 'محتوى نصي'
+                            : 'ملف قابل للتحميل'}
+                          {attachment.file_size &&
+                            ` • ${(attachment.file_size / 1024 / 1024).toFixed(2)} MB`}
                         </p>
                       </div>
                       {attachment.attachment_type === 'text' ? (
@@ -584,9 +609,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <div className="bg-white rounded-xl p-6 shadow-sm">
                 <div className="flex items-center gap-3 text-gray-600">
                   <Lock className="w-5 h-5" />
-                  <p className="text-sm">
-                    سيتم إتاحة المرفقات بعد إتمام عملية الشراء
-                  </p>
+                  <p className="text-sm">سيتم إتاحة المرفقات بعد إتمام عملية الشراء</p>
                 </div>
               </div>
             )}
