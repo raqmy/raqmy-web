@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Heart, Trash2, ShoppingCart, ArrowLeft } from 'lucide-react';
 import { supabase, Product } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,24 +12,21 @@ interface FavoriteProduct extends Product {
   added_at: string;
 }
 
+type ProductImageRow = {
+  id: string;
+  product_id: string;
+  image_url: string;
+  is_primary: boolean;
+  display_order: number;
+};
+
 export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
   const { user } = useAuth();
   const [favorites, setFavorites] = useState<FavoriteProduct[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ✅ حماية الاسم من undefined/null
-  const getProductName = (product: Partial<Product> | null | undefined) => {
-    const raw = (product as any)?.name;
-    if (raw === null || raw === undefined) return 'بدون اسم';
-    const name = String(raw).trim();
-    return name.length > 0 ? name : 'بدون اسم';
-  };
-
-  // ✅ حرف أول آمن
-  const getFirstChar = (product: Partial<Product> | null | undefined) => {
-    const name = getProductName(product);
-    return name.charAt(0) || '؟';
-  };
+  // صور المنتجات (primary) حسب product_id
+  const [productImageMap, setProductImageMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (user) {
@@ -37,11 +34,20 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
     }
   }, [user]);
 
+  // بعد ما تجيب favorites، جيب صورها من product_images
+  useEffect(() => {
+    if (favorites.length > 0) {
+      fetchFavoriteImages(favorites.map((p) => p.id));
+    } else {
+      setProductImageMap({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favorites]);
+
   const loadFavorites = async () => {
     if (!user) return;
 
     setLoading(true);
-
     try {
       const { data, error } = await supabase
         .from('favorites')
@@ -58,34 +64,63 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
 
       if (error) throw error;
 
-      // ✅ لو العلاقة رجعت null (منتج محذوف / مشكلة صلاحيات) نتجاهله
       const favoriteProducts =
-        data
-          ?.map((fav: any) => {
-            if (!fav?.products) return null;
-            return {
-              ...fav.products,
-              favorite_id: fav.id,
-              added_at: fav.created_at,
-            } as FavoriteProduct;
-          })
-          .filter(Boolean) || [];
+        data?.map((fav: any) => ({
+          ...(fav.products || {}),
+          favorite_id: fav.id,
+          added_at: fav.created_at,
+        })) || [];
 
-      setFavorites(favoriteProducts as FavoriteProduct[]);
+      // فلترة احتياطية: لو products رجعت null لأي سبب
+      setFavorites(favoriteProducts.filter((p: any) => p && p.id));
     } catch (error) {
       console.error('Error loading favorites:', error);
+      setFavorites([]);
+      alert('حدث خطأ أثناء تحميل قائمة المفضلة');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchFavoriteImages = async (productIds: string[]) => {
+    try {
+      const uniqueIds = Array.from(new Set(productIds)).filter(Boolean);
+      if (uniqueIds.length === 0) return;
+
+      const { data, error } = await supabase
+        .from('product_images')
+        .select('id, product_id, image_url, is_primary, display_order')
+        .in('product_id', uniqueIds)
+        .order('is_primary', { ascending: false })
+        .order('display_order', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching favorite images:', error);
+        return;
+      }
+
+      const rows = (data || []) as ProductImageRow[];
+      const map: Record<string, string> = {};
+
+      // نأخذ أول صورة (primary أولاً ثم حسب display_order)
+      for (const row of rows) {
+        if (!map[row.product_id] && row.image_url) {
+          map[row.product_id] = row.image_url;
+        }
+      }
+
+      setProductImageMap(map);
+    } catch (err) {
+      console.error('fetchFavoriteImages error:', err);
     }
   };
 
   const handleRemoveFavorite = async (favoriteId: string) => {
     try {
       const { error } = await supabase.from('favorites').delete().eq('id', favoriteId);
-
       if (error) throw error;
 
-      setFavorites(favorites.filter((f) => f.favorite_id !== favoriteId));
+      setFavorites((prev) => prev.filter((f) => f.favorite_id !== favoriteId));
     } catch (error) {
       console.error('Error removing favorite:', error);
       alert('حدث خطأ أثناء إزالة المنتج من المفضلة');
@@ -106,8 +141,8 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
       if (existingItem) {
         await supabase
           .from('cart_items')
-          .update({ quantity: existingItem.quantity + 1 })
-          .eq('id', existingItem.id);
+          .update({ quantity: (existingItem as any).quantity + 1 })
+          .eq('id', (existingItem as any).id);
       } else {
         await supabase.from('cart_items').insert({
           user_id: user.id,
@@ -121,6 +156,21 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
       console.error('Error adding to cart:', error);
       alert('حدث خطأ أثناء إضافة المنتج للسلة');
     }
+  };
+
+  const getProductTitle = (product: any) => {
+    // يدعم name أو title
+    return (product?.name ?? product?.title ?? '').toString().trim();
+  };
+
+  const getCurrencyLabel = (currency?: string) => {
+    const c = (currency || 'SAR').toString();
+    return c === 'SAR' ? 'ريال' : c;
+  };
+
+  const getInitialLetter = (text: string) => {
+    const t = (text || '').trim();
+    return t.length > 0 ? t.charAt(0) : '؟';
   };
 
   if (!user) {
@@ -189,8 +239,12 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {favorites.map((product) => {
-              const name = getProductName(product);
+            {favorites.map((product: any) => {
+              const title = getProductTitle(product);
+              const displayTitle = title || 'بدون اسم';
+              const imgUrl =
+                productImageMap[product.id] || product.thumbnail_url || product.image_url || '';
+
               return (
                 <div
                   key={product.favorite_id}
@@ -198,29 +252,30 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
                 >
                   <div onClick={() => onNavigate(`product-${product.id}`)} className="cursor-pointer">
                     <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                      {product.thumbnail_url ? (
-                        <img
-                          src={product.thumbnail_url}
-                          alt={name}
-                          className="w-full h-full object-cover"
-                        />
+                      {imgUrl ? (
+                        <img src={imgUrl} alt={displayTitle} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="text-blue-600 text-4xl font-bold">{getFirstChar(product)}</div>
+                        <div className="text-blue-600 text-4xl font-bold">
+                          {getInitialLetter(displayTitle)}
+                        </div>
                       )}
                     </div>
+
                     <div className="p-4">
-                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">{name}</h3>
+                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">
+                        {displayTitle}
+                      </h3>
+
                       <p className="text-gray-600 text-sm mb-3 line-clamp-2">
-                        {product.description || ''}
+                        {(product.description || '').toString() || 'لا يوجد وصف'}
                       </p>
+
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-xl font-bold text-blue-600">
-                          {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
+                          {product.price} {getCurrencyLabel(product.currency)}
                         </span>
                         <span className="text-xs text-gray-500">
-                          {product.added_at
-                            ? new Date(product.added_at).toLocaleDateString('ar-SA')
-                            : ''}
+                          {new Date(product.added_at).toLocaleDateString('ar-SA')}
                         </span>
                       </div>
                     </div>
