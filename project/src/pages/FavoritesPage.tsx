@@ -17,6 +17,20 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
   const [favorites, setFavorites] = useState<FavoriteProduct[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // ✅ حماية الاسم من undefined/null
+  const getProductName = (product: Partial<Product> | null | undefined) => {
+    const raw = (product as any)?.name;
+    if (raw === null || raw === undefined) return 'بدون اسم';
+    const name = String(raw).trim();
+    return name.length > 0 ? name : 'بدون اسم';
+  };
+
+  // ✅ حرف أول آمن
+  const getFirstChar = (product: Partial<Product> | null | undefined) => {
+    const name = getProductName(product);
+    return name.charAt(0) || '؟';
+  };
+
   useEffect(() => {
     if (user) {
       loadFavorites();
@@ -26,27 +40,38 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
   const loadFavorites = async () => {
     if (!user) return;
 
+    setLoading(true);
+
     try {
       const { data, error } = await supabase
         .from('favorites')
-        .select(`
+        .select(
+          `
           id,
           created_at,
           product_id,
           products (*)
-        `)
+        `
+        )
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      const favoriteProducts = data?.map((fav: any) => ({
-        ...fav.products,
-        favorite_id: fav.id,
-        added_at: fav.created_at,
-      })) || [];
+      // ✅ لو العلاقة رجعت null (منتج محذوف / مشكلة صلاحيات) نتجاهله
+      const favoriteProducts =
+        data
+          ?.map((fav: any) => {
+            if (!fav?.products) return null;
+            return {
+              ...fav.products,
+              favorite_id: fav.id,
+              added_at: fav.created_at,
+            } as FavoriteProduct;
+          })
+          .filter(Boolean) || [];
 
-      setFavorites(favoriteProducts);
+      setFavorites(favoriteProducts as FavoriteProduct[]);
     } catch (error) {
       console.error('Error loading favorites:', error);
     } finally {
@@ -56,10 +81,7 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
 
   const handleRemoveFavorite = async (favoriteId: string) => {
     try {
-      const { error } = await supabase
-        .from('favorites')
-        .delete()
-        .eq('id', favoriteId);
+      const { error } = await supabase.from('favorites').delete().eq('id', favoriteId);
 
       if (error) throw error;
 
@@ -167,64 +189,62 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {favorites.map((product) => (
-              <div
-                key={product.favorite_id}
-                className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow"
-              >
+            {favorites.map((product) => {
+              const name = getProductName(product);
+              return (
                 <div
-                  onClick={() => onNavigate(`product-${product.id}`)}
-                  className="cursor-pointer"
+                  key={product.favorite_id}
+                  className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow"
                 >
-                  <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                    {product.thumbnail_url ? (
-                      <img
-                        src={product.thumbnail_url}
-                        alt={product.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="text-blue-600 text-4xl font-bold">
-                        {product.name.charAt(0)}
+                  <div onClick={() => onNavigate(`product-${product.id}`)} className="cursor-pointer">
+                    <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+                      {product.thumbnail_url ? (
+                        <img
+                          src={product.thumbnail_url}
+                          alt={name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="text-blue-600 text-4xl font-bold">{getFirstChar(product)}</div>
+                      )}
+                    </div>
+                    <div className="p-4">
+                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">{name}</h3>
+                      <p className="text-gray-600 text-sm mb-3 line-clamp-2">
+                        {product.description || ''}
+                      </p>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xl font-bold text-blue-600">
+                          {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {product.added_at
+                            ? new Date(product.added_at).toLocaleDateString('ar-SA')
+                            : ''}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                  <div className="p-4">
-                    <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">
-                      {product.name}
-                    </h3>
-                    <p className="text-gray-600 text-sm mb-3 line-clamp-2">
-                      {product.description}
-                    </p>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xl font-bold text-blue-600">
-                        {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {new Date(product.added_at).toLocaleDateString('ar-SA')}
-                      </span>
                     </div>
                   </div>
-                </div>
 
-                <div className="p-4 pt-0 flex gap-2">
-                  <button
-                    onClick={() => handleAddToCart(product.id)}
-                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                  >
-                    <ShoppingCart className="w-4 h-4" />
-                    <span>أضف للسلة</span>
-                  </button>
-                  <button
-                    onClick={() => handleRemoveFavorite(product.favorite_id)}
-                    className="px-3 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-                    title="إزالة من المفضلة"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="p-4 pt-0 flex gap-2">
+                    <button
+                      onClick={() => handleAddToCart(product.id)}
+                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                    >
+                      <ShoppingCart className="w-4 h-4" />
+                      <span>أضف للسلة</span>
+                    </button>
+                    <button
+                      onClick={() => handleRemoveFavorite(product.favorite_id)}
+                      className="px-3 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                      title="إزالة من المفضلة"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
