@@ -4,8 +4,8 @@ import { supabase } from '../../lib/supabase';
 
 export interface ProductImage {
   id?: string;
-  image_url: string; // ✅ Supabase public URL (يُحفظ في DB)
-  preview_url?: string; // 👀 للعرض فقط داخل الصفحة
+  image_url: string; // ✅ الرابط العام (Public URL) — يُحفظ في DB ويُستخدم دائماً
+  preview_url?: string; // 👀 مؤقت للعرض قبل الحفظ فقط
   is_primary: boolean;
   display_order: number;
   file?: File;
@@ -25,7 +25,7 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // 🔹 رفع الصورة إلى Supabase Storage وإرجاع الرابط العام
+  // 🔹 رفع الصورة إلى Supabase Storage وإرجاع الرابط العام (Public URL فقط)
   const uploadImageToStorage = async (file: File): Promise<string> => {
     const ext = file.name.split('.').pop();
     const fileName = `${crypto.randomUUID()}.${ext}`;
@@ -43,6 +43,7 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
       throw error;
     }
 
+    // ✅ الحصول على الرابط العام الدائم
     const { data } = supabase.storage
       .from('product-images')
       .getPublicUrl(filePath);
@@ -70,8 +71,8 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
         const publicUrl = await uploadImageToStorage(file);
 
         uploadedImages.push({
-          image_url: publicUrl, // ✅ يُحفظ في قاعدة البيانات
-          preview_url: URL.createObjectURL(file), // 👀 للعرض فقط
+          image_url: publicUrl, // ✅ الرابط العام (يُستخدم بعد الحفظ)
+          preview_url: URL.createObjectURL(file), // 👀 مؤقت قبل الحفظ فقط
           is_primary: images.length === 0 && i === 0,
           display_order: images.length + i,
         });
@@ -185,8 +186,9 @@ export const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
                 key={index}
                 className="relative group aspect-square bg-gray-100 rounded-lg overflow-hidden border-2 border-gray-200 hover:border-blue-500 transition-colors"
               >
+                {/* ✅ نعرض الرابط العام دائماً */}
                 <img
-                  src={image.preview_url || image.image_url}
+                  src={image.image_url}
                   alt={`صورة المنتج ${index + 1}`}
                   className="w-full h-full object-cover"
                 />
