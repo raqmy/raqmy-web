@@ -34,6 +34,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     password: ''
   });
 
+  // ملاحظة: هذه البيانات ما راح تُحفظ في orders حالياً لأن أعمدتها غير موجودة بجدول orders عندك
   const [formData, setFormData] = useState({
     shippingAddress: '',
     notes: ''
@@ -90,7 +91,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    // تحقق بسيط لبيانات الدفع (Mock)
+    // تحقق بسيط للدفع (واجهة فقط)
     if (paymentMethod === 'card') {
       if (!cardData.cardNumber || !cardData.expiryDate || !cardData.cvv || !cardData.cardholderName) {
         setError('الرجاء ملء جميع بيانات البطاقة');
@@ -110,36 +111,53 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setProcessing(true);
 
     try {
-      /**
-       * ✅ الحل الصحيح عندك:
-       * بدل insert يدوي على orders (فيه أعمدة غير موجودة مثل customer_email)
-       * نستدعي الدالة اللي سويتها في Supabase:
-       * public.create_order_from_cart()
-       *
-       * المفترض ترجع UUID للطلب (order_id).
-       */
-      const { data, error: rpcError } = await supabase.rpc('create_order_from_cart');
+      const totalAmount = calculateTotal();
 
-      if (rpcError) throw rpcError;
+      // محاولة استخراج merchant_id / seller_id من المنتج
+      // (حسب جدول orders عندك فيه customer_id + merchant_id + seller_id)
+      const firstProduct: any = cartItems[0]?.product;
+      const sellerId = firstProduct?.user_id ?? firstProduct?.seller_id ?? null;
+      const merchantId = firstProduct?.merchant_id ?? sellerId ?? null;
 
-      // بعض الإعدادات ترجع القيمة مباشرة، وبعضها ترجع { ... } — نخليها مرنة:
-      const orderId =
-        (typeof data === 'string' && data) ||
-        (data?.id as string) ||
-        (data?.order_id as string) ||
-        (data?.new_order_id as string);
+      // ✅ هنا التعديل الأهم:
+      // لا ترسل user_id ولا customer_email ولا customer_name ولا shipping_address ولا notes ولا payment_method
+      // لأن جدول orders عندك (حسب الخطأ) ما يحتويها
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .insert({
+          customer_id: profile!.id,
+          merchant_id: merchantId,
+          seller_id: sellerId,
+          total_amount: totalAmount,
+          status: 'pending'
+        })
+        .select()
+        .single();
 
-      if (!orderId) {
-        throw new Error('Order ID not returned from create_order_from_cart');
-      }
+      if (orderError) throw orderError;
 
-      // تحديث السلة محليًا (اختياري لكن مفيد)
-      setCartItems([]);
+      // ✅ بناء order_items بأعمدة موجودة فقط: order_id, product_id, quantity, price
+      const orderItems = cartItems.map(item => ({
+        order_id: order.id,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        price: item.product?.price || 0
+      }));
 
-      // انتقل لصفحة الدفع
-      onNavigate(`payment-${orderId}`);
-    } catch (err: any) {
-      console.error('Error creating order:', err);
+      const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
+      if (itemsError) throw itemsError;
+
+      // تفريغ السلة
+      const { error: clearCartError } = await supabase
+        .from('cart_items')
+        .delete()
+        .eq('user_id', profile!.id);
+
+      if (clearCartError) throw clearCartError;
+
+      onNavigate(`payment-${order.id}`);
+    } catch (error: any) {
+      console.error('Error creating order:', error);
       setError('حدث خطأ أثناء إنشاء الطلب. الرجاء المحاولة مرة أخرى.');
     } finally {
       setProcessing(false);
@@ -150,8 +168,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue- hookup: this is from old; keep consistent
-          border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-600">جاري التحميل...</p>
         </div>
       </div>
@@ -360,24 +377,28 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                 <h3 className="text-xl font-bold text-gray-900 mb-6">ملخص الطلب</h3>
 
                 <div className="space-y-4 mb-6">
-                  {cartItems.map((item) => (
-                    <div key={item.id} className="flex gap-3">
-                      <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Package className="w-8 h-8 text-blue-600" />
+                  {cartItems.map((item) => {
+                    const anyProduct: any = item.product;
+                    const productTitle = anyProduct?.title ?? anyProduct?.name ?? '';
+                    return (
+                      <div key={item.id} className="flex gap-3">
+                        <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <Package className="w-8 h-8 text-blue-600" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-gray-900 text-sm line-clamp-1">
+                            {productTitle}
+                          </h4>
+                          <p className="text-sm text-gray-600">
+                            {item.quantity} × {item.product?.price} {item.product?.currency}
+                          </p>
+                          <p className="text-sm font-bold text-blue-600 mt-1">
+                            {((item.product?.price || 0) * item.quantity).toFixed(2)} {item.product?.currency}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-gray-900 text-sm line-clamp-1">
-                          {(item.product as any)?.title ?? (item.product as any)?.name ?? 'منتج'}
-                        </h4>
-                        <p className="text-sm text-gray-600">
-                          {item.quantity} × {item.product?.price} {item.product?.currency}
-                        </p>
-                        <p className="text-sm font-bold text-blue-600 mt-1">
-                          {((item.product?.price || 0) * item.quantity).toFixed(2)} {item.product?.currency}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <div className="border-t border-gray-200 pt-4 mb-6">
