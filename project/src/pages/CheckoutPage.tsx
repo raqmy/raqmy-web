@@ -34,7 +34,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     password: ''
   });
 
-  // ملاحظة: هذه البيانات ما راح تُحفظ في orders حالياً لأن أعمدتها غير موجودة بجدول orders عندك
   const [formData, setFormData] = useState({
     shippingAddress: '',
     notes: ''
@@ -91,7 +90,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    // تحقق بسيط للدفع (واجهة فقط)
     if (paymentMethod === 'card') {
       if (!cardData.cardNumber || !cardData.expiryDate || !cardData.cvv || !cardData.cardholderName) {
         setError('الرجاء ملء جميع بيانات البطاقة');
@@ -111,49 +109,56 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setProcessing(true);
 
     try {
+      const { data: orderNumberData } = await supabase.rpc('generate_order_number');
+
       const totalAmount = calculateTotal();
+      const sellerId = cartItems[0]?.product?.user_id;
 
-      // محاولة استخراج merchant_id / seller_id من المنتج
-      // (حسب جدول orders عندك فيه customer_id + merchant_id + seller_id)
-      const firstProduct: any = cartItems[0]?.product;
-      const sellerId = firstProduct?.user_id ?? firstProduct?.seller_id ?? null;
-      const merchantId = firstProduct?.merchant_id ?? sellerId ?? null;
-
-      // ✅ هنا التعديل الأهم:
-      // لا ترسل user_id ولا customer_email ولا customer_name ولا shipping_address ولا notes ولا payment_method
-      // لأن جدول orders عندك (حسب الخطأ) ما يحتويها
+      // ✅ التعديل الأساسي هنا: customer_id بدل user_id
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
-          customer_id: profile!.id,
-          merchant_id: merchantId,
+          order_number: orderNumberData,
+          customer_id: profile!.id, // ✅ كان user_id
           seller_id: sellerId,
           total_amount: totalAmount,
-          status: 'pending'
+          status: 'pending',
+          customer_name: profile?.name || '',
+          customer_email: profile?.email || '',
+          customer_phone: profile?.phone || '',
+          shipping_address: formData.shippingAddress,
+          notes: formData.notes,
+          payment_method: paymentMethod
         })
         .select()
         .single();
 
       if (orderError) throw orderError;
 
-      // ✅ بناء order_items بأعمدة موجودة فقط: order_id, product_id, quantity, price
-      const orderItems = cartItems.map(item => ({
-        order_id: order.id,
-        product_id: item.product_id,
-        quantity: item.quantity,
-        price: item.product?.price || 0
-      }));
+      const orderItems = cartItems.map(item => {
+        // دعم name/title (عشان اختلافات السكيمة اللي مرت عليك)
+        const productTitle =
+          (item.product as any)?.title ??
+          (item.product as any)?.name ??
+          '';
 
-      const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
-      if (itemsError) throw itemsError;
+        return {
+          order_id: order.id,
+          product_id: item.product_id,
+          product_name: productTitle,
+          product_price: item.product!.price,
+          quantity: item.quantity,
+          subtotal: item.product!.price * item.quantity
+        };
+      });
 
-      // تفريغ السلة
-      const { error: clearCartError } = await supabase
+      const { error: orderItemsError } = await supabase.from('order_items').insert(orderItems);
+      if (orderItemsError) throw orderItemsError;
+
+      await supabase
         .from('cart_items')
         .delete()
         .eq('user_id', profile!.id);
-
-      if (clearCartError) throw clearCartError;
 
       onNavigate(`payment-${order.id}`);
     } catch (error: any) {
@@ -378,8 +383,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
                 <div className="space-y-4 mb-6">
                   {cartItems.map((item) => {
-                    const anyProduct: any = item.product;
-                    const productTitle = anyProduct?.title ?? anyProduct?.name ?? '';
+                    const productTitle =
+                      (item.product as any)?.title ??
+                      (item.product as any)?.name ??
+                      '';
+
                     return (
                       <div key={item.id} className="flex gap-3">
                         <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
