@@ -43,6 +43,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     if (profile) {
       fetchCartItems();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   const fetchCartItems = async () => {
@@ -109,52 +110,37 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setProcessing(true);
 
     try {
-      // نولّد رقم الطلب للاستعمال لاحقًا/للعرض (لكن ما نخزنه لأن العمود غير موجود بالجدول)
       const { data: orderNumberData, error: orderNumberError } = await supabase.rpc('generate_order_number');
       if (orderNumberError) throw orderNumberError;
 
       const totalAmount = calculateTotal();
+      const sellerId = cartItems[0]?.product?.user_id;
 
-      // نجيب التاجر من أول منتج (افتراض سلتك من تاجر واحد)
-      const merchantId = cartItems[0]?.product?.user_id;
-      if (!merchantId) {
-        setError('تعذر تحديد التاجر لهذا الطلب');
-        return;
-      }
-
-      // ✅ إدخال أعمدة موجودة فقط في جدول orders حسب السكيمة عندك
+      // ✅ مهم: سكيمتك في orders فيها customer_id (وأيضاً user_id موجود حسب الصورة)
+      // لكن اللي نعتمد عليه هنا customer_id
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
+          order_number: orderNumberData,
           customer_id: profile!.id,
-          merchant_id: merchantId,
+          seller_id: sellerId,
           total_amount: totalAmount,
           status: 'pending',
-          // بعض مشاريعك قد تستخدم user_id بدل customer_id في أماكن ثانية
-          // نخليه للتوافق (اختياري لكنه يساعد لو عندك كود قديم يعتمد عليه)
-          user_id: profile!.id
+          // ⚠️ ملاحظة: إذا ما عندك أعمدة customer_name/email/phone/shipping_address/notes/payment_method في جدول orders
+          // احذفها من هنا أو أضفها للجدول. (حسب أخطائك السابقة كان customer_email غير موجود)
+          // لذلك أنا راح أتركها "غير مرسلة" الآن لتجنب PGRST204.
         })
         .select()
         .single();
 
       if (orderError) throw orderError;
-      if (!order?.id) throw new Error('Order created but id is missing');
 
-      const orderItems = cartItems.map(item => {
-        const productTitle =
-          (item.product as any)?.title ??
-          (item.product as any)?.name ??
-          '';
-
-        return {
-          order_id: order.id,
-          product_id: item.product_id,
-          product_name: productTitle,
-          product_price: item.product!.price,
-          quantity: item.quantity,
-          subtotal: item.product!.price * item.quantity
-        };
-      });
+      // ✅ التعديل الأساسي: order_items فقط الأعمدة الموجودة غالباً (order_id, product_id, quantity)
+      const orderItems = cartItems.map(item => ({
+        order_id: order.id,
+        product_id: item.product_id,
+        quantity: item.quantity
+      }));
 
       const { error: orderItemsError } = await supabase.from('order_items').insert(orderItems);
       if (orderItemsError) throw orderItemsError;
@@ -164,20 +150,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         .delete()
         .eq('user_id', profile!.id);
 
-      // لو تبغى تستخدم orderNumberData في واجهة صفحة الدفع/النجاح تقدر تمرره بالـ state أو تخزنه محلياً
-      // حالياً نروح لصفحة الدفع باستخدام id
       onNavigate(`payment-${order.id}`);
     } catch (error: any) {
       console.error('Error creating order:', error);
-
-      // رسائل أوضح حسب نوع الخطأ
-      if (error?.code === 'PGRST204') {
-        setError('خطأ في سكيمة قاعدة البيانات: يوجد حقل يتم إرساله غير موجود في جدول الطلبات.');
-      } else if (error?.code === '42501') {
-        setError('تم رفض العملية بسبب سياسات الحماية (RLS). يلزم تعديل سياسات الجداول.');
-      } else {
-        setError('حدث خطأ أثناء إنشاء الطلب. الرجاء المحاولة مرة أخرى.');
-      }
+      setError('حدث خطأ أثناء إنشاء الطلب. الرجاء المحاولة مرة أخرى.');
     } finally {
       setProcessing(false);
     }
