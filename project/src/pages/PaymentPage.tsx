@@ -10,12 +10,16 @@ interface PaymentPageProps {
 
 interface Order {
   id: string;
-  order_number: string;
+  order_number?: string | null;
   total_amount: number;
   status: string;
-  customer_name: string;
-  customer_email: string;
-  customer_phone: string;
+
+  // هذه الحقول ممكن تكون موجودة عندك أو لا (حسب سكيمتك)
+  customer_name?: string | null;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+
+  created_at?: string | null;
 }
 
 export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId }) => {
@@ -37,27 +41,27 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
     setError('');
 
     try {
-      // ✅ نجيب الطلب بشرط:
-      // - id يساوي orderId
-      // - والمالك هو المستخدم الحالي سواء customer_id أو user_id
+      // ✅ مهم: الطلب قد يكون مربوط بـ customer_id أو user_id (للتوافق)
+      const ownerFilter = `customer_id.eq.${profile!.id},user_id.eq.${profile!.id}`;
+
       const { data, error } = await supabase
         .from('orders')
-        .select('id, order_number, total_amount, status, customer_name, customer_email, customer_phone')
+        .select('*')
         .eq('id', orderId)
-        .or(`customer_id.eq.${profile!.id},user_id.eq.${profile!.id}`)
+        .or(ownerFilter)
         .maybeSingle();
 
       if (error) throw error;
 
       if (!data) {
         setOrder(null);
-        setError('لم يتم العثور على الطلب أو لا تملك صلاحية الوصول إليه');
+        setError('لم يتم العثور على الطلب');
         return;
       }
 
       setOrder(data as Order);
-    } catch (error) {
-      console.error('Error fetching order:', error);
+    } catch (err) {
+      console.error('Error fetching order:', err);
       setOrder(null);
       setError('لم يتم العثور على الطلب');
     } finally {
@@ -94,36 +98,27 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
         throw new Error(result?.error || 'فشلت عملية الدفع');
       }
 
-      // ✅ لا نخلي فشل log يوقف نجاح الدفع
-      try {
-        await supabase.from('payment_logs').insert({
-          order_id: orderId,
-          event_type: 'payment_success',
-          status: 'success',
-          payload: { paymentIntentId: result.paymentIntentId },
-        });
-      } catch (logErr) {
-        console.warn('payment_logs insert failed (ignored):', logErr);
-      }
+      await supabase.from('payment_logs').insert({
+        order_id: orderId,
+        event_type: 'payment_success',
+        status: 'success',
+        payload: { paymentIntentId: result.paymentIntentId },
+      });
 
       onNavigate(`payment-success-${orderId}`);
-    } catch (error: any) {
-      console.error('Payment error:', error);
-      const msg = error?.message || 'فشلت عملية الدفع. الرجاء المحاولة مرة أخرى.';
+    } catch (err: any) {
+      console.error('Payment error:', err);
+
+      const msg = err?.message || 'فشلت عملية الدفع. الرجاء المحاولة مرة أخرى.';
       setError(msg);
 
-      // ✅ لا نخلي فشل log يطيّح الصفحة
-      try {
-        await supabase.from('payment_logs').insert({
-          order_id: orderId,
-          event_type: 'payment_failed',
-          status: 'failed',
-          error_message: msg,
-        });
-      } catch (logErr) {
-        console.warn('payment_logs insert failed (ignored):', logErr);
-      }
-    } finally {
+      await supabase.from('payment_logs').insert({
+        order_id: orderId,
+        event_type: 'payment_failed',
+        status: 'failed',
+        error_message: msg,
+      });
+
       setProcessing(false);
     }
   };
@@ -157,6 +152,8 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
     );
   }
 
+  const displayOrderNumber = order.order_number || order.id;
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -166,34 +163,40 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
               <CreditCard className="w-8 h-8" />
               <h1 className="text-2xl font-bold">صفحة الدفع</h1>
             </div>
-            <p className="text-blue-100">رقم الطلب: {order.order_number}</p>
+            <p className="text-blue-100">رقم الطلب: {displayOrderNumber}</p>
           </div>
 
           <div className="p-6 space-y-6">
             <div className="bg-gray-50 rounded-lg p-6">
               <h3 className="text-lg font-bold text-gray-900 mb-4">تفاصيل الطلب</h3>
+
               <div className="space-y-3">
                 <div className="flex justify-between">
                   <span className="text-gray-600">اسم العميل</span>
-                  <span className="font-semibold text-gray-900">{order.customer_name}</span>
+                  <span className="font-semibold text-gray-900">
+                    {order.customer_name || '—'}
+                  </span>
                 </div>
+
                 <div className="flex justify-between">
                   <span className="text-gray-600">البريد الإلكتروني</span>
                   <span className="font-semibold text-gray-900" dir="ltr">
-                    {order.customer_email}
+                    {order.customer_email || '—'}
                   </span>
                 </div>
+
                 <div className="flex justify-between">
                   <span className="text-gray-600">رقم الهاتف</span>
                   <span className="font-semibold text-gray-900" dir="ltr">
-                    {order.customer_phone}
+                    {order.customer_phone || '—'}
                   </span>
                 </div>
+
                 <div className="border-t border-gray-200 pt-3">
                   <div className="flex justify-between items-center">
                     <span className="text-xl font-bold text-gray-900">المبلغ الإجمالي</span>
                     <span className="text-3xl font-bold text-blue-600">
-                      {Number(order.total_amount).toFixed(2)} ريال
+                      {Number(order.total_amount || 0).toFixed(2)} ريال
                     </span>
                   </div>
                 </div>
@@ -229,7 +232,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
                 </>
               ) : (
                 <>
-                  <span>تأكيد ودفع {Number(order.total_amount).toFixed(2)} ريال</span>
+                  <span>تأكيد ودفع {Number(order.total_amount || 0).toFixed(2)} ريال</span>
                 </>
               )}
             </button>
