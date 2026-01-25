@@ -43,7 +43,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     if (profile) {
       fetchCartItems();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   const fetchCartItems = async () => {
@@ -91,6 +90,19 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       return;
     }
 
+    // ✅ تأكد أن كل العناصر عندها منتج وسعر (عشان ما يصير price = null)
+    const missingProduct = cartItems.find(i => !i.product);
+    if (missingProduct) {
+      setError('حدث خطأ: بعض المنتجات غير موجودة. رجاءً حدّث الصفحة وحاول مرة أخرى.');
+      return;
+    }
+
+    const missingPrice = cartItems.find(i => (i.product?.price ?? null) === null);
+    if (missingPrice) {
+      setError('حدث خطأ: سعر أحد المنتجات غير موجود. رجاءً راجع بيانات المنتج.');
+      return;
+    }
+
     if (paymentMethod === 'card') {
       if (!cardData.cardNumber || !cardData.expiryDate || !cardData.cvv || !cardData.cardholderName) {
         setError('الرجاء ملء جميع بيانات البطاقة');
@@ -110,14 +122,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setProcessing(true);
 
     try {
-      const { data: orderNumberData, error: orderNumberError } = await supabase.rpc('generate_order_number');
-      if (orderNumberError) throw orderNumberError;
+      const { data: orderNumberData } = await supabase.rpc('generate_order_number');
 
       const totalAmount = calculateTotal();
       const sellerId = cartItems[0]?.product?.user_id;
 
-      // ✅ مهم: سكيمتك في orders فيها customer_id (وأيضاً user_id موجود حسب الصورة)
-      // لكن اللي نعتمد عليه هنا customer_id
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
@@ -126,21 +135,29 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           seller_id: sellerId,
           total_amount: totalAmount,
           status: 'pending',
-          // ⚠️ ملاحظة: إذا ما عندك أعمدة customer_name/email/phone/shipping_address/notes/payment_method في جدول orders
-          // احذفها من هنا أو أضفها للجدول. (حسب أخطائك السابقة كان customer_email غير موجود)
-          // لذلك أنا راح أتركها "غير مرسلة" الآن لتجنب PGRST204.
+          customer_name: profile?.name || '',
+          customer_email: profile?.email || '',
+          customer_phone: profile?.phone || '',
+          shipping_address: formData.shippingAddress,
+          notes: formData.notes,
+          payment_method: paymentMethod
         })
         .select()
         .single();
 
       if (orderError) throw orderError;
 
-      // ✅ التعديل الأساسي: order_items فقط الأعمدة الموجودة غالباً (order_id, product_id, quantity)
-      const orderItems = cartItems.map(item => ({
-        order_id: order.id,
-        product_id: item.product_id,
-        quantity: item.quantity
-      }));
+      // ✅ أهم تعديل هنا: إرسال price (NOT NULL) بدل product_price
+      // ونرسل أقل حقول ممكنة لتجنب أخطاء "column does not exist"
+      const orderItems = cartItems.map(item => {
+        const price = item.product!.price; // مضمون بسبب التحقق فوق
+        return {
+          order_id: order.id,
+          product_id: item.product_id,
+          quantity: item.quantity,
+          price: price
+        };
+      });
 
       const { error: orderItemsError } = await supabase.from('order_items').insert(orderItems);
       if (orderItemsError) throw orderItemsError;
