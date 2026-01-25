@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CreditCard, Lock, AlertCircle, CheckCircle } from 'lucide-react';
+import { CreditCard, AlertCircle, CheckCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -29,21 +29,36 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
     if (profile && orderId) {
       fetchOrder();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, orderId]);
 
   const fetchOrder = async () => {
+    setLoading(true);
+    setError('');
+
     try {
+      // ✅ نجيب الطلب بشرط:
+      // - id يساوي orderId
+      // - والمالك هو المستخدم الحالي سواء customer_id أو user_id
       const { data, error } = await supabase
         .from('orders')
-        .select('*')
+        .select('id, order_number, total_amount, status, customer_name, customer_email, customer_phone')
         .eq('id', orderId)
-        .eq('user_id', profile!.id)
-        .single();
+        .or(`customer_id.eq.${profile!.id},user_id.eq.${profile!.id}`)
+        .maybeSingle();
 
       if (error) throw error;
-      setOrder(data);
+
+      if (!data) {
+        setOrder(null);
+        setError('لم يتم العثور على الطلب أو لا تملك صلاحية الوصول إليه');
+        return;
+      }
+
+      setOrder(data as Order);
     } catch (error) {
       console.error('Error fetching order:', error);
+      setOrder(null);
       setError('لم يتم العثور على الطلب');
     } finally {
       setLoading(false);
@@ -55,7 +70,8 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
     setError('');
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData?.session;
 
       if (!session) {
         throw new Error('يجب تسجيل الدخول');
@@ -66,7 +82,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ orderId }),
@@ -74,29 +90,40 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
 
       const result = await response.json();
 
-      if (!result.success) {
-        throw new Error(result.error || 'فشلت عملية الدفع');
+      if (!result?.success) {
+        throw new Error(result?.error || 'فشلت عملية الدفع');
       }
 
-      await supabase.from('payment_logs').insert({
-        order_id: orderId,
-        event_type: 'payment_success',
-        status: 'success',
-        payload: { paymentIntentId: result.paymentIntentId }
-      });
+      // ✅ لا نخلي فشل log يوقف نجاح الدفع
+      try {
+        await supabase.from('payment_logs').insert({
+          order_id: orderId,
+          event_type: 'payment_success',
+          status: 'success',
+          payload: { paymentIntentId: result.paymentIntentId },
+        });
+      } catch (logErr) {
+        console.warn('payment_logs insert failed (ignored):', logErr);
+      }
 
       onNavigate(`payment-success-${orderId}`);
     } catch (error: any) {
       console.error('Payment error:', error);
-      setError(error.message || 'فشلت عملية الدفع. الرجاء المحاولة مرة أخرى.');
+      const msg = error?.message || 'فشلت عملية الدفع. الرجاء المحاولة مرة أخرى.';
+      setError(msg);
 
-      await supabase.from('payment_logs').insert({
-        order_id: orderId,
-        event_type: 'payment_failed',
-        status: 'failed',
-        error_message: error.message
-      });
-
+      // ✅ لا نخلي فشل log يطيّح الصفحة
+      try {
+        await supabase.from('payment_logs').insert({
+          order_id: orderId,
+          event_type: 'payment_failed',
+          status: 'failed',
+          error_message: msg,
+        });
+      } catch (logErr) {
+        console.warn('payment_logs insert failed (ignored):', logErr);
+      }
+    } finally {
       setProcessing(false);
     }
   };
@@ -152,17 +179,21 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">البريد الإلكتروني</span>
-                  <span className="font-semibold text-gray-900" dir="ltr">{order.customer_email}</span>
+                  <span className="font-semibold text-gray-900" dir="ltr">
+                    {order.customer_email}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">رقم الهاتف</span>
-                  <span className="font-semibold text-gray-900" dir="ltr">{order.customer_phone}</span>
+                  <span className="font-semibold text-gray-900" dir="ltr">
+                    {order.customer_phone}
+                  </span>
                 </div>
                 <div className="border-t border-gray-200 pt-3">
                   <div className="flex justify-between items-center">
                     <span className="text-xl font-bold text-gray-900">المبلغ الإجمالي</span>
                     <span className="text-3xl font-bold text-blue-600">
-                      {order.total_amount.toFixed(2)} ريال
+                      {Number(order.total_amount).toFixed(2)} ريال
                     </span>
                   </div>
                 </div>
@@ -198,7 +229,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
                 </>
               ) : (
                 <>
-                  <span>تأكيد ودفع {order.total_amount.toFixed(2)} ريال</span>
+                  <span>تأكيد ودفع {Number(order.total_amount).toFixed(2)} ريال</span>
                 </>
               )}
             </button>
