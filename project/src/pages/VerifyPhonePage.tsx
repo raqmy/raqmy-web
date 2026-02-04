@@ -2,18 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Smartphone,
   Loader2,
-  ArrowRight,
-  RefreshCw,
   AlertCircle,
   CheckCircle,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
 export const VerifyPhonePage: React.FC = () => {
   const { profile, refreshProfile } = useAuth();
-  const navigate = useNavigate();
 
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
@@ -49,10 +45,7 @@ export const VerifyPhonePage: React.FC = () => {
     }
   };
 
-  const handleKeyDown = (
-    index: number,
-    e: React.KeyboardEvent<HTMLInputElement>
-  ) => {
+  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Backspace' && !otp[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
     }
@@ -63,10 +56,7 @@ export const VerifyPhonePage: React.FC = () => {
     if (error) setError('');
     if (success) setSuccess('');
 
-    const pasted = e.clipboardData
-      .getData('text')
-      .replace(/\D/g, '')
-      .slice(0, 6);
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
 
     const next = [...otp];
     for (let i = 0; i < pasted.length; i++) {
@@ -97,9 +87,7 @@ export const VerifyPhonePage: React.FC = () => {
     setSuccess('');
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
 
       if (!session) {
         setError('يرجى تسجيل الدخول مرة أخرى');
@@ -116,16 +104,14 @@ export const VerifyPhonePage: React.FC = () => {
         .eq('id', session.user.id);
 
       if (updateError) {
-        // إذا الأعمدة غير موجودة/الكاش، لا نوقف المستخدم مؤقتًا
         console.warn('Phone verify columns update failed (temporary bypass):', updateError);
       }
 
       setSuccess('تم تأكيد رقم الجوال بنجاح (وضع مؤقت)');
       await refreshProfile();
 
-      // ✅ توجيه للصفحة الرئيسية بعد نجاح التحقق
-      // (استبدل "/" لو صفحتك الرئيسية مسارها مختلف)
-      navigate('/', { replace: true });
+      // ✅ تحويل للصفحة الرئيسية بدون react-router
+      window.location.replace('/');
     } catch (e) {
       console.error(e);
       setError('حدث خطأ أثناء التحقق');
@@ -198,7 +184,14 @@ export const VerifyPhonePage: React.FC = () => {
             disabled={loading || otp.join('').length !== 6}
             className="w-full bg-blue-600 text-white py-3 rounded font-semibold disabled:opacity-50"
           >
-            {loading ? 'جاري التحقق...' : 'تأكيد'}
+            {loading ? (
+              <span className="inline-flex items-center gap-2 justify-center">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                جاري التحقق...
+              </span>
+            ) : (
+              'تأكيد'
+            )}
           </button>
 
           <button
@@ -206,9 +199,7 @@ export const VerifyPhonePage: React.FC = () => {
             disabled={cooldown > 0 || loading}
             className="w-full border py-2 rounded text-gray-700 disabled:opacity-50"
           >
-            {cooldown > 0
-              ? `إعادة الإرسال بعد ${cooldown}s`
-              : 'إعادة إرسال الرمز'}
+            {cooldown > 0 ? `إعادة الإرسال بعد ${cooldown}s` : 'إعادة إرسال الرمز'}
           </button>
 
           <button
