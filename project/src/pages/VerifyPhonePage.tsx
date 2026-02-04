@@ -1,13 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Smartphone, AlertCircle, CheckCircle } from 'lucide-react';
+import {
+  Smartphone,
+  Loader2,
+  ArrowRight,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle,
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { useLocation, useNavigate } from 'react-router-dom';
 
 export const VerifyPhonePage: React.FC = () => {
   const { profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation() as any;
 
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
@@ -31,6 +37,9 @@ export const VerifyPhonePage: React.FC = () => {
   const handleOtpChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
 
+    if (error) setError('');
+    if (success) setSuccess('');
+
     const next = [...otp];
     next[index] = value.slice(-1);
     setOtp(next);
@@ -51,6 +60,9 @@ export const VerifyPhonePage: React.FC = () => {
 
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
+    if (error) setError('');
+    if (success) setSuccess('');
+
     const pasted = e.clipboardData
       .getData('text')
       .replace(/\D/g, '')
@@ -62,13 +74,6 @@ export const VerifyPhonePage: React.FC = () => {
     }
     setOtp(next);
     inputRefs.current[Math.min(pasted.length, 5)]?.focus();
-  };
-
-  const safeRedirectAfterSuccess = () => {
-    // لو عندك صفحة كان المستخدم جاي منها (Guard عادة يرسلها في state.from)
-    const to = location?.state?.from?.pathname || '/';
-    // استبدال حتى ما يرجع لصفحة التحقق عند الضغط رجوع
-    navigate(to, { replace: true });
   };
 
   const handleVerify = async () => {
@@ -101,32 +106,26 @@ export const VerifyPhonePage: React.FC = () => {
         return;
       }
 
-      // ✅ محاولة تحديث DB (لو العمود موجود). لو غير موجود/كاش، نكمل كتجاوز مؤقت بدون فشل.
+      // ✅ محاولة تحديث قاعدة البيانات (ولو فشل بسبب عدم وجود الأعمدة، نكمل مؤقتًا)
       const { error: updateError } = await supabase
         .from('users_profile')
         .update({
           phone_verified: true,
           phone_verified_at: new Date().toISOString(),
-        } as any)
+        })
         .eq('id', session.user.id);
 
       if (updateError) {
-        // إذا ظهر خطأ schema cache / عمود غير موجود، لا نوقف المستخدم الآن (حل مؤقت)
-        console.warn('Phone verified update failed (temporary bypass):', updateError);
+        // إذا الأعمدة غير موجودة/الكاش، لا نوقف المستخدم مؤقتًا
+        console.warn('Phone verify columns update failed (temporary bypass):', updateError);
       }
-
-      // ✅ علامة محلية مؤقتة (قد تفيدك لاحقًا لو حبيت تستخدمها في الـ Guard)
-      try {
-        localStorage.setItem('raqmy_phone_verified_temp', 'true');
-      } catch {}
 
       setSuccess('تم تأكيد رقم الجوال بنجاح (وضع مؤقت)');
       await refreshProfile();
 
-      // ✅ تحويل تلقائي للصفحة الرئيسية (أو صفحة الرجوع)
-      setTimeout(() => {
-        safeRedirectAfterSuccess();
-      }, 400);
+      // ✅ توجيه للصفحة الرئيسية بعد نجاح التحقق
+      // (استبدل "/" لو صفحتك الرئيسية مسارها مختلف)
+      navigate('/', { replace: true });
     } catch (e) {
       console.error(e);
       setError('حدث خطأ أثناء التحقق');
@@ -136,8 +135,8 @@ export const VerifyPhonePage: React.FC = () => {
   };
 
   const handleResend = () => {
-    setError('');
     setSuccess('تم إرسال الرمز (وضع تجريبي)');
+    setError('');
     setCooldown(60);
     setOtp(['', '', '', '', '', '']);
     inputRefs.current[0]?.focus();
@@ -196,7 +195,7 @@ export const VerifyPhonePage: React.FC = () => {
 
           <button
             onClick={handleVerify}
-            disabled={loading}
+            disabled={loading || otp.join('').length !== 6}
             className="w-full bg-blue-600 text-white py-3 rounded font-semibold disabled:opacity-50"
           >
             {loading ? 'جاري التحقق...' : 'تأكيد'}
@@ -204,8 +203,8 @@ export const VerifyPhonePage: React.FC = () => {
 
           <button
             onClick={handleResend}
-            disabled={cooldown > 0}
-            className="w-full border py-2 rounded text-gray-700"
+            disabled={cooldown > 0 || loading}
+            className="w-full border py-2 rounded text-gray-700 disabled:opacity-50"
           >
             {cooldown > 0
               ? `إعادة الإرسال بعد ${cooldown}s`
@@ -214,7 +213,8 @@ export const VerifyPhonePage: React.FC = () => {
 
           <button
             onClick={handleChangePhone}
-            className="w-full text-sm text-gray-500"
+            disabled={loading}
+            className="w-full text-sm text-gray-500 disabled:opacity-50"
           >
             تغيير رقم الجوال
           </button>
