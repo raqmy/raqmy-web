@@ -1,40 +1,53 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Smartphone, Loader2, ArrowRight, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
+import {
+  Smartphone,
+  Loader2,
+  ArrowRight,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle,
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
 export const VerifyPhonePage: React.FC = () => {
   const { profile, refreshProfile } = useAuth();
+
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
-  const [resending, setResending] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [cooldown, setCooldown] = useState(0);
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  useEffect(() => {
-    if (cooldown > 0) {
-      const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [cooldown]);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
     inputRefs.current[0]?.focus();
   }, []);
 
+  useEffect(() => {
+    if (cooldown > 0) {
+      const t = setTimeout(() => setCooldown(cooldown - 1), 1000);
+      return () => clearTimeout(t);
+    }
+  }, [cooldown]);
+
   const handleOtpChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
-    const newOtp = [...otp];
-    newOtp[index] = value.slice(-1);
-    setOtp(newOtp);
+
+    const next = [...otp];
+    next[index] = value.slice(-1);
+    setOtp(next);
+
     if (value && index < 5) {
       inputRefs.current[index + 1]?.focus();
     }
   };
 
-  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (
+    index: number,
+    e: React.KeyboardEvent<HTMLInputElement>
+  ) => {
     if (e.key === 'Backspace' && !otp[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
     }
@@ -42,13 +55,17 @@ export const VerifyPhonePage: React.FC = () => {
 
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
-    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-    const newOtp = [...otp];
-    for (let i = 0; i < pastedData.length; i++) {
-      newOtp[i] = pastedData[i];
+    const pasted = e.clipboardData
+      .getData('text')
+      .replace(/\D/g, '')
+      .slice(0, 6);
+
+    const next = [...otp];
+    for (let i = 0; i < pasted.length; i++) {
+      next[i] = pasted[i];
     }
-    setOtp(newOtp);
-    inputRefs.current[Math.min(pastedData.length, 5)]?.focus();
+    setOtp(next);
+    inputRefs.current[Math.min(pasted.length, 5)]?.focus();
   };
 
   const handleVerify = async () => {
@@ -59,20 +76,28 @@ export const VerifyPhonePage: React.FC = () => {
       return;
     }
 
+    // ✅ الرمز الوحيد المسموح حاليًا
+    if (otpString !== '000000') {
+      setError('رمز التحقق غير صحيح (استخدم 000000 للتجربة)');
+      setOtp(['', '', '', '', '', '']);
+      inputRefs.current[0]?.focus();
+      return;
+    }
+
     setLoading(true);
     setError('');
     setSuccess('');
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (!session) {
         setError('يرجى تسجيل الدخول مرة أخرى');
-        await supabase.auth.signOut();
         return;
       }
 
-      // 🔴 TEMPORARY BYPASS (أي رمز صحيح)
       const { error: updateError } = await supabase
         .from('users_profile')
         .update({
@@ -82,23 +107,20 @@ export const VerifyPhonePage: React.FC = () => {
         .eq('id', session.user.id);
 
       if (updateError) {
-        throw new Error('فشل تحديث حالة التحقق');
+        throw updateError;
       }
 
-      setSuccess('تم تأكيد رقم الجوال بنجاح');
+      setSuccess('تم تأكيد رقم الجوال بنجاح (وضع مؤقت)');
       await refreshProfile();
-
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'حدث خطأ أثناء التحقق');
-      setOtp(['', '', '', '', '', '']);
-      inputRefs.current[0]?.focus();
+    } catch (e) {
+      console.error(e);
+      setError('حدث خطأ أثناء التحقق');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleResend = async () => {
+  const handleResend = () => {
     setSuccess('تم إرسال الرمز (وضع تجريبي)');
     setCooldown(60);
     setOtp(['', '', '', '', '', '']);
@@ -113,26 +135,29 @@ export const VerifyPhonePage: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-xl p-8 space-y-6">
-
           <div className="text-center space-y-3">
             <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
               <Smartphone className="w-8 h-8 text-blue-600" />
             </div>
             <h1 className="text-2xl font-bold">تأكيد رقم الجوال</h1>
             {profile?.phone && (
-              <p className="text-blue-600 font-semibold" dir="ltr">{profile.phone}</p>
+              <p className="text-blue-600 font-semibold" dir="ltr">
+                {profile.phone}
+              </p>
             )}
           </div>
 
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm flex gap-2">
-              <AlertCircle className="w-4 h-4" /> {error}
+              <AlertCircle className="w-4 h-4" />
+              {error}
             </div>
           )}
 
           {success && (
             <div className="p-3 bg-green-50 border border-green-200 rounded text-green-700 text-sm flex gap-2">
-              <CheckCircle className="w-4 h-4" /> {success}
+              <CheckCircle className="w-4 h-4" />
+              {success}
             </div>
           )}
 
@@ -148,6 +173,7 @@ export const VerifyPhonePage: React.FC = () => {
                 onKeyDown={(e) => handleKeyDown(i, e)}
                 onPaste={handlePaste}
                 className="w-12 h-14 text-center text-2xl border-2 rounded focus:border-blue-500"
+                disabled={loading}
               />
             ))}
           </div>
@@ -155,7 +181,7 @@ export const VerifyPhonePage: React.FC = () => {
           <button
             onClick={handleVerify}
             disabled={loading}
-            className="w-full bg-blue-600 text-white py-3 rounded font-semibold"
+            className="w-full bg-blue-600 text-white py-3 rounded font-semibold disabled:opacity-50"
           >
             {loading ? 'جاري التحقق...' : 'تأكيد'}
           </button>
@@ -165,7 +191,9 @@ export const VerifyPhonePage: React.FC = () => {
             disabled={cooldown > 0}
             className="w-full border py-2 rounded text-gray-700"
           >
-            {cooldown > 0 ? `إعادة الإرسال بعد ${cooldown}s` : 'إعادة إرسال الرمز'}
+            {cooldown > 0
+              ? `إعادة الإرسال بعد ${cooldown}s`
+              : 'إعادة إرسال الرمز'}
           </button>
 
           <button
@@ -174,7 +202,6 @@ export const VerifyPhonePage: React.FC = () => {
           >
             تغيير رقم الجوال
           </button>
-
         </div>
       </div>
     </div>
