@@ -260,8 +260,6 @@ function AppContent() {
   );
 }
 
-/* باقي الملف كما هو بدون أي تغيير (UserDashboardPlaceholder + PrivacyPage + TermsPage + App) */
-
 function App() {
   return (
     <AuthProvider>
