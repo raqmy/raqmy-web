@@ -42,7 +42,6 @@ import { AffiliatePolicyPage } from './pages/AffiliatePolicyPage';
 import { MerchantAgreementPage } from './pages/MerchantAgreementPage';
 import { VerifyPhonePage } from './pages/VerifyPhonePage';
 import { MerchantBankDetailsPage } from './pages/MerchantBankDetailsPage';
-import { TermsPage } from './pages/TermsPage'; // ✅ أضفنا هذا السطر
 import { supabase } from './lib/supabase';
 
 function AppContent() {
@@ -89,12 +88,7 @@ function AppContent() {
         return;
       }
 
-      if (
-        profile.phone_verified &&
-        profile.role === 'seller' &&
-        hasBankDetails === false &&
-        currentPage !== 'merchant-bank-details'
-      ) {
+      if (profile.phone_verified && profile.role === 'seller' && hasBankDetails === false && currentPage !== 'merchant-bank-details') {
         setCurrentPage('merchant-bank-details');
         return;
       }
@@ -138,13 +132,119 @@ function AppContent() {
       return <StorefrontPage storeSlug={storeSlug} onNavigate={setCurrentPage} />;
     }
 
+    if (currentPage.startsWith('marketer-analytics-')) {
+      const marketerId = currentPage.replace('marketer-analytics-', '');
+      return <MarketerAnalyticsPage marketerId={marketerId} onNavigate={setCurrentPage} />;
+    }
+
+    if (currentPage.startsWith('payment-success-')) {
+      const orderId = currentPage.replace('payment-success-', '');
+      return <PaymentSuccessPage orderId={orderId} onNavigate={setCurrentPage} />;
+    }
+
+    if (currentPage.startsWith('payment-failed-')) {
+      const orderId = currentPage.replace('payment-failed-', '');
+      return <PaymentFailedPage orderId={orderId} onNavigate={setCurrentPage} />;
+    }
+
+    if (currentPage.startsWith('payment-')) {
+      const orderId = currentPage.replace('payment-', '');
+      return <PaymentPage orderId={orderId} onNavigate={setCurrentPage} />;
+    }
+
     switch (currentPage) {
       case 'home':
         return <HomePage onNavigate={setCurrentPage} />;
+      case 'auth':
+        return <AuthPage />;
+      case 'verify-phone':
+        return <VerifyPhonePage />;
+      case 'merchant-bank-details':
+        return <MerchantBankDetailsPage onNavigate={setCurrentPage} />;
+      case 'pricing':
+        return <PricingPage onNavigate={setCurrentPage} />;
+      case 'marketplace':
+        return <MarketplacePage onNavigate={setCurrentPage} />;
+      case 'seller-dashboard':
+        return profile?.role === 'seller' || profile?.role === 'admin' ? (
+          <SellerDashboard onNavigate={setCurrentPage} />
+        ) : (
+          <HomePage onNavigate={setCurrentPage} />
+        );
+      case 'user-dashboard':
+        return <UserDashboardPlaceholder onNavigate={setCurrentPage} />;
+      case 'admin':
+        return profile?.role === 'admin' ? (
+          <AdminDashboard onNavigate={setCurrentPage} />
+        ) : (
+          <HomePage onNavigate={setCurrentPage} />
+        );
+      case 'affiliate-dashboard':
+        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+          <AffiliateDashboard onNavigate={setCurrentPage} />
+        ) : (
+          <HomePage onNavigate={setCurrentPage} />
+        );
+      case 'coupons-management':
+        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+          <CouponsManagementPage onNavigate={setCurrentPage} />
+        ) : (
+          <HomePage onNavigate={setCurrentPage} />
+        );
+      case 'affiliate-management':
+        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+          <AffiliateManagementPage onNavigate={setCurrentPage} />
+        ) : (
+          <HomePage onNavigate={setCurrentPage} />
+        );
+      case 'cart':
+        return <CartPage onNavigate={setCurrentPage} />;
+      case 'checkout':
+        return <CheckoutPage onNavigate={setCurrentPage} />;
+      case 'payment-failed':
+        return <PaymentFailedPage onNavigate={setCurrentPage} />;
+      case 'orders':
+        return <OrdersPage onNavigate={setCurrentPage} />;
+      case 'orders-management':
+        return <OrdersManagementPage onNavigate={setCurrentPage} />;
+      case 'payment-settings':
+        return <PaymentSettingsPage onNavigate={setCurrentPage} />;
+      case 'bank-account':
+        return <BankAccountPage onNavigate={setCurrentPage} />;
+      case 'withdrawal-requests':
+        return <WithdrawalRequestsPage onNavigate={setCurrentPage} />;
+      case 'admin-withdrawals':
+        return <AdminWithdrawalsPage onNavigate={setCurrentPage} />;
+      case 'transactions':
+        return <TransactionsPage onNavigate={setCurrentPage} />;
+      case 'admin-management':
+        return <AdminManagementPage onNavigate={setCurrentPage} />;
+      case 'admin-verification-apis':
+        return <AdminVerificationApisPage onNavigate={setCurrentPage} />;
+      case 'merchant-withdraw':
+        return <MerchantWithdrawPage onNavigate={setCurrentPage} />;
+      case 'admin-announcements':
+        return <AdminAnnouncementsPage onNavigate={setCurrentPage} />;
+      case 'favorites':
+        return <FavoritesPage onNavigate={setCurrentPage} />;
+      case 'viewed-products':
+        return <ViewedProductsPage onNavigate={setCurrentPage} />;
+      case 'support':
+        return <SupportPage />;
+      case 'profile':
+        return <ProfilePage onNavigate={setCurrentPage} />;
+      case 'privacy-policy':
+        return <PrivacyPolicyPage />;
+      case 'refund-policy':
+        return <RefundPolicyPage />;
+      case 'affiliate-policy':
+        return <AffiliatePolicyPage />;
+      case 'merchant-agreement':
+        return <MerchantAgreementPage />;
       case 'privacy':
         return <PrivacyPolicyPage />;
       case 'terms':
-        return <TermsPage />; // ✅ الآن سيعمل بدون شاشة بيضاء
+        return <TermsPage />;   // ✅ التعديل هنا
       default:
         return <HomePage onNavigate={setCurrentPage} />;
     }
@@ -159,6 +259,8 @@ function AppContent() {
     </div>
   );
 }
+
+/* باقي الملف كما هو بدون أي تغيير (UserDashboardPlaceholder + PrivacyPage + TermsPage + App) */
 
 function App() {
   return (
