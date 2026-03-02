@@ -182,7 +182,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(paymentKeys),
@@ -283,7 +283,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     }
   };
 
-  if (profile?.role !== 'admin') {
+  // ✅ السماح للـ admin و superadmin
+  if (profile?.role !== 'admin' && profile?.role !== 'superadmin') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -312,15 +313,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     );
   }
 
-  const filteredUsers = users.filter((user) =>
-    user.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-  const filteredStores = stores.filter((store) =>
-    store.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-  const filteredProducts = products.filter((product) =>
-    product.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // ✅ فلترة آمنة بدون كسر الصفحة لو name/slug فاضي
+  const q = (searchQuery || '').toLowerCase().trim();
+
+  const filteredUsers = users.filter((user) => {
+    const name = (user.name ?? '').toString().toLowerCase();
+    const email = (user.email ?? '').toString().toLowerCase();
+    return name.includes(q) || email.includes(q);
+  });
+
+  const filteredStores = stores.filter((store) => {
+    const name = (store.name ?? '').toString().toLowerCase();
+    const slug = (store.slug ?? '').toString().toLowerCase();
+    return name.includes(q) || slug.includes(q);
+  });
+
+  const filteredProducts = products.filter((product) => {
+    // لو عندك في الداتا title بدل name، نخليها fallback
+    const name = ((product as any).name ?? (product as any).title ?? '').toString().toLowerCase();
+    return name.includes(q);
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -426,9 +438,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
             <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 text-white mb-8">
               <h2 className="text-2xl font-bold mb-2">مرحباً بك في لوحة الإدارة</h2>
-              <p className="text-blue-100">
-                من هنا يمكنك إدارة جميع المستخدمين والمتاجر والمنتجات في المنصة
-              </p>
+              <p className="text-blue-100">من هنا يمكنك إدارة جميع المستخدمين والمتاجر والمنتجات في المنصة</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -522,25 +532,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      الاسم
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      الدور
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      تاريخ التسجيل
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                      الإجراءات
-                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">الاسم</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">الدور</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">تاريخ التسجيل</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">الإجراءات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {filteredUsers.map((user) => (
                     <tr key={user.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4">
-                        <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                        <div className="text-sm font-medium text-gray-900">{user.name || '—'}</div>
+                        {user.email && <div className="text-xs text-gray-500">{user.email}</div>}
                       </td>
                       <td className="px-6 py-4">
                         <span
@@ -555,9 +558,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                           {user.role === 'admin' ? 'مدير' : user.role === 'seller' ? 'تاجر' : 'عميل'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        {new Date(user.created_at).toLocaleDateString('ar-SA')}
-                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500">{new Date(user.created_at).toLocaleDateString('ar-SA')}</td>
                       <td className="px-6 py-4">
                         <button
                           onClick={() => handleDeleteUser(user.id)}
@@ -598,17 +599,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                       <StoreIcon className="w-6 h-6 text-white" />
                     </div>
                     <div className="flex-1">
-                      <h3 className="text-lg font-bold text-gray-900">{store.name}</h3>
-                      <p className="text-sm text-gray-500">{store.slug}</p>
+                      <h3 className="text-lg font-bold text-gray-900">{store.name || '—'}</h3>
+                      <p className="text-sm text-gray-500">{store.slug || ''}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleToggleStoreStatus(store.id, store.is_active)}
                       className={`flex-1 px-4 py-2 rounded-lg font-medium ${
-                        store.is_active
-                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        store.is_active ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       }`}
                     >
                       {store.is_active ? 'نشط' : 'معطل'}
@@ -642,44 +641,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredProducts.map((product) => (
-                <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                    <Package className="w-12 h-12 text-blue-600" />
-                  </div>
-                  <div className="p-6">
-                    <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-1">
-                      {product.name}
-                    </h3>
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="text-xl font-bold text-blue-600">
-                        {product.price} {product.currency}
-                      </span>
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          product.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-                        }`}
-                      >
-                        {product.is_active ? 'نشط' : 'معطل'}
-                      </span>
+              {filteredProducts.map((product) => {
+                const displayName = ((product as any).name ?? (product as any).title ?? '—') as string;
+                return (
+                  <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+                      <Package className="w-12 h-12 text-blue-600" />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleToggleProductStatus(product.id, product.is_active)}
-                        className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-                      >
-                        {product.is_active ? 'تعطيل' : 'تفعيل'}
-                      </button>
-                      <button
-                        onClick={() => handleDeleteProduct(product.id)}
-                        className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
+                    <div className="p-6">
+                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-1">{displayName}</h3>
+                      <div className="flex items-center justify-between mb-4">
+                        <span className="text-xl font-bold text-blue-600">
+                          {product.price} {product.currency}
+                        </span>
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                            product.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          {product.is_active ? 'نشط' : 'معطل'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleToggleProductStatus(product.id, product.is_active)}
+                          className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                        >
+                          {product.is_active ? 'تعطيل' : 'تفعيل'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteProduct(product.id)}
+                          className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -694,9 +694,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             {message && (
               <div
                 className={`mb-6 p-4 rounded-lg flex items-center gap-3 ${
-                  message.type === 'success'
-                    ? 'bg-green-50 border border-green-200'
-                    : 'bg-red-50 border border-red-200'
+                  message.type === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
                 }`}
               >
                 {message.type === 'success' ? (
@@ -704,9 +702,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                 ) : (
                   <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
                 )}
-                <p className={message.type === 'success' ? 'text-green-700' : 'text-red-700'}>
-                  {message.text}
-                </p>
+                <p className={message.type === 'success' ? 'text-green-700' : 'text-red-700'}>{message.text}</p>
               </div>
             )}
 
@@ -755,9 +751,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                 </div>
 
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <p className="text-sm text-blue-700">
-                    💡 يمكنك الحصول على هذه المفاتيح من لوحة تحكم Paymob → Settings → API Keys
-                  </p>
+                  <p className="text-sm text-blue-700">💡 يمكنك الحصول على هذه المفاتيح من لوحة تحكم Paymob → Settings → API Keys</p>
                 </div>
 
                 <button
@@ -773,9 +767,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg font-bold text-gray-900 mb-4">اختبار الاتصال</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                اختبر الاتصال ببوابة Paymob للتأكد من صحة المفاتيح
-              </p>
+              <p className="text-sm text-gray-600 mb-4">اختبر الاتصال ببوابة Paymob للتأكد من صحة المفاتيح</p>
               <button
                 onClick={handleTestConnection}
                 disabled={testing}
@@ -787,7 +779,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </div>
           </div>
         )}
-
       </div>
     </div>
   );
