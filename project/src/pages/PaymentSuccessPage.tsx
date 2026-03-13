@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, Package, Download, Home } from 'lucide-react';
+import { CheckCircle, Package, Home, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -103,7 +103,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
               <CheckCircle className="w-12 h-12 text-green-600" />
             </div>
             <h1 className="text-3xl font-bold mb-2">تم الدفع بنجاح!</h1>
-            <p className="text-green-100 text-lg">شكراً لك على طلبك</p>
+            <p className="text-green-100 text-lg">تم تسجيل طلبك ويمكنك الوصول إلى مشترياتك</p>
           </div>
 
           <div className="p-8 space-y-6">
@@ -112,6 +112,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
                 <p className="text-sm text-blue-600 font-medium mb-1">رقم الطلب</p>
                 <p className="text-2xl font-bold text-blue-900">{order.order_number}</p>
               </div>
+
               {order.payment_reference && (
                 <div className="text-center">
                   <p className="text-xs text-blue-600 mb-1">رقم مرجع الدفع</p>
@@ -129,11 +130,15 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
                 </div>
                 <div>
                   <p className="text-sm text-gray-600 mb-1">رقم الهاتف</p>
-                  <p className="font-semibold text-gray-900" dir="ltr">{order.customer_phone}</p>
+                  <p className="font-semibold text-gray-900" dir="ltr">
+                    {order.customer_phone}
+                  </p>
                 </div>
                 <div className="md:col-span-2">
                   <p className="text-sm text-gray-600 mb-1">البريد الإلكتروني</p>
-                  <p className="font-semibold text-gray-900" dir="ltr">{order.customer_email}</p>
+                  <p className="font-semibold text-gray-900" dir="ltr">
+                    {order.customer_email}
+                  </p>
                 </div>
               </div>
             </div>
@@ -143,9 +148,13 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
                 <Package className="w-5 h-5" />
                 المنتجات المطلوبة
               </h3>
+
               <div className="space-y-3">
                 {orderItems.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                  >
                     <div className="flex-1">
                       <h4 className="font-semibold text-gray-900">{item.product_name}</h4>
                       <p className="text-sm text-gray-600">
@@ -165,11 +174,15 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
             <div className="border-t border-gray-200 pt-6">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-gray-600">المجموع الفرعي</span>
-                <span className="font-semibold text-gray-900">{order.total_amount.toFixed(2)} ريال</span>
+                <span className="font-semibold text-gray-900">
+                  {order.total_amount.toFixed(2)} ريال
+                </span>
               </div>
               <div className="flex items-center justify-between pt-3 border-t border-gray-200">
                 <span className="text-xl font-bold text-gray-900">المجموع الكلي</span>
-                <span className="text-2xl font-bold text-green-600">{order.total_amount.toFixed(2)} ريال</span>
+                <span className="text-2xl font-bold text-green-600">
+                  {order.total_amount.toFixed(2)} ريال
+                </span>
               </div>
             </div>
 
@@ -178,15 +191,15 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
               <ul className="space-y-2 text-sm text-gray-600">
                 <li className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
-                  <span>سيتم إرسال رسالة تأكيد إلى بريدك الإلكتروني</span>
+                  <span>تم تسجيل الطلب بنجاح داخل حسابك</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
-                  <span>سيقوم البائع بمراجعة طلبك والتواصل معك</span>
+                  <span>يمكنك الدخول إلى صفحة "مشترياتي" للوصول إلى ملفات المنتجات المدفوعة</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
-                  <span>يمكنك متابعة حالة الطلب من صفحة طلباتي</span>
+                  <span>إذا كان المنتج رقميًا فستظهر مرفقاته بعد التحقق من حالة الشراء</span>
                 </li>
               </ul>
             </div>
@@ -196,9 +209,10 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
                 onClick={() => onNavigate('orders')}
                 className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
               >
-                <Download className="w-5 h-5" />
-                <span>عرض طلباتي</span>
+                <ShoppingBag className="w-5 h-5" />
+                <span>الذهاب إلى مشترياتي</span>
               </button>
+
               <button
                 onClick={() => onNavigate('marketplace')}
                 className="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
