@@ -22,7 +22,7 @@ interface ProductDetailPageProps {
 
 interface ProductWithDetails extends Product {
   store?: Store | null;
-  seller?: UserProfile;
+  seller?: UserProfile | null;
 }
 
 interface ProductImage {
@@ -60,7 +60,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   useEffect(() => {
     fetchProduct();
     fetchProductImages();
-    // ✅ زيادة المشاهدات بمجرد فتح صفحة المنتج (حتى لو الزائر غير مسجل)
     incrementViewCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
@@ -69,10 +68,22 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     if (user && productId) {
       checkFavoriteStatus();
       checkPurchaseStatus();
-      fetchAttachments();
+    } else {
+      setHasPurchased(false);
+      setIsFavorite(false);
+      setAttachments([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, productId]);
+
+  useEffect(() => {
+    if (productId && (isOwner || hasPurchased)) {
+      fetchAttachments();
+    } else {
+      setAttachments([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId, isOwner, hasPurchased]);
 
   const fetchProduct = async () => {
     try {
@@ -104,6 +115,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           .select('id, name, slug, category')
           .eq('id', data.store_id)
           .maybeSingle();
+
         store = storeData;
       }
 
@@ -113,6 +125,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           .select('id, name')
           .eq('id', data.user_id)
           .maybeSingle();
+
         seller = userData;
       }
 
@@ -122,9 +135,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         seller,
       };
 
-      setProduct(enrichedProduct as any);
+      setProduct(enrichedProduct as ProductWithDetails);
 
-      // Check if current user is the owner
       if (user && data.user_id === user.id) {
         setIsOwner(true);
       } else {
@@ -148,7 +160,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
       if (!error && data) {
         setImages(data);
-        // Set the first primary image as selected, or first image if no primary
         const primaryIndex = data.findIndex((img) => img.is_primary);
         setSelectedImageIndex(primaryIndex >= 0 ? primaryIndex : 0);
       }
@@ -158,8 +169,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   };
 
   const fetchAttachments = async () => {
-    if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('product_attachments')
@@ -167,11 +176,16 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         .eq('product_id', productId)
         .order('display_order');
 
-      if (!error && data) {
-        setAttachments(data);
+      if (error) {
+        console.error('Error fetching attachments:', error);
+        setAttachments([]);
+        return;
       }
+
+      setAttachments(data || []);
     } catch (error) {
       console.error('Error fetching attachments:', error);
+      setAttachments([]);
     }
   };
 
@@ -179,29 +193,55 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     if (!user) return;
 
     try {
-      const { data, error } = await supabase
-        .from('order_items')
-        .select('id, order:orders(status)')
-        .eq('product_id', productId)
-        .eq('orders.user_id', user.id);
+      const validStatuses = ['paid', 'completed', 'delivered'];
 
-      if (!error && data && data.length > 0) {
-        // Check if any order is completed
-        const hasCompletedOrder = (data as any[]).some(
-          (item: any) => item.order?.status === 'completed' || item.order?.status === 'delivered'
-        );
-        setHasPurchased(hasCompletedOrder);
-      } else {
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('user_id', user.id)
+        .in('status', validStatuses);
+
+      if (ordersError) {
+        console.error('Error fetching user paid orders:', ordersError);
         setHasPurchased(false);
+        return;
       }
+
+      const orderIds = (ordersData || []).map((order) => order.id);
+
+      if (orderIds.length === 0) {
+        setHasPurchased(false);
+        return;
+      }
+
+      const { data: itemsData, error: itemsError } = await supabase
+        .from('order_items')
+        .select('id')
+        .eq('product_id', productId)
+        .in('order_id', orderIds)
+        .limit(1);
+
+      if (itemsError) {
+        console.error('Error checking purchase status:', itemsError);
+        setHasPurchased(false);
+        return;
+      }
+
+      setHasPurchased(!!itemsData && itemsData.length > 0);
     } catch (error) {
       console.error('Error checking purchase status:', error);
+      setHasPurchased(false);
     }
   };
 
   const handleBuyNow = async () => {
     if (!user) {
       onNavigate('auth');
+      return;
+    }
+
+    if (isOwner) {
+      alert('لا يمكنك شراء منتجك الخاص');
       return;
     }
 
@@ -216,22 +256,24 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         .maybeSingle();
 
       if (!existingItem) {
-        await supabase.from('cart_items').insert({
+        const { error } = await supabase.from('cart_items').insert({
           user_id: user.id,
           product_id: productId,
           quantity: 1,
         });
+
+        if (error) throw error;
       }
 
       onNavigate('checkout');
     } catch (error) {
       console.error('Error adding to cart:', error);
+      alert('حدث خطأ أثناء نقل المنتج إلى السلة');
     } finally {
       setPurchasing(false);
     }
   };
 
-  // ✅ NEW: زيادة المشاهدات باستخدام الدالة اللي سويتها increment_product_view
   const incrementViewCount = async () => {
     if (!productId) return;
 
@@ -245,11 +287,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         return;
       }
 
-      // تحديث الرقم في الواجهة مباشرة (بدون جلب جديد)
       setProduct((prev) => {
-        if (!prev) return prev as any;
+        if (!prev) return prev;
         const current = Number((prev as any).views_count ?? 0) || 0;
-        return { ...prev, views_count: current + 1 } as any;
+        return { ...prev, views_count: current + 1 } as ProductWithDetails;
       });
     } catch (error) {
       console.error('Error incrementing view:', error);
@@ -260,10 +301,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     if (!user || !productId) return;
 
     try {
-      const { data, error } = await supabase
-        .from;
-      // NOTE: تركت منطقك زي ما هو (favorites + toggle_favorite)
-      // إذا لاحقاً غيرنا لنظام product_favorites بنعدله معك.
       const { data: favData, error: favError } = await supabase
         .from('favorites')
         .select('id')
@@ -278,6 +315,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       }
     } catch (error) {
       console.error('Error checking favorite status:', error);
+      setIsFavorite(false);
     }
   };
 
@@ -297,7 +335,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
       if (error) throw error;
 
-      // data يحتوي على true إذا تمت الإضافة، false إذا تم الحذف
       setIsFavorite(!!data);
     } catch (error) {
       console.error('Error toggling favorite:', error);
@@ -313,6 +350,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       return;
     }
 
+    if (isOwner) {
+      alert('لا يمكنك إضافة منتجك الخاص إلى السلة');
+      return;
+    }
+
     try {
       const { data: existingItem } = await supabase
         .from('cart_items')
@@ -322,16 +364,20 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         .maybeSingle();
 
       if (existingItem) {
-        await supabase
+        const { error } = await supabase
           .from('cart_items')
           .update({ quantity: existingItem.quantity + 1 })
           .eq('id', existingItem.id);
+
+        if (error) throw error;
       } else {
-        await supabase.from('cart_items').insert({
+        const { error } = await supabase.from('cart_items').insert({
           user_id: user.id,
           product_id: productId,
           quantity: 1,
         });
+
+        if (error) throw error;
       }
 
       alert('تم إضافة المنتج إلى السلة بنجاح');
@@ -368,6 +414,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     );
   }
 
+  const canAccessAttachments = isOwner || hasPurchased;
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -381,7 +429,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           <div className="space-y-4">
-            {/* Main Image */}
             <div className="bg-white rounded-xl overflow-hidden shadow-sm">
               <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
                 {images.length > 0 ? (
@@ -402,7 +449,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </div>
             </div>
 
-            {/* Image Gallery */}
             {images.length > 1 && (
               <div className="grid grid-cols-4 gap-3">
                 {images.map((image, index) => (
@@ -474,16 +520,30 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </div>
 
+            {canAccessAttachments && !isOwner && (
+              <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center gap-2 text-green-700">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="font-medium">تم التحقق من الشراء ويمكنك الوصول إلى الملفات</span>
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-col gap-3 mb-6">
               <button
                 onClick={handleBuyNow}
-                disabled={purchasing}
+                disabled={purchasing || isOwner}
                 className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
                 {purchasing ? (
                   <>
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                     <span>جاري المعالجة...</span>
+                  </>
+                ) : isOwner ? (
+                  <>
+                    <Lock className="w-5 h-5" />
+                    <span>هذا منتجك</span>
                   </>
                 ) : (
                   <>
@@ -495,10 +555,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
               <button
                 onClick={handleAddToCart}
-                className="w-full flex items-center justify-center gap-2 px-6 py-4 border-2 border-blue-600 text-blue-600 rounded-lg font-semibold hover:bg-blue-50 transition-colors"
+                disabled={isOwner}
+                className="w-full flex items-center justify-center gap-2 px-6 py-4 border-2 border-blue-600 text-blue-600 rounded-lg font-semibold hover:bg-blue-50 transition-colors disabled:opacity-50"
               >
                 <ShoppingCart className="w-5 h-5" />
-                <span>أضف إلى السلة</span>
+                <span>{isOwner ? 'لا يمكن إضافة منتجك للسلة' : 'أضف إلى السلة'}</span>
               </button>
             </div>
 
@@ -515,6 +576,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 <Heart className={`w-5 h-5 ${isFavorite ? 'fill-red-500' : ''}`} />
                 <span>{isFavorite ? 'في المفضلة' : 'أضف للمفضلة'}</span>
               </button>
+
               <button className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
                 <Share2 className="w-5 h-5" />
                 <span>مشاركة</span>
@@ -556,9 +618,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </div>
             )}
 
-            {/* Product Attachments Section */}
-            {(isOwner || hasPurchased) && attachments.length > 0 && (
-              <div className="bg-white rounded-xl p-6 shadow-sm">
+            {canAccessAttachments && attachments.length > 0 && (
+              <div className="mt-8 bg-white rounded-xl p-6 shadow-sm border border-gray-100">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">مرفقات المنتج</h3>
                 <div className="space-y-3">
                   {attachments.map((attachment) => (
@@ -573,6 +634,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                           <Download className="w-5 h-5 text-blue-600" />
                         )}
                       </div>
+
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-gray-900 truncate">{attachment.title}</p>
                         <p className="text-xs text-gray-500">
@@ -583,9 +645,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                             ` • ${(attachment.file_size / 1024 / 1024).toFixed(2)} MB`}
                         </p>
                       </div>
+
                       {attachment.attachment_type === 'text' ? (
                         <button
-                          onClick={() => alert(attachment.text_content)}
+                          onClick={() => alert(attachment.text_content || '')}
                           className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
                         >
                           عرض
@@ -594,6 +657,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                         <a
                           href={attachment.file_url}
                           download
+                          target="_blank"
+                          rel="noreferrer"
                           className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
                         >
                           تحميل
@@ -605,8 +670,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </div>
             )}
 
-            {!isOwner && !hasPurchased && (
-              <div className="bg-white rounded-xl p-6 shadow-sm">
+            {!canAccessAttachments && (
+              <div className="mt-8 bg-white rounded-xl p-6 shadow-sm">
                 <div className="flex items-center gap-3 text-gray-600">
                   <Lock className="w-5 h-5" />
                   <p className="text-sm">سيتم إتاحة المرفقات بعد إتمام عملية الشراء</p>
@@ -628,6 +693,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     <div className="text-sm text-gray-500">تاجر معتمد</div>
                   </div>
                 </div>
+
                 {product.store && (
                   <button
                     onClick={() => onNavigate(`storefront-${product.store?.slug}`)}
@@ -652,6 +718,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     {product.is_subscription ? 'اشتراك' : 'منتج عادي'}
                   </span>
                 </div>
+
                 {product.file_size && (
                   <div className="flex justify-between">
                     <span className="text-gray-600">حجم الملف:</span>
@@ -660,6 +727,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     </span>
                   </div>
                 )}
+
                 <div className="flex justify-between">
                   <span className="text-gray-600">تاريخ النشر:</span>
                   <span className="font-medium text-gray-900">
