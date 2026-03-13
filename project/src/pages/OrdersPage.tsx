@@ -1,28 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import {
   Package,
-  Download,
   CheckCircle,
   XCircle,
   Clock,
   AlertCircle,
   Eye,
   Star,
+  Download,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
 interface OrdersPageProps {
   onNavigate: (page: string) => void;
-}
-
-interface Order {
-  id: string;
-  order_number: string;
-  total_amount: number;
-  status: string;
-  created_at: string;
-  items?: OrderItem[];
 }
 
 interface OrderItem {
@@ -34,8 +25,18 @@ interface OrderItem {
   product_id: string;
 }
 
+interface Order {
+  id: string;
+  order_number: string;
+  total_amount: number;
+  status: string;
+  created_at: string;
+  currency?: string;
+  items?: OrderItem[];
+}
+
 export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'paid' | 'pending' | 'failed' | 'completed'>('all');
@@ -43,50 +44,72 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
   useEffect(() => {
     if (user) {
       fetchOrders();
+    } else {
+      setLoading(false);
     }
   }, [user]);
 
   const fetchOrders = async () => {
     try {
-      const { data: ordersData } = await supabase
+      setLoading(true);
+
+      const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
-        .select('*')
+        .select('id, order_number, total_amount, status, created_at, currency')
         .eq('user_id', user!.id)
         .order('created_at', { ascending: false });
+
+      if (ordersError) throw ordersError;
 
       if (ordersData) {
         const ordersWithItems = await Promise.all(
           ordersData.map(async (order) => {
-            const { data: items } = await supabase
+            const { data: items, error: itemsError } = await supabase
               .from('order_items')
-              .select('*')
+              .select('id, product_name, product_price, quantity, subtotal, product_id')
               .eq('order_id', order.id);
+
+            if (itemsError) {
+              console.error('Error fetching order items:', itemsError);
+            }
 
             return {
               ...order,
-              items: items || []
+              items: items || [],
             };
           })
         );
+
         setOrders(ordersWithItems);
       }
     } catch (error) {
       console.error('Error fetching orders:', error);
+      setOrders([]);
     } finally {
       setLoading(false);
     }
   };
 
+  const canAccessFiles = (status: string) => {
+    return ['paid', 'completed', 'delivered'].includes(status);
+  };
+
+  const handleOpenProductFiles = (productId: string) => {
+    onNavigate(`product-${productId}`);
+  };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
+      case 'paid':
       case 'completed':
+      case 'delivered':
         return <CheckCircle className="w-5 h-5 text-green-600" />;
       case 'pending':
         return <Clock className="w-5 h-5 text-yellow-600" />;
       case 'failed':
         return <XCircle className="w-5 h-5 text-red-600" />;
       case 'refunded':
+      case 'cancelled':
         return <AlertCircle className="w-5 h-5 text-gray-600" />;
       default:
         return <Clock className="w-5 h-5 text-gray-600" />;
@@ -99,12 +122,16 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
         return 'تم الدفع';
       case 'completed':
         return 'مكتمل';
+      case 'delivered':
+        return 'تم التسليم';
       case 'pending':
         return 'جاري المعالجة';
       case 'failed':
         return 'فشل';
       case 'cancelled':
         return 'ملغي';
+      case 'refunded':
+        return 'مسترجع';
       default:
         return status;
     }
@@ -113,6 +140,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'paid':
+      case 'delivered':
         return 'bg-green-100 text-green-700';
       case 'completed':
         return 'bg-blue-100 text-blue-700';
@@ -121,6 +149,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
       case 'failed':
         return 'bg-red-100 text-red-700';
       case 'cancelled':
+      case 'refunded':
         return 'bg-gray-100 text-gray-700';
       default:
         return 'bg-gray-100 text-gray-700';
@@ -178,6 +207,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
             >
               الكل ({orders.length})
             </button>
+
             <button
               onClick={() => setFilter('paid')}
               className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -186,6 +216,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
             >
               تم الدفع ({orders.filter((o) => o.status === 'paid').length})
             </button>
+
             <button
               onClick={() => setFilter('completed')}
               className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -194,6 +225,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
             >
               مكتملة ({orders.filter((o) => o.status === 'completed').length})
             </button>
+
             <button
               onClick={() => setFilter('pending')}
               className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -202,6 +234,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
             >
               جاري المعالجة ({orders.filter((o) => o.status === 'pending').length})
             </button>
+
             <button
               onClick={() => setFilter('failed')}
               className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
@@ -230,43 +263,29 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
             {filteredOrders.map((order) => (
               <div key={order.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
                 <div className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-start gap-4 flex-1">
-                      <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        {order.product?.thumbnail_url ? (
-                          <img
-                            src={order.product.thumbnail_url}
-                            alt={order.product.name}
-                            className="w-full h-full object-cover rounded-lg"
-                          />
-                        ) : (
-                          <Package className="w-10 h-10 text-blue-600" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-lg font-bold text-gray-900 mb-1">
-                          {order.product?.name || 'منتج'}
-                        </h3>
-                        <p className="text-sm text-gray-500 mb-2" dir="ltr">
-                          رقم الطلب: {order.order_number}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {new Date(order.created_at).toLocaleDateString('ar-SA', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </p>
-                      </div>
+                  <div className="flex items-start justify-between mb-5">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900 mb-1">
+                        الطلب #{order.order_number}
+                      </h3>
+                      <p className="text-xs text-gray-500">
+                        {new Date(order.created_at).toLocaleDateString('ar-SA', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </p>
                     </div>
+
                     <div className="text-left">
                       <div className="text-xl font-bold text-blue-600 mb-2">
-                        {order.total_amount} {order.currency === 'SAR' ? 'ريال' : order.currency}
+                        {Number(order.total_amount).toFixed(2)}{' '}
+                        {order.currency === 'SAR' || !order.currency ? 'ريال' : order.currency}
                       </div>
                       <div
-                        className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(
+                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(
                           order.status
                         )}`}
                       >
@@ -276,31 +295,67 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
                     </div>
                   </div>
 
-                  <div className="flex gap-3 pt-4 border-t border-gray-100">
-                    {order.status === 'completed' && order.download_url && (
-                      <button
-                        onClick={() => handleDownload(order)}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                      >
-                        <Download className="w-4 h-4" />
-                        <span>تحميل</span>
-                        {order.download_count > 0 && (
-                          <span className="text-xs">({order.download_count})</span>
-                        )}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => onNavigate(`product-${order.product_id}`)}
-                      className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      <Eye className="w-4 h-4" />
-                      <span>عرض المنتج</span>
-                    </button>
-                    {order.status === 'completed' && (
-                      <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
-                        <Star className="w-4 h-4" />
-                        <span>تقييم</span>
-                      </button>
+                  <div className="border-t border-gray-100 pt-4">
+                    <h4 className="text-sm font-bold text-gray-700 mb-3">عناصر الطلب</h4>
+
+                    {order.items && order.items.length > 0 ? (
+                      <div className="space-y-3">
+                        {order.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="p-4 rounded-xl border border-gray-100 bg-gray-50"
+                          >
+                            <div className="flex items-start justify-between gap-4 mb-3">
+                              <div className="flex items-start gap-3">
+                                <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  <Package className="w-6 h-6 text-blue-600" />
+                                </div>
+                                <div>
+                                  <h5 className="font-semibold text-gray-900">
+                                    {item.product_name || 'منتج'}
+                                  </h5>
+                                  <p className="text-sm text-gray-500">
+                                    الكمية: {item.quantity} × {Number(item.product_price).toFixed(2)} ريال
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="text-left font-bold text-gray-900">
+                                {Number(item.subtotal).toFixed(2)} ريال
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-3">
+                              {canAccessFiles(order.status) && (
+                                <button
+                                  onClick={() => handleOpenProductFiles(item.product_id)}
+                                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                >
+                                  <Download className="w-4 h-4" />
+                                  <span>فتح الملفات</span>
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => onNavigate(`product-${item.product_id}`)}
+                                className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
+                              >
+                                <Eye className="w-4 h-4" />
+                                <span>عرض المنتج</span>
+                              </button>
+
+                              {canAccessFiles(order.status) && (
+                                <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">
+                                  <Star className="w-4 h-4" />
+                                  <span>تقييم</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-500">لا توجد عناصر مرتبطة بهذا الطلب</div>
                     )}
                   </div>
                 </div>
