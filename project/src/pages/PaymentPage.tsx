@@ -13,12 +13,10 @@ interface Order {
   order_number?: string | null;
   total_amount: number;
   status: string;
-
-  // هذه الحقول ممكن تكون موجودة عندك أو لا (حسب سكيمتك)
+  currency?: string | null;
   customer_name?: string | null;
   customer_email?: string | null;
   customer_phone?: string | null;
-
   created_at?: string | null;
 }
 
@@ -41,7 +39,6 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
     setError('');
 
     try {
-      // ✅ مهم: الطلب قد يكون مربوط بـ customer_id أو user_id (للتوافق)
       const ownerFilter = `customer_id.eq.${profile!.id},user_id.eq.${profile!.id}`;
 
       const { data, error } = await supabase
@@ -69,7 +66,76 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
     }
   };
 
+  const buildPaymobIframeUrl = (iframeId: string | number, paymentToken: string) => {
+    return `https://accept.paymob.com/api/acceptance/iframes/${iframeId}?payment_token=${paymentToken}`;
+  };
+
+  const extractRedirectUrl = (result: any): string | null => {
+    if (!result) return null;
+
+    if (typeof result === 'string' && result.startsWith('http')) {
+      return result;
+    }
+
+    if (result.iframe_url && typeof result.iframe_url === 'string') {
+      return result.iframe_url;
+    }
+
+    if (result.payment_url && typeof result.payment_url === 'string') {
+      return result.payment_url;
+    }
+
+    if (result.checkout_url && typeof result.checkout_url === 'string') {
+      return result.checkout_url;
+    }
+
+    if (result.url && typeof result.url === 'string') {
+      return result.url;
+    }
+
+    if (result.redirect_url && typeof result.redirect_url === 'string') {
+      return result.redirect_url;
+    }
+
+    if (result.iframe_id && result.payment_token) {
+      return buildPaymobIframeUrl(result.iframe_id, result.payment_token);
+    }
+
+    if (result.data?.iframe_url && typeof result.data.iframe_url === 'string') {
+      return result.data.iframe_url;
+    }
+
+    if (result.data?.payment_url && typeof result.data.payment_url === 'string') {
+      return result.data.payment_url;
+    }
+
+    if (result.data?.checkout_url && typeof result.data.checkout_url === 'string') {
+      return result.data.checkout_url;
+    }
+
+    if (result.data?.url && typeof result.data.url === 'string') {
+      return result.data.url;
+    }
+
+    if (result.data?.redirect_url && typeof result.data.redirect_url === 'string') {
+      return result.data.redirect_url;
+    }
+
+    if (result.data?.iframe_id && result.data?.payment_token) {
+      return buildPaymobIframeUrl(result.data.iframe_id, result.data.payment_token);
+    }
+
+    return null;
+  };
+
   const handlePayment = async () => {
+    if (!order) return;
+
+    if (order.status === 'paid' || order.status === 'completed') {
+      onNavigate(`payment-success-${order.id}`);
+      return;
+    }
+
     setProcessing(true);
     setError('');
 
@@ -78,10 +144,10 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
       const session = sessionData?.session;
 
       if (!session) {
-        throw new Error('يجب تسجيل الدخول');
+        throw new Error('يجب تسجيل الدخول أولًا');
       }
 
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-stripe-payment`;
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-paymob-payment`;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -89,36 +155,41 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ orderId }),
+        body: JSON.stringify({
+          order_id: orderId,
+          orderId: orderId,
+        }),
       });
 
-      const result = await response.json();
+      const rawText = await response.text();
+      let result: any = null;
 
-      if (!result?.success) {
-        throw new Error(result?.error || 'فشلت عملية الدفع');
+      try {
+        result = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        result = rawText;
       }
 
-      await supabase.from('payment_logs').insert({
-        order_id: orderId,
-        event_type: 'payment_success',
-        status: 'success',
-        payload: { paymentIntentId: result.paymentIntentId },
-      });
+      if (!response.ok) {
+        const serverMessage =
+          result?.error ||
+          result?.message ||
+          (typeof result === 'string' ? result : null) ||
+          'فشل بدء جلسة الدفع';
+        throw new Error(serverMessage);
+      }
 
-      onNavigate(`payment-success-${orderId}`);
+      const redirectUrl = extractRedirectUrl(result);
+
+      if (!redirectUrl) {
+        console.error('Unexpected create-paymob-payment response:', result);
+        throw new Error('تعذر الحصول على رابط الدفع من Paymob');
+      }
+
+      window.location.href = redirectUrl;
     } catch (err: any) {
-      console.error('Payment error:', err);
-
-      const msg = err?.message || 'فشلت عملية الدفع. الرجاء المحاولة مرة أخرى.';
-      setError(msg);
-
-      await supabase.from('payment_logs').insert({
-        order_id: orderId,
-        event_type: 'payment_failed',
-        status: 'failed',
-        error_message: msg,
-      });
-
+      console.error('Paymob payment start error:', err);
+      setError(err?.message || 'حدث خطأ أثناء بدء الدفع. حاول مرة أخرى.');
       setProcessing(false);
     }
   };
@@ -153,6 +224,8 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
   }
 
   const displayOrderNumber = order.order_number || order.id;
+  const displayCurrency = order.currency === 'SAR' || !order.currency ? 'ريال' : order.currency;
+  const isAlreadyPaid = order.status === 'paid' || order.status === 'completed';
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -196,12 +269,18 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
                   <div className="flex justify-between items-center">
                     <span className="text-xl font-bold text-gray-900">المبلغ الإجمالي</span>
                     <span className="text-3xl font-bold text-blue-600">
-                      {Number(order.total_amount || 0).toFixed(2)} ريال
+                      {Number(order.total_amount || 0).toFixed(2)} {displayCurrency}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
+
+            {!isAlreadyPaid && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+                سيتم تحويلك إلى صفحة الدفع الآمنة لإدخال بيانات البطاقة وإتمام العملية.
+              </div>
+            )}
 
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -217,23 +296,21 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
 
             <button
               onClick={handlePayment}
-              disabled={processing || order.status === 'paid'}
+              disabled={processing || isAlreadyPaid}
               className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg font-bold text-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
             >
               {processing ? (
                 <>
                   <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>جاري معالجة الدفع...</span>
+                  <span>جاري تحويلك إلى Paymob...</span>
                 </>
-              ) : order.status === 'paid' ? (
+              ) : isAlreadyPaid ? (
                 <>
                   <CheckCircle className="w-6 h-6" />
                   <span>تم الدفع بنجاح</span>
                 </>
               ) : (
-                <>
-                  <span>تأكيد ودفع {Number(order.total_amount || 0).toFixed(2)} ريال</span>
-                </>
+                <span>تأكيد ودفع {Number(order.total_amount || 0).toFixed(2)} {displayCurrency}</span>
               )}
             </button>
           </div>
