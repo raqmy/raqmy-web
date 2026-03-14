@@ -11,11 +11,30 @@ interface CartItem {
   id: string;
   product_id: string;
   quantity: number;
-  product?: Product;
+  product?: Product & {
+    user_id?: string;
+    title?: string;
+    name?: string;
+    currency?: string;
+  };
+}
+
+interface CreatedOrder {
+  id: string;
+  order_number: string;
+}
+
+interface PaymobStartResponse {
+  iframe_url?: string;
+  payment_url?: string;
+  checkout_url?: string;
+  redirect_url?: string;
+  url?: string;
+  iframeUrl?: string;
 }
 
 export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -26,42 +45,47 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     cardNumber: '',
     expiryDate: '',
     cvv: '',
-    cardholderName: ''
+    cardholderName: '',
   });
 
   const [paypalData, setPaypalData] = useState({
     email: '',
-    password: ''
+    password: '',
   });
 
   const [formData, setFormData] = useState({
     shippingAddress: '',
-    notes: ''
+    notes: '',
   });
 
   useEffect(() => {
-    if (profile) {
+    if (user) {
       fetchCartItems();
     }
-  }, [profile]);
+  }, [user]);
 
   const fetchCartItems = async () => {
     try {
-      const { data: cartData } = await supabase
+      const { data: cartData, error: cartError } = await supabase
         .from('cart_items')
         .select('*')
-        .eq('user_id', profile!.id);
+        .eq('user_id', user!.id);
+
+      if (cartError) throw cartError;
 
       if (cartData && cartData.length > 0) {
-        const productIds = cartData.map(item => item.product_id);
-        const { data: productsData } = await supabase
+        const productIds = cartData.map((item) => item.product_id);
+
+        const { data: productsData, error: productsError } = await supabase
           .from('products')
           .select('*')
           .in('id', productIds);
 
-        const enrichedItems = cartData.map(item => ({
+        if (productsError) throw productsError;
+
+        const enrichedItems = cartData.map((item) => ({
           ...item,
-          product: productsData?.find(p => p.id === item.product_id)
+          product: productsData?.find((p) => p.id === item.product_id),
         }));
 
         setCartItems(enrichedItems);
@@ -70,6 +94,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       }
     } catch (error) {
       console.error('Error fetching cart:', error);
+      setError('حدث خطأ أثناء تحميل السلة');
     } finally {
       setLoading(false);
     }
@@ -81,100 +106,191 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     }, 0);
   };
 
+  const generateFallbackOrderNumber = () => {
+    const now = new Date();
+    const y = now.getFullYear().toString();
+    const m = (now.getMonth() + 1).toString().padStart(2, '0');
+    const d = now.getDate().toString().padStart(2, '0');
+    const random = Math.floor(1000 + Math.random() * 9000);
+    return `RQ-${y}${m}${d}-${random}`;
+  };
+
+  const createInternalOrder = async (): Promise<CreatedOrder> => {
+    const missingProduct = cartItems.find((i) => !i.product);
+    if (missingProduct) {
+      throw new Error('بعض المنتجات غير موجودة');
+    }
+
+    const missingPrice = cartItems.find((i) => (i.product?.price ?? null) === null);
+    if (missingPrice) {
+      throw new Error('سعر أحد المنتجات غير موجود');
+    }
+
+    const firstItem = cartItems[0];
+    const sellerId = firstItem?.product?.user_id || null;
+    const currency = firstItem?.product?.currency || 'SAR';
+    const totalAmount = calculateTotal();
+
+    let orderNumber = generateFallbackOrderNumber();
+
+    try {
+      const { data: orderNumberData, error: orderNumberError } = await supabase.rpc(
+        'generate_order_number'
+      );
+
+      if (!orderNumberError && orderNumberData) {
+        orderNumber = orderNumberData;
+      }
+    } catch (rpcError) {
+      console.warn('generate_order_number failed, using fallback order number:', rpcError);
+    }
+
+    const orderPayload = {
+      order_number: orderNumber,
+      user_id: user!.id,
+      seller_id: sellerId,
+      total_amount: totalAmount,
+      currency,
+      status: 'pending_payment',
+      payment_provider: 'paymob',
+      payment_method: paymentMethod,
+      customer_name: profile?.name || '',
+      customer_email: profile?.email || user?.email || '',
+      customer_phone: profile?.phone || '',
+      shipping_address: formData.shippingAddress || null,
+      notes: formData.notes || null,
+    };
+
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .insert(orderPayload)
+      .select('id, order_number')
+      .single();
+
+    if (orderError) {
+      console.error('Order insert error:', orderError);
+      throw orderError;
+    }
+
+    const orderItemsPayload = cartItems.map((item) => ({
+      order_id: order.id,
+      product_id: item.product_id,
+      seller_id: item.product?.user_id || null,
+      quantity: item.quantity,
+      price: item.product!.price,
+    }));
+
+    const { error: orderItemsError } = await supabase.from('order_items').insert(orderItemsPayload);
+
+    if (orderItemsError) {
+      console.error('Order items insert error:', orderItemsError);
+
+      // محاولة تنظيف الطلب إذا فشل إدخال العناصر
+      await supabase.from('orders').delete().eq('id', order.id);
+      throw orderItemsError;
+    }
+
+    return order;
+  };
+
+  const startPaymobPayment = async (orderId: string): Promise<string> => {
+    const { data, error } = await supabase.functions.invoke('create-paymob-payment', {
+      body: {
+        order_id: orderId,
+      },
+    });
+
+    if (error) {
+      console.error('Paymob function invoke error:', error);
+      throw error;
+    }
+
+    const response = (data || {}) as PaymobStartResponse;
+
+    const paymentUrl =
+      response.iframe_url ||
+      response.payment_url ||
+      response.checkout_url ||
+      response.redirect_url ||
+      response.url ||
+      response.iframeUrl;
+
+    if (!paymentUrl) {
+      console.error('Invalid Paymob response:', response);
+      throw new Error('لم يتم استلام رابط الدفع من Paymob');
+    }
+
+    return paymentUrl;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!user) {
+      setError('يجب تسجيل الدخول أولاً');
+      return;
+    }
 
     if (cartItems.length === 0) {
       setError('السلة فارغة');
       return;
     }
 
-    // ✅ تأكد أن كل العناصر عندها منتج وسعر (عشان ما يصير price = null)
-    const missingProduct = cartItems.find(i => !i.product);
-    if (missingProduct) {
-      setError('حدث خطأ: بعض المنتجات غير موجودة. رجاءً حدّث الصفحة وحاول مرة أخرى.');
+    const hasMultipleSellers = new Set(
+      cartItems.map((item) => item.product?.user_id).filter(Boolean)
+    ).size > 1;
+
+    if (hasMultipleSellers) {
+      setError('حالياً لا يمكن إتمام طلب واحد لمنتجات من أكثر من بائع. قسم السلة ثم حاول مرة أخرى.');
       return;
     }
 
-    const missingPrice = cartItems.find(i => (i.product?.price ?? null) === null);
-    if (missingPrice) {
-      setError('حدث خطأ: سعر أحد المنتجات غير موجود. رجاءً راجع بيانات المنتج.');
+    if (paymentMethod === 'paypal') {
+      setError('PayPal غير مفعّل حالياً. استخدم البطاقة وسيتم تحويلك إلى صفحة الدفع.');
       return;
-    }
-
-    if (paymentMethod === 'card') {
-      if (!cardData.cardNumber || !cardData.expiryDate || !cardData.cvv || !cardData.cardholderName) {
-        setError('الرجاء ملء جميع بيانات البطاقة');
-        return;
-      }
-      if (cardData.cardNumber.replace(/\s/g, '').length !== 16) {
-        setError('رقم البطاقة يجب أن يكون 16 رقم');
-        return;
-      }
-    } else {
-      if (!paypalData.email || !paypalData.password) {
-        setError('الرجاء ملء بيانات PayPal');
-        return;
-      }
     }
 
     setProcessing(true);
 
     try {
-      const { data: orderNumberData } = await supabase.rpc('generate_order_number');
+      const createdOrder = await createInternalOrder();
+      const paymentUrl = await startPaymobPayment(createdOrder.id);
 
-      const totalAmount = calculateTotal();
-      const sellerId = cartItems[0]?.product?.user_id;
-
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-          order_number: orderNumberData,
-          customer_id: profile!.id,
-          seller_id: sellerId,
-          total_amount: totalAmount,
-          status: 'pending',
-          customer_name: profile?.name || '',
-          customer_email: profile?.email || '',
-          customer_phone: profile?.phone || '',
-          shipping_address: formData.shippingAddress,
-          notes: formData.notes,
-          payment_method: paymentMethod
-        })
-        .select()
-        .single();
-
-      if (orderError) throw orderError;
-
-      // ✅ أهم تعديل هنا: إرسال price (NOT NULL) بدل product_price
-      // ونرسل أقل حقول ممكنة لتجنب أخطاء "column does not exist"
-      const orderItems = cartItems.map(item => {
-        const price = item.product!.price; // مضمون بسبب التحقق فوق
-        return {
-          order_id: order.id,
-          product_id: item.product_id,
-          quantity: item.quantity,
-          price: price
-        };
-      });
-
-      const { error: orderItemsError } = await supabase.from('order_items').insert(orderItems);
-      if (orderItemsError) throw orderItemsError;
-
-      await supabase
-        .from('cart_items')
-        .delete()
-        .eq('user_id', profile!.id);
-
-      onNavigate(`payment-${order.id}`);
+      // لا نحذف السلة هنا، نحذفها بعد تأكيد الدفع الفعلي
+      window.location.href = paymentUrl;
     } catch (error: any) {
-      console.error('Error creating order:', error);
-      setError('حدث خطأ أثناء إنشاء الطلب. الرجاء المحاولة مرة أخرى.');
+      console.error('Error creating order / starting payment:', error);
+
+      const detailedMessage =
+        error?.message ||
+        error?.context ||
+        error?.details ||
+        error?.hint ||
+        'حدث خطأ أثناء بدء عملية الدفع. الرجاء المحاولة مرة أخرى.';
+
+      setError(detailedMessage);
     } finally {
       setProcessing(false);
     }
   };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">يجب تسجيل الدخول</h2>
+          <button
+            onClick={() => onNavigate('auth')}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+          >
+            تسجيل الدخول
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -248,13 +364,16 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
                 {paymentMethod === 'card' ? (
                   <div className="space-y-4">
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+                      سيتم تحويلك إلى صفحة الدفع الآمنة لإدخال بيانات البطاقة وإتمام العملية.
+                    </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        رقم البطاقة <span className="text-red-600">*</span>
+                        رقم البطاقة
                       </label>
                       <input
                         type="text"
-                        required
                         maxLength={19}
                         value={cardData.cardNumber}
                         onChange={(e) => {
@@ -262,8 +381,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                           const formatted = value.match(/.{1,4}/g)?.join(' ') || value;
                           setCardData({ ...cardData, cardNumber: formatted });
                         }}
-                        placeholder="1234 5678 9012 3456"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="سيتم إدخاله في صفحة الدفع"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         dir="ltr"
                       />
                     </div>
@@ -271,11 +390,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          تاريخ الانتهاء <span className="text-red-600">*</span>
+                          تاريخ الانتهاء
                         </label>
                         <input
                           type="text"
-                          required
                           maxLength={5}
                           value={cardData.expiryDate}
                           onChange={(e) => {
@@ -286,18 +404,17 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                             setCardData({ ...cardData, expiryDate: value });
                           }}
                           placeholder="MM/YY"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           dir="ltr"
                         />
                       </div>
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          CVV <span className="text-red-600">*</span>
+                          CVV
                         </label>
                         <input
                           type="text"
-                          required
                           maxLength={3}
                           value={cardData.cvv}
                           onChange={(e) => {
@@ -305,7 +422,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                             setCardData({ ...cardData, cvv: value });
                           }}
                           placeholder="123"
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           dir="ltr"
                         />
                       </div>
@@ -313,43 +430,49 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        الاسم على البطاقة <span className="text-red-600">*</span>
+                        الاسم على البطاقة
                       </label>
                       <input
                         type="text"
-                        required
                         value={cardData.cardholderName}
-                        onChange={(e) => setCardData({ ...cardData, cardholderName: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        onChange={(e) =>
+                          setCardData({ ...cardData, cardholderName: e.target.value })
+                        }
+                        placeholder="سيتم إدخاله في صفحة الدفع"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                   </div>
                 ) : (
                   <div className="space-y-4">
+                    <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+                      PayPal غير مفعّل حالياً في الموقع.
+                    </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        البريد الإلكتروني PayPal <span className="text-red-600">*</span>
+                        البريد الإلكتروني PayPal
                       </label>
                       <input
                         type="email"
-                        required
                         value={paypalData.email}
                         onChange={(e) => setPaypalData({ ...paypalData, email: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         dir="ltr"
                       />
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        كلمة المرور <span className="text-red-600">*</span>
+                        كلمة المرور
                       </label>
                       <input
                         type="password"
-                        required
                         value={paypalData.password}
-                        onChange={(e) => setPaypalData({ ...paypalData, password: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        onChange={(e) =>
+                          setPaypalData({ ...paypalData, password: e.target.value })
+                        }
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         dir="ltr"
                       />
                     </div>
@@ -363,7 +486,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     </label>
                     <textarea
                       value={formData.shippingAddress}
-                      onChange={(e) => setFormData({ ...formData, shippingAddress: e.target.value })}
+                      onChange={(e) =>
+                        setFormData({ ...formData, shippingAddress: e.target.value })
+                      }
                       rows={3}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                     />
@@ -391,9 +516,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                 <div className="space-y-4 mb-6">
                   {cartItems.map((item) => {
                     const productTitle =
-                      (item.product as any)?.title ??
-                      (item.product as any)?.name ??
-                      '';
+                      (item.product as any)?.title ?? (item.product as any)?.name ?? '';
 
                     return (
                       <div key={item.id} className="flex gap-3">
@@ -408,7 +531,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                             {item.quantity} × {item.product?.price} {item.product?.currency}
                           </p>
                           <p className="text-sm font-bold text-blue-600 mt-1">
-                            {((item.product?.price || 0) * item.quantity).toFixed(2)} {item.product?.currency}
+                            {((item.product?.price || 0) * item.quantity).toFixed(2)}{' '}
+                            {item.product?.currency}
                           </p>
                         </div>
                       </div>
