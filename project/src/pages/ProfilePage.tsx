@@ -18,6 +18,10 @@ import {
   Banknote,
   Edit,
   CheckCircle,
+  Download,
+  XCircle,
+  Clock,
+  Star,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -31,6 +35,25 @@ type ProfileStats = {
   viewed_products_count: number;
 };
 
+type ProfileOrderItem = {
+  id: string;
+  product_id: string;
+  quantity: number;
+  product_name: string;
+  product_price: number;
+  subtotal: number;
+};
+
+type ProfileOrder = {
+  id: string;
+  order_number: string;
+  total_amount: number;
+  status: string;
+  created_at: string;
+  currency?: string | null;
+  items: ProfileOrderItem[];
+};
+
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const { user, profile, updateProfile } = useAuth();
   const [activeTab, setActiveTab] = useState<
@@ -40,14 +63,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  // ✅ NEW: stats
   const [stats, setStats] = useState<ProfileStats>({
     favorites_count: 0,
     viewed_products_count: 0,
   });
   const [statsLoading, setStatsLoading] = useState(false);
 
-  // ✅ NEW: Bank details
   const [bankDetails, setBankDetails] = useState<any>(null);
   const [editingBank, setEditingBank] = useState(false);
   const [bankAccountHolderName, setBankAccountHolderName] = useState('');
@@ -55,6 +76,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [bankName, setBankName] = useState('');
   const [bankLoading, setBankLoading] = useState(false);
   const [bankMessage, setBankMessage] = useState('');
+
+  const [orders, setOrders] = useState<ProfileOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState('');
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
 
   const fetchProfileStats = async () => {
     if (!user) return;
@@ -70,7 +96,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         return;
       }
 
-      // Supabase RPC returning "table" غالباً يرجّع array
       const row = Array.isArray(data) ? data?.[0] : data;
 
       setStats({
@@ -110,14 +135,118 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
-  // ✅ Fetch stats when page loads (and after login)
+  const fetchOrders = async () => {
+    if (!user) return;
+
+    setOrdersLoading(true);
+    setOrdersError('');
+
+    try {
+      const ownerFilter = `user_id.eq.${user.id},customer_id.eq.${user.id}`;
+
+      const { data: ordersData, error: ordersDbError } = await supabase
+        .from('orders')
+        .select('id, order_number, total_amount, status, created_at, currency')
+        .or(ownerFilter)
+        .order('created_at', { ascending: false });
+
+      if (ordersDbError) throw ordersDbError;
+
+      if (!ordersData || ordersData.length === 0) {
+        setOrders([]);
+        setOrdersLoaded(true);
+        return;
+      }
+
+      const orderIds = ordersData.map((order) => order.id);
+
+      const { data: rawItems, error: itemsError } = await supabase
+        .from('order_items')
+        .select('id, order_id, product_id, quantity, price')
+        .in('order_id', orderIds);
+
+      if (itemsError) {
+        console.error('Error fetching order items:', itemsError);
+      }
+
+      const safeItems = rawItems || [];
+      const productIds = [...new Set(safeItems.map((item: any) => item.product_id).filter(Boolean))];
+
+      let productsMap = new Map<string, any>();
+
+      if (productIds.length > 0) {
+        const { data: productsData, error: productsError } = await supabase
+          .from('products')
+          .select('id, title, name, price, currency')
+          .in('id', productIds);
+
+        if (productsError) {
+          console.error('Error fetching products for orders:', productsError);
+        } else {
+          productsMap = new Map((productsData || []).map((product: any) => [product.id, product]));
+        }
+      }
+
+      const itemsByOrderId = new Map<string, ProfileOrderItem[]>();
+
+      for (const item of safeItems as any[]) {
+        const product = productsMap.get(item.product_id);
+        const resolvedPrice = Number(item.price ?? product?.price ?? 0);
+        const resolvedQuantity = Number(item.quantity ?? 1);
+
+        const normalizedItem: ProfileOrderItem = {
+          id: item.id,
+          product_id: item.product_id,
+          quantity: resolvedQuantity,
+          product_name: product?.title || product?.name || 'منتج',
+          product_price: resolvedPrice,
+          subtotal: resolvedPrice * resolvedQuantity,
+        };
+
+        if (!itemsByOrderId.has(item.order_id)) {
+          itemsByOrderId.set(item.order_id, []);
+        }
+
+        itemsByOrderId.get(item.order_id)!.push(normalizedItem);
+      }
+
+      const normalizedOrders: ProfileOrder[] = ordersData.map((order: any) => ({
+        id: order.id,
+        order_number: order.order_number || order.id,
+        total_amount: Number(order.total_amount ?? 0),
+        status: order.status || 'pending',
+        created_at: order.created_at,
+        currency: order.currency || 'SAR',
+        items: itemsByOrderId.get(order.id) || [],
+      }));
+
+      setOrders(normalizedOrders);
+      setOrdersLoaded(true);
+    } catch (error) {
+      console.error('Error fetching profile orders:', error);
+      setOrders([]);
+      setOrdersError('حدث خطأ أثناء تحميل المشتريات');
+      setOrdersLoaded(true);
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (user?.id) {
       fetchProfileStats();
       fetchBankDetails();
+      fetchOrders();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, profile?.role]);
+
+  useEffect(() => {
+    if (activeTab === 'orders' && user?.id && !ordersLoaded && !ordersLoading) {
+      fetchOrders();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, user?.id]);
 
   const handleUpdateProfile = async () => {
     setLoading(true);
@@ -177,7 +306,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   };
 
   const handleUpgradeToSeller = async () => {
-    // ✅ الواجهة تعتمد seller (و AuthContext يحول merchant -> seller)
     if (profile?.role === 'seller') return;
 
     const confirm = window.confirm('هل تريد ترقية حسابك إلى حساب تاجر؟ ستتمكن من إنشاء متاجر وبيع المنتجات.');
@@ -201,10 +329,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     const confirmText = 'DELETE';
     const userInput = window.prompt(
       `تحذير: هذا الإجراء لا يمكن التراجع عنه!\n\n` +
-      `سيتم حذف:\n` +
-      `- حسابك وجميع بياناتك الشخصية\n` +
-      (profile?.role === 'seller' ? `- جميع متاجرك ومنتجاتك\n- جميع مبيعاتك وعمولاتك\n` : '') +
-      `\nاكتب "${confirmText}" للتأكيد:`
+        `سيتم حذف:\n` +
+        `- حسابك وجميع بياناتك الشخصية\n` +
+        (profile?.role === 'seller' ? `- جميع متاجرك ومنتجاتك\n- جميع مبيعاتك وعمولاتك\n` : '') +
+        `\nاكتب "${confirmText}" للتأكيد:`
     );
 
     if (userInput !== confirmText) {
@@ -216,8 +344,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     setLoading(true);
     try {
-      // ملاحظة: هذا يحتاج Service Role Key على السيرفر.
-      // إذا ما كان عندك Backend/Admin API، هذا السطر غالباً ما راح يشتغل على المتصفح.
       const { error } = await supabase.auth.admin.deleteUser(user!.id);
       if (error) throw error;
 
@@ -228,6 +354,72 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       setMessage('حدث خطأ أثناء حذف الحساب. يرجى المحاولة لاحقاً.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const canAccessFiles = (status: string) => {
+    return ['paid', 'completed', 'delivered'].includes(status);
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'paid':
+      case 'completed':
+      case 'delivered':
+        return <CheckCircle className="w-5 h-5 text-green-600" />;
+      case 'pending':
+      case 'pending_payment':
+        return <Clock className="w-5 h-5 text-yellow-600" />;
+      case 'failed':
+        return <XCircle className="w-5 h-5 text-red-600" />;
+      case 'refunded':
+      case 'cancelled':
+        return <AlertCircle className="w-5 h-5 text-gray-600" />;
+      default:
+        return <Clock className="w-5 h-5 text-gray-600" />;
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'paid':
+        return 'تم الدفع';
+      case 'completed':
+        return 'مكتمل';
+      case 'delivered':
+        return 'تم التسليم';
+      case 'pending':
+        return 'جاري المعالجة';
+      case 'pending_payment':
+        return 'بانتظار الدفع';
+      case 'failed':
+        return 'فشل';
+      case 'cancelled':
+        return 'ملغي';
+      case 'refunded':
+        return 'مسترجع';
+      default:
+        return status;
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'paid':
+      case 'delivered':
+        return 'bg-green-100 text-green-700';
+      case 'completed':
+        return 'bg-blue-100 text-blue-700';
+      case 'pending':
+      case 'pending_payment':
+        return 'bg-yellow-100 text-yellow-700';
+      case 'failed':
+        return 'bg-red-100 text-red-700';
+      case 'cancelled':
+      case 'refunded':
+        return 'bg-gray-100 text-gray-700';
+      default:
+        return 'bg-gray-100 text-gray-700';
     }
   };
 
@@ -247,7 +439,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     );
   }
 
-  // ✅ المهم: التاجر = seller
   const isMerchant = profile.role === 'seller';
 
   return (
@@ -430,7 +621,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <ShoppingBag className="w-6 h-6 text-blue-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900 mb-1">0</div>
+                      <div className="text-3xl font-bold text-gray-900 mb-1">{orders.length}</div>
                       <p className="text-sm text-gray-600">إجمالي المشتريات</p>
                     </div>
 
@@ -486,18 +677,143 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
               {activeTab === 'orders' && (
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">مشترياتي</h2>
-                  <div className="text-center py-12">
-                    <ShoppingBag className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد مشتريات</h3>
-                    <p className="text-gray-600 mb-6">ابدأ بتصفح المنتجات وشراء ما يعجبك</p>
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-bold text-gray-900">مشترياتي</h2>
                     <button
-                      onClick={() => onNavigate('marketplace')}
-                      className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                      onClick={fetchOrders}
+                      disabled={ordersLoading}
+                      className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
                     >
-                      تصفح المنتجات
+                      {ordersLoading ? 'جاري التحديث...' : 'تحديث المشتريات'}
                     </button>
                   </div>
+
+                  {ordersLoading ? (
+                    <div className="text-center py-12">
+                      <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                      <p className="text-gray-600">جاري تحميل المشتريات...</p>
+                    </div>
+                  ) : ordersError ? (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+                      {ordersError}
+                    </div>
+                  ) : orders.length === 0 ? (
+                    <div className="text-center py-12">
+                      <ShoppingBag className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد مشتريات</h3>
+                      <p className="text-gray-600 mb-6">ابدأ بتصفح المنتجات وشراء ما يعجبك</p>
+                      <button
+                        onClick={() => onNavigate('marketplace')}
+                        className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                      >
+                        تصفح المنتجات
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {orders.map((order) => (
+                        <div key={order.id} className="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
+                          <div className="p-6">
+                            <div className="flex items-start justify-between mb-5">
+                              <div>
+                                <h3 className="text-lg font-bold text-gray-900 mb-1">
+                                  الطلب #{order.order_number}
+                                </h3>
+                                <p className="text-xs text-gray-500">
+                                  {new Date(order.created_at).toLocaleDateString('ar-SA', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </p>
+                              </div>
+
+                              <div className="text-left">
+                                <div className="text-xl font-bold text-blue-600 mb-2">
+                                  {Number(order.total_amount).toFixed(2)}{' '}
+                                  {order.currency === 'SAR' || !order.currency ? 'ريال' : order.currency}
+                                </div>
+                                <div
+                                  className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(
+                                    order.status
+                                  )}`}
+                                >
+                                  {getStatusIcon(order.status)}
+                                  <span>{getStatusText(order.status)}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="border-t border-gray-200 pt-4">
+                              <h4 className="text-sm font-bold text-gray-700 mb-3">عناصر الطلب</h4>
+
+                              {order.items && order.items.length > 0 ? (
+                                <div className="space-y-3">
+                                  {order.items.map((item) => (
+                                    <div
+                                      key={item.id}
+                                      className="p-4 rounded-xl border border-gray-200 bg-white"
+                                    >
+                                      <div className="flex items-start justify-between gap-4 mb-3">
+                                        <div className="flex items-start gap-3">
+                                          <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                                            <Package className="w-6 h-6 text-blue-600" />
+                                          </div>
+                                          <div>
+                                            <h5 className="font-semibold text-gray-900">
+                                              {item.product_name || 'منتج'}
+                                            </h5>
+                                            <p className="text-sm text-gray-500">
+                                              الكمية: {item.quantity} × {Number(item.product_price).toFixed(2)} ريال
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        <div className="text-left font-bold text-gray-900">
+                                          {Number(item.subtotal).toFixed(2)} ريال
+                                        </div>
+                                      </div>
+
+                                      <div className="flex flex-wrap gap-3">
+                                        {canAccessFiles(order.status) && (
+                                          <button
+                                            onClick={() => onNavigate(`product-${item.product_id}`)}
+                                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                          >
+                                            <Download className="w-4 h-4" />
+                                            <span>فتح الملفات</span>
+                                          </button>
+                                        )}
+
+                                        <button
+                                          onClick={() => onNavigate(`product-${item.product_id}`)}
+                                          className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
+                                        >
+                                          <Eye className="w-4 h-4" />
+                                          <span>عرض المنتج</span>
+                                        </button>
+
+                                        {canAccessFiles(order.status) && (
+                                          <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">
+                                            <Star className="w-4 h-4" />
+                                            <span>تقييم</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="text-sm text-gray-500">لا توجد عناصر مرتبطة بهذا الطلب</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -611,11 +927,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           </div>
 
                           {bankMessage && (
-                            <div className={`mb-4 p-3 rounded-lg ${
-                              bankMessage.includes('بنجاح')
-                                ? 'bg-green-50 text-green-700 border border-green-200'
-                                : 'bg-red-50 text-red-700 border border-red-200'
-                            }`}>
+                            <div
+                              className={`mb-4 p-3 rounded-lg ${
+                                bankMessage.includes('بنجاح')
+                                  ? 'bg-green-50 text-green-700 border border-green-200'
+                                  : 'bg-red-50 text-red-700 border border-red-200'
+                              }`}
+                            >
                               <div className="flex items-center gap-2">
                                 {bankMessage.includes('بنجاح') ? (
                                   <CheckCircle className="w-4 h-4" />
@@ -699,9 +1017,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                               </div>
 
                               <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  اسم البنك
-                                </label>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">اسم البنك</label>
                                 <input
                                   type="text"
                                   value={bankName}
