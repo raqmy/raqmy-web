@@ -8,20 +8,38 @@ interface PaymentSuccessPageProps {
   orderId: string;
 }
 
+interface ProductLite {
+  id: string;
+  name?: string | null;
+  title?: string | null;
+  price?: number | null;
+}
+
 interface Order {
   id: string;
   order_number: string;
   total_amount: number;
   status: string;
-  customer_name: string;
-  customer_email: string;
-  customer_phone: string;
-  created_at: string;
-  payment_reference: string;
+  customer_name?: string | null;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  created_at?: string | null;
+  payment_reference?: string | null;
 }
 
-interface OrderItem {
+interface RawOrderItem {
   id: string;
+  product_id: string;
+  quantity?: number | null;
+  product_name?: string | null;
+  product_price?: number | null;
+  subtotal?: number | null;
+  price?: number | null;
+}
+
+interface OrderItemView {
+  id: string;
+  product_id: string;
   product_name: string;
   product_price: number;
   quantity: number;
@@ -31,7 +49,7 @@ interface OrderItem {
 export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNavigate, orderId }) => {
   const { profile } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
-  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [orderItems, setOrderItems] = useState<OrderItemView[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -42,14 +60,17 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
 
   const fetchOrderDetails = async () => {
     try {
+      const ownerFilter = `user_id.eq.${profile!.id},customer_id.eq.${profile!.id}`;
+
       const { data: orderData, error: orderError } = await supabase
         .from('orders')
         .select('*')
         .eq('id', orderId)
-        .eq('user_id', profile!.id)
-        .single();
+        .or(ownerFilter)
+        .maybeSingle();
 
       if (orderError) throw orderError;
+      if (!orderData) throw new Error('Order not found');
 
       const { data: itemsData, error: itemsError } = await supabase
         .from('order_items')
@@ -58,10 +79,55 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
 
       if (itemsError) throw itemsError;
 
-      setOrder(orderData);
-      setOrderItems(itemsData || []);
+      const rawItems = (itemsData || []) as RawOrderItem[];
+      const productIds = [...new Set(rawItems.map((item) => item.product_id).filter(Boolean))];
+
+      let productsMap = new Map<string, ProductLite>();
+
+      if (productIds.length > 0) {
+        const { data: productsData, error: productsError } = await supabase
+          .from('products')
+          .select('id, name, title, price')
+          .in('id', productIds);
+
+        if (productsError) {
+          console.error('Error fetching products for success page:', productsError);
+        } else if (productsData) {
+          productsMap = new Map(
+            (productsData as ProductLite[]).map((product) => [product.id, product])
+          );
+        }
+      }
+
+      const normalizedItems: OrderItemView[] = rawItems.map((item) => {
+        const product = productsMap.get(item.product_id);
+
+        const quantity = Number(item.quantity ?? 1) || 1;
+        const unitPrice =
+          Number(item.product_price ?? item.price ?? product?.price ?? 0) || 0;
+        const subtotal = Number(item.subtotal ?? unitPrice * quantity) || 0;
+        const productName =
+          item.product_name ||
+          product?.title ||
+          product?.name ||
+          'منتج';
+
+        return {
+          id: item.id,
+          product_id: item.product_id,
+          product_name: productName,
+          product_price: unitPrice,
+          quantity,
+          subtotal,
+        };
+      });
+
+      setOrder(orderData as Order);
+      setOrderItems(normalizedItems);
     } catch (error) {
       console.error('Error fetching order details:', error);
+      setOrder(null);
+      setOrderItems([]);
     } finally {
       setLoading(false);
     }
@@ -126,18 +192,18 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-gray-600 mb-1">الاسم</p>
-                  <p className="font-semibold text-gray-900">{order.customer_name}</p>
+                  <p className="font-semibold text-gray-900">{order.customer_name || '—'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-600 mb-1">رقم الهاتف</p>
                   <p className="font-semibold text-gray-900" dir="ltr">
-                    {order.customer_phone}
+                    {order.customer_phone || '—'}
                   </p>
                 </div>
                 <div className="md:col-span-2">
                   <p className="text-sm text-gray-600 mb-1">البريد الإلكتروني</p>
                   <p className="font-semibold text-gray-900" dir="ltr">
-                    {order.customer_email}
+                    {order.customer_email || '—'}
                   </p>
                 </div>
               </div>
@@ -150,24 +216,28 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
               </h3>
 
               <div className="space-y-3">
-                {orderItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
-                  >
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900">{item.product_name}</h4>
-                      <p className="text-sm text-gray-600">
-                        الكمية: {item.quantity} × {item.product_price.toFixed(2)} ريال
-                      </p>
+                {orderItems.length > 0 ? (
+                  orderItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                    >
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-gray-900">{item.product_name}</h4>
+                        <p className="text-sm text-gray-600">
+                          الكمية: {item.quantity} × {item.product_price.toFixed(2)} ريال
+                        </p>
+                      </div>
+                      <div className="text-left">
+                        <p className="text-lg font-bold text-blue-600">
+                          {item.subtotal.toFixed(2)} ريال
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-left">
-                      <p className="text-lg font-bold text-blue-600">
-                        {item.subtotal.toFixed(2)} ريال
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <div className="text-sm text-gray-500">لا توجد عناصر مرتبطة بهذا الطلب</div>
+                )}
               </div>
             </div>
 
@@ -175,13 +245,13 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
               <div className="flex items-center justify-between mb-2">
                 <span className="text-gray-600">المجموع الفرعي</span>
                 <span className="font-semibold text-gray-900">
-                  {order.total_amount.toFixed(2)} ريال
+                  {Number(order.total_amount || 0).toFixed(2)} ريال
                 </span>
               </div>
               <div className="flex items-center justify-between pt-3 border-t border-gray-200">
                 <span className="text-xl font-bold text-gray-900">المجموع الكلي</span>
                 <span className="text-2xl font-bold text-green-600">
-                  {order.total_amount.toFixed(2)} ريال
+                  {Number(order.total_amount || 0).toFixed(2)} ريال
                 </span>
               </div>
             </div>
