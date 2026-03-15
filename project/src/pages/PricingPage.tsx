@@ -79,8 +79,8 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   };
 
   const formatPrice = (price: number, currency: string) => {
-    if (price === 0) return 'مجاناً';
-    return `${price} ${currency}`;
+    if (price === 0) return 'مجانا';
+    return `${currency} ${price}`;
   };
 
   if (loading) {
@@ -161,14 +161,6 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
                         عمولة البيع المباشر {plan.direct_commission_percent}%
                       </span>
                     </li>
-
-                    {Array.isArray(plan.features) &&
-                      plan.features.map((feature, idx) => (
-                        <li key={idx} className="flex items-start gap-3">
-                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                          <span className="text-gray-700">{feature}</span>
-                        </li>
-                      ))}
                   </ul>
 
                   <button
