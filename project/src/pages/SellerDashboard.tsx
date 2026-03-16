@@ -41,6 +41,24 @@ interface AffiliateLinkUI extends AffiliateLinkRow {
   sales_count?: number;
 }
 
+interface IdentityVerificationRow {
+  id: string;
+  user_id: string;
+  full_name: string | null;
+  identity_type: string | null;
+  identity_number: string | null;
+  date_of_birth: string | null;
+  document_front_url: string | null;
+  document_back_url: string | null;
+  status: 'not_submitted' | 'pending' | 'approved' | 'rejected';
+  rejection_reason: string | null;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ✅ نطبع المنتج عشان لو الجدول عندك يستخدم title/merchant_id بدل name/user_id
 type NormalizedProduct = Product & {
   name: string;
@@ -73,8 +91,27 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [affiliateLinks, setAffiliateLinks] = useState<AffiliateLinkUI[]>([]);
 
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [verificationSubmitting, setVerificationSubmitting] = useState(false);
+  const [verificationError, setVerificationError] = useState('');
+  const [verificationSuccess, setVerificationSuccess] = useState('');
+  const [identityVerification, setIdentityVerification] = useState<IdentityVerificationRow | null>(null);
+
+  const [verificationForm, setVerificationForm] = useState({
+    full_name: '',
+    identity_type: 'national_id',
+    identity_number: '',
+    date_of_birth: '',
+  });
+
+  const [frontFile, setFrontFile] = useState<File | null>(null);
+  const [backFile, setBackFile] = useState<File | null>(null);
+
   useEffect(() => {
-    if (profile) fetchDashboardData();
+    if (profile) {
+      fetchDashboardData();
+      fetchIdentityVerification();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
@@ -254,10 +291,195 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
   };
 
+  const fetchIdentityVerification = async () => {
+    if (!profile) return;
+
+    try {
+      setVerificationLoading(true);
+      setVerificationError('');
+
+      const { data, error } = await supabase
+        .from('identity_verifications')
+        .select('*')
+        .eq('user_id', profile.id)
+        .maybeSingle();
+
+      if (error) {
+        console.error('identity_verifications fetch error:', error);
+        setVerificationError('حدث خطأ أثناء تحميل بيانات التوثيق');
+        return;
+      }
+
+      const row = (data as IdentityVerificationRow | null) ?? null;
+      setIdentityVerification(row);
+
+      if (row) {
+        setVerificationForm({
+          full_name: row.full_name ?? profile.name ?? '',
+          identity_type: row.identity_type ?? 'national_id',
+          identity_number: row.identity_number ?? '',
+          date_of_birth: row.date_of_birth ?? '',
+        });
+      } else {
+        setVerificationForm({
+          full_name: profile.name ?? '',
+          identity_type: 'national_id',
+          identity_number: '',
+          date_of_birth: '',
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching identity verification:', error);
+      setVerificationError('حدث خطأ أثناء تحميل بيانات التوثيق');
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const uploadIdentityFile = async (file: File, side: 'front' | 'back') => {
+    if (!profile) throw new Error('المستخدم غير مسجل الدخول');
+
+    const fileExt = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
+    const safeExt = fileExt || 'jpg';
+    const filePath = `${profile.id}/${side}-${Date.now()}.${safeExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('identity-documents')
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    return filePath;
+  };
+
+  const handleVerificationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!profile) {
+      setVerificationError('يجب تسجيل الدخول أولاً');
+      return;
+    }
+
+    setVerificationError('');
+    setVerificationSuccess('');
+
+    if (!verificationForm.full_name.trim()) {
+      setVerificationError('يرجى إدخال الاسم الكامل');
+      return;
+    }
+
+    if (!verificationForm.identity_number.trim()) {
+      setVerificationError('يرجى إدخال رقم الهوية');
+      return;
+    }
+
+    if (!verificationForm.date_of_birth) {
+      setVerificationError('يرجى إدخال تاريخ الميلاد');
+      return;
+    }
+
+    const existingFront = identityVerification?.document_front_url ?? null;
+    const existingBack = identityVerification?.document_back_url ?? null;
+
+    if (!frontFile && !existingFront) {
+      setVerificationError('يرجى رفع صورة الواجهة الأمامية للهوية');
+      return;
+    }
+
+    if (!backFile && !existingBack) {
+      setVerificationError('يرجى رفع صورة الواجهة الخلفية للهوية');
+      return;
+    }
+
+    try {
+      setVerificationSubmitting(true);
+
+      let frontUrl = existingFront;
+      let backUrl = existingBack;
+
+      if (frontFile) {
+        frontUrl = await uploadIdentityFile(frontFile, 'front');
+      }
+
+      if (backFile) {
+        backUrl = await uploadIdentityFile(backFile, 'back');
+      }
+
+      const payload = {
+        user_id: profile.id,
+        full_name: verificationForm.full_name.trim(),
+        identity_type: verificationForm.identity_type,
+        identity_number: verificationForm.identity_number.trim(),
+        date_of_birth: verificationForm.date_of_birth,
+        document_front_url: frontUrl,
+        document_back_url: backUrl,
+        status: 'pending',
+        rejection_reason: null,
+        submitted_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase
+        .from('identity_verifications')
+        .upsert(payload, { onConflict: 'user_id' });
+
+      if (error) {
+        console.error('identity_verifications upsert error:', error);
+        throw error;
+      }
+
+      setFrontFile(null);
+      setBackFile(null);
+      setVerificationSuccess('تم إرسال طلب التوثيق بنجاح');
+      await fetchIdentityVerification();
+    } catch (error: any) {
+      console.error('Identity verification submit error:', error);
+      setVerificationError(error?.message || 'حدث خطأ أثناء إرسال طلب التوثيق');
+    } finally {
+      setVerificationSubmitting(false);
+    }
+  };
+
   const openProduct = (id: string) => {
     // نفس طريقة السوق العام
     onNavigate(`product-${id}`);
   };
+
+  const verificationStatusMeta = useMemo(() => {
+    const status = identityVerification?.status ?? 'not_submitted';
+
+    if (status === 'approved') {
+      return {
+        label: 'موثق',
+        className: 'bg-green-100 text-green-700',
+        description: 'تمت مراجعة الهوية والموافقة عليها.',
+      };
+    }
+
+    if (status === 'pending') {
+      return {
+        label: 'قيد المراجعة',
+        className: 'bg-yellow-100 text-yellow-700',
+        description: 'تم إرسال الطلب وهو الآن بانتظار المراجعة.',
+      };
+    }
+
+    if (status === 'rejected') {
+      return {
+        label: 'مرفوض',
+        className: 'bg-red-100 text-red-700',
+        description:
+          identityVerification?.rejection_reason || 'تم رفض الطلب، يمكنك تعديل البيانات وإعادة الإرسال.',
+      };
+    }
+
+    return {
+      label: 'لم يتم التقديم بعد',
+      className: 'bg-gray-100 text-gray-700',
+      description: 'قم بإدخال بيانات الهوية ورفع المستندات ثم أرسل الطلب للمراجعة.',
+    };
+  }, [identityVerification]);
 
   if (loading) {
     return (
@@ -792,26 +1014,169 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <div className="flex-1">
                   <h2 className="text-2xl font-bold text-gray-900 mb-2">توثيق الهوية</h2>
                   <p className="text-gray-600 mb-4">
-                    من هنا سيتم رفع بيانات الهوية ومتابعة حالة التوثيق الخاصة بحساب التاجر.
+                    ارفع بيانات الهوية والمستندات المطلوبة لإرسال طلب التوثيق ومراجعته من الإدارة.
                   </p>
 
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
-                    حالياً تم تجهيز مكان قسم التوثيق داخل لوحة التاجر، والخطوة التالية ستكون
-                    إنشاء نموذج رفع الهوية وربطه بجدول التوثيق وملفات المستندات.
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className={`px-3 py-1 rounded-full text-sm font-semibold ${verificationStatusMeta.className}`}>
+                      {verificationStatusMeta.label}
+                    </span>
+                    <span className="text-sm text-gray-500">{verificationStatusMeta.description}</span>
                   </div>
+
+                  {identityVerification?.rejection_reason && identityVerification.status === 'rejected' && (
+                    <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                      سبب الرفض: {identityVerification.rejection_reason}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
             <div className="bg-white rounded-xl p-8 shadow-sm">
+              <h3 className="text-lg font-bold text-gray-900 mb-6">نموذج التوثيق</h3>
+
+              {verificationLoading ? (
+                <div className="text-center py-8">
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-gray-600">جاري تحميل بيانات التوثيق...</p>
+                </div>
+              ) : (
+                <form onSubmit={handleVerificationSubmit} className="space-y-6">
+                  {verificationError && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                      {verificationError}
+                    </div>
+                  )}
+
+                  {verificationSuccess && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-700">
+                      {verificationSuccess}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">الاسم الكامل</label>
+                      <input
+                        type="text"
+                        value={verificationForm.full_name}
+                        onChange={(e) =>
+                          setVerificationForm((prev) => ({ ...prev, full_name: e.target.value }))
+                        }
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="اكتب الاسم الكامل كما هو في الهوية"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">نوع الهوية</label>
+                      <select
+                        value={verificationForm.identity_type}
+                        onChange={(e) =>
+                          setVerificationForm((prev) => ({ ...prev, identity_type: e.target.value }))
+                        }
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="national_id">هوية وطنية</option>
+                        <option value="iqama">إقامة</option>
+                        <option value="passport">جواز سفر</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">رقم الهوية</label>
+                      <input
+                        type="text"
+                        value={verificationForm.identity_number}
+                        onChange={(e) =>
+                          setVerificationForm((prev) => ({ ...prev, identity_number: e.target.value }))
+                        }
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="أدخل رقم الهوية"
+                        dir="ltr"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">تاريخ الميلاد</label>
+                      <input
+                        type="date"
+                        value={verificationForm.date_of_birth}
+                        onChange={(e) =>
+                          setVerificationForm((prev) => ({ ...prev, date_of_birth: e.target.value }))
+                        }
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">صورة الهوية الأمامية</label>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={(e) => setFrontFile(e.target.files?.[0] || null)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white"
+                      />
+                      <p className="text-xs text-gray-500 mt-2">
+                        {identityVerification?.document_front_url && !frontFile
+                          ? 'يوجد ملف مرفوع حالياً. يمكنك اختيار ملف جديد لاستبداله.'
+                          : 'ارفع صورة أو ملف PDF للواجهة الأمامية.'}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">صورة الهوية الخلفية</label>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={(e) => setBackFile(e.target.files?.[0] || null)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white"
+                      />
+                      <p className="text-xs text-gray-500 mt-2">
+                        {identityVerification?.document_back_url && !backFile
+                          ? 'يوجد ملف مرفوع حالياً. يمكنك اختيار ملف جديد لاستبداله.'
+                          : 'ارفع صورة أو ملف PDF للواجهة الخلفية.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+                    بعد الإرسال سيتم تحويل الحالة إلى "قيد المراجعة"، ويمكن للإدارة لاحقاً الموافقة أو الرفض مع سبب الرفض.
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={verificationSubmitting}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {verificationSubmitting ? 'جاري إرسال الطلب...' : 'إرسال طلب التوثيق'}
+                  </button>
+                </form>
+              )}
+            </div>
+
+            <div className="bg-white rounded-xl p-8 shadow-sm">
               <h3 className="text-lg font-bold text-gray-900 mb-4">الحالة الحالية</h3>
-              <div className="flex items-center gap-3">
-                <span className="px-3 py-1 rounded-full text-sm font-semibold bg-gray-100 text-gray-700">
-                  لم يتم التقديم بعد
-                </span>
-                <span className="text-sm text-gray-500">
-                  سيتم تحديث هذه الحالة تلقائياً بعد بناء نموذج التوثيق.
-                </span>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className={`px-3 py-1 rounded-full text-sm font-semibold ${verificationStatusMeta.className}`}>
+                    {verificationStatusMeta.label}
+                  </span>
+                  <span className="text-sm text-gray-500">{verificationStatusMeta.description}</span>
+                </div>
+
+                {identityVerification?.submitted_at && (
+                  <p className="text-sm text-gray-500">
+                    تاريخ التقديم: {new Date(identityVerification.submitted_at).toLocaleString('ar-SA')}
+                  </p>
+                )}
+
+                {identityVerification?.reviewed_at && (
+                  <p className="text-sm text-gray-500">
+                    تاريخ المراجعة: {new Date(identityVerification.reviewed_at).toLocaleString('ar-SA')}
+                  </p>
+                )}
               </div>
             </div>
           </div>
