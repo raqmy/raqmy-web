@@ -136,6 +136,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   const safeArray = <T,>(v: T[] | null | undefined): T[] => (Array.isArray(v) ? v : []);
 
+  const getFileNameFromPath = (path: string | null | undefined) => {
+    if (!path) return '';
+    const parts = path.split('/');
+    return parts[parts.length - 1] || path;
+  };
+
   const fetchDashboardData = async () => {
     if (!profile) return;
 
@@ -207,7 +213,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           .in('product_id', productIds);
 
         if (linksErr) {
-          // ✅ أهم شيء: لا نخلي الخطأ يطيح الصفحة
           console.error('affiliate_links fetch error:', linksErr);
           affiliateRows = [];
         } else {
@@ -266,7 +271,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         })
       );
 
-      // Set states
       setStores(storesData || []);
       setProducts(productsWithThumbs);
       setAffiliateLinks(linksWithStats);
@@ -362,15 +366,33 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       return;
     }
 
+    if (identityVerification?.status === 'pending') {
+      setVerificationError('طلب التوثيق الحالي قيد المراجعة بالفعل ولا يمكن تعديله الآن');
+      return;
+    }
+
+    if (identityVerification?.status === 'approved') {
+      setVerificationError('تمت الموافقة على التوثيق مسبقاً ولا يمكن تعديل الطلب حالياً');
+      return;
+    }
+
     setVerificationError('');
     setVerificationSuccess('');
 
-    if (!verificationForm.full_name.trim()) {
+    const normalizedFullName = verificationForm.full_name.trim();
+    const normalizedIdentityNumber = verificationForm.identity_number.trim();
+
+    if (!normalizedFullName) {
       setVerificationError('يرجى إدخال الاسم الكامل');
       return;
     }
 
-    if (!verificationForm.identity_number.trim()) {
+    if (normalizedFullName.length < 3) {
+      setVerificationError('الاسم الكامل قصير جداً، يرجى إدخال الاسم بشكل صحيح');
+      return;
+    }
+
+    if (!normalizedIdentityNumber) {
       setVerificationError('يرجى إدخال رقم الهوية');
       return;
     }
@@ -409,9 +431,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       const payload = {
         user_id: profile.id,
-        full_name: verificationForm.full_name.trim(),
+        full_name: normalizedFullName,
         identity_type: verificationForm.identity_type,
-        identity_number: verificationForm.identity_number.trim(),
+        identity_number: normalizedIdentityNumber,
         date_of_birth: verificationForm.date_of_birth,
         document_front_url: frontUrl,
         document_back_url: backUrl,
@@ -442,7 +464,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   const openProduct = (id: string) => {
-    // نفس طريقة السوق العام
     onNavigate(`product-${id}`);
   };
 
@@ -480,6 +501,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       description: 'قم بإدخال بيانات الهوية ورفع المستندات ثم أرسل الطلب للمراجعة.',
     };
   }, [identityVerification]);
+
+  const isVerificationPending = identityVerification?.status === 'pending';
+  const isVerificationApproved = identityVerification?.status === 'approved';
+  const canEditVerification = !isVerificationPending && !isVerificationApproved;
 
   if (loading) {
     return (
@@ -710,7 +735,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     key={product.id}
                     className="bg-white rounded-xl shadow-sm overflow-hidden"
                   >
-                    {/* ✅ مثل السوق العام: الضغط على الصورة يفتح المنتج */}
                     <div
                       className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center cursor-pointer"
                       onClick={() => openProduct(product.id)}
@@ -729,7 +753,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     </div>
 
                     <div className="p-6">
-                      {/* ✅ الضغط على الاسم يفتح المنتج */}
                       <h3
                         className="text-lg font-bold text-gray-900 mb-2 line-clamp-1 cursor-pointer hover:text-blue-600"
                         onClick={() => openProduct(product.id)}
@@ -758,7 +781,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         </span>
                       </div>
 
-                      {/* ✅ حذفنا زر "عرض المنتج" بالكامل */}
                       <button
                         onClick={() => setEditingProductId(product.id)}
                         className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
@@ -1029,6 +1051,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       سبب الرفض: {identityVerification.rejection_reason}
                     </div>
                   )}
+
+                  {isVerificationPending && (
+                    <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-yellow-800">
+                      لا يمكنك تعديل الطلب حالياً لأن الطلب قيد المراجعة.
+                    </div>
+                  )}
+
+                  {isVerificationApproved && (
+                    <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
+                      تم اعتماد هويتك بنجاح، لذلك تم قفل نموذج التعديل.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1064,7 +1098,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         onChange={(e) =>
                           setVerificationForm((prev) => ({ ...prev, full_name: e.target.value }))
                         }
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled={!canEditVerification || verificationSubmitting}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
                         placeholder="اكتب الاسم الكامل كما هو في الهوية"
                       />
                     </div>
@@ -1076,7 +1111,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         onChange={(e) =>
                           setVerificationForm((prev) => ({ ...prev, identity_type: e.target.value }))
                         }
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled={!canEditVerification || verificationSubmitting}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
                       >
                         <option value="national_id">هوية وطنية</option>
                         <option value="iqama">إقامة</option>
@@ -1092,7 +1128,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         onChange={(e) =>
                           setVerificationForm((prev) => ({ ...prev, identity_number: e.target.value }))
                         }
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled={!canEditVerification || verificationSubmitting}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
                         placeholder="أدخل رقم الهوية"
                         dir="ltr"
                       />
@@ -1106,7 +1143,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         onChange={(e) =>
                           setVerificationForm((prev) => ({ ...prev, date_of_birth: e.target.value }))
                         }
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled={!canEditVerification || verificationSubmitting}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
                       />
                     </div>
 
@@ -1116,11 +1154,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         type="file"
                         accept="image/*,.pdf"
                         onChange={(e) => setFrontFile(e.target.files?.[0] || null)}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white"
+                        disabled={!canEditVerification || verificationSubmitting}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-500"
                       />
                       <p className="text-xs text-gray-500 mt-2">
-                        {identityVerification?.document_front_url && !frontFile
-                          ? 'يوجد ملف مرفوع حالياً. يمكنك اختيار ملف جديد لاستبداله.'
+                        {frontFile
+                          ? `الملف الجديد المختار: ${frontFile.name}`
+                          : identityVerification?.document_front_url
+                          ? `الملف الحالي: ${getFileNameFromPath(identityVerification.document_front_url)}`
                           : 'ارفع صورة أو ملف PDF للواجهة الأمامية.'}
                       </p>
                     </div>
@@ -1131,11 +1172,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         type="file"
                         accept="image/*,.pdf"
                         onChange={(e) => setBackFile(e.target.files?.[0] || null)}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white"
+                        disabled={!canEditVerification || verificationSubmitting}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-500"
                       />
                       <p className="text-xs text-gray-500 mt-2">
-                        {identityVerification?.document_back_url && !backFile
-                          ? 'يوجد ملف مرفوع حالياً. يمكنك اختيار ملف جديد لاستبداله.'
+                        {backFile
+                          ? `الملف الجديد المختار: ${backFile.name}`
+                          : identityVerification?.document_back_url
+                          ? `الملف الحالي: ${getFileNameFromPath(identityVerification.document_back_url)}`
                           : 'ارفع صورة أو ملف PDF للواجهة الخلفية.'}
                       </p>
                     </div>
@@ -1145,13 +1189,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     بعد الإرسال سيتم تحويل الحالة إلى "قيد المراجعة"، ويمكن للإدارة لاحقاً الموافقة أو الرفض مع سبب الرفض.
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={verificationSubmitting}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {verificationSubmitting ? 'جاري إرسال الطلب...' : 'إرسال طلب التوثيق'}
-                  </button>
+                  {canEditVerification ? (
+                    <button
+                      type="submit"
+                      disabled={verificationSubmitting}
+                      className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {verificationSubmitting
+                        ? 'جاري إرسال الطلب...'
+                        : identityVerification?.status === 'rejected'
+                        ? 'إعادة إرسال طلب التوثيق'
+                        : 'إرسال طلب التوثيق'}
+                    </button>
+                  ) : (
+                    <div className="text-sm text-gray-500">
+                      تم إيقاف تعديل النموذج حسب حالة طلب التوثيق الحالية.
+                    </div>
+                  )}
                 </form>
               )}
             </div>
