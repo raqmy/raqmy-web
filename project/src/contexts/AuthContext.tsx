@@ -34,7 +34,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const refreshUserSubscriptionStatus = async (userId: string) => {
+    try {
+      const { error } = await supabase.rpc('refresh_user_subscription', {
+        p_user_id: userId,
+      });
+
+      if (error) {
+        console.warn('refresh_user_subscription warning:', error);
+      }
+    } catch (error) {
+      console.warn('refresh_user_subscription failed:', error);
+    }
+  };
+
   const fetchProfile = async (userId: string) => {
+    await refreshUserSubscriptionStatus(userId);
+
     const { data, error } = await supabase
       .from('users_profile')
       .select('*')
@@ -98,7 +114,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       })();
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       (async () => {
         setUser(session?.user ?? null);
 
