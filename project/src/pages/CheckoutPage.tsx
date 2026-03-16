@@ -146,6 +146,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         customer_phone: profile?.phone || '',
         shipping_address: formData.shippingAddress || '',
         notes: formData.notes || '',
+        sale_source: 'marketplace',
       };
 
       const { data: order, error: orderError } = await supabase
