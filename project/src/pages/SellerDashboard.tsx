@@ -14,6 +14,7 @@ import {
   Users,
   Link as LinkIcon,
   Check,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Store, Product } from '../lib/supabase';
@@ -53,7 +54,7 @@ type NormalizedProduct = Product & {
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'products' | 'stores' | 'marketing' | 'analytics' | 'settings' | 'orders'
+    'overview' | 'products' | 'stores' | 'marketing' | 'analytics' | 'settings' | 'orders' | 'verification'
   >('overview');
 
   const [stores, setStores] = useState<Store[]>([]);
@@ -349,6 +350,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             >
               <BarChart3 className="w-5 h-5" />
               <span>التحليلات</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('verification')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'verification'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <ShieldCheck className="w-5 h-5" />
+              <span>توثيق الهوية</span>
             </button>
 
             <button
@@ -765,6 +778,42 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-gray-900 mb-2">التحليلات قريباً</h3>
             <p className="text-gray-600">سيتم إضافة لوحة التحليلات قريباً</p>
+          </div>
+        )}
+
+        {activeTab === 'verification' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl p-8 shadow-sm">
+              <div className="flex items-start gap-4">
+                <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <ShieldCheck className="w-7 h-7 text-blue-600" />
+                </div>
+
+                <div className="flex-1">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">توثيق الهوية</h2>
+                  <p className="text-gray-600 mb-4">
+                    من هنا سيتم رفع بيانات الهوية ومتابعة حالة التوثيق الخاصة بحساب التاجر.
+                  </p>
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+                    حالياً تم تجهيز مكان قسم التوثيق داخل لوحة التاجر، والخطوة التالية ستكون
+                    إنشاء نموذج رفع الهوية وربطه بجدول التوثيق وملفات المستندات.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-8 shadow-sm">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">الحالة الحالية</h3>
+              <div className="flex items-center gap-3">
+                <span className="px-3 py-1 rounded-full text-sm font-semibold bg-gray-100 text-gray-700">
+                  لم يتم التقديم بعد
+                </span>
+                <span className="text-sm text-gray-500">
+                  سيتم تحديث هذه الحالة تلقائياً بعد بناء نموذج التوثيق.
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
