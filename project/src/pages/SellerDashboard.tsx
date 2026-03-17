@@ -15,6 +15,13 @@ import {
   Link as LinkIcon,
   Check,
   ShieldCheck,
+  Wallet,
+  ArrowUpLeft,
+  ArrowDownLeft,
+  Clock3,
+  Landmark,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Store, Product } from '../lib/supabase';
@@ -59,7 +66,44 @@ interface IdentityVerificationRow {
   updated_at: string;
 }
 
-// ✅ نطبع المنتج عشان لو الجدول عندك يستخدم title/merchant_id بدل name/user_id
+interface WalletRow {
+  id: string;
+  merchant_id: string;
+  balance_available: number | null;
+  balance_pending: number | null;
+  updated_at: string | null;
+  created_at?: string | null;
+}
+
+interface WalletLedgerRow {
+  id: string;
+  wallet_id: string | null;
+  merchant_id: string;
+  order_id: string | null;
+  entry_type: string | null;
+  amount: number | null;
+  status: string | null;
+  reference: string | null;
+  notes: string | null;
+  created_at: string | null;
+}
+
+interface WithdrawalRequestRow {
+  id: string;
+  merchant_id: string;
+  amount: number | null;
+  status: 'pending' | 'approved' | 'rejected' | string;
+  created_at: string | null;
+  approved_at: string | null;
+  rejected_at: string | null;
+  notes: string | null;
+  wallet_id?: string | null;
+  approved_by?: string | null;
+  rejected_by?: string | null;
+  rejection_reason?: string | null;
+  processed_at?: string | null;
+}
+
 type NormalizedProduct = Product & {
   name: string;
   user_id?: string | null;
@@ -69,10 +113,21 @@ type NormalizedProduct = Product & {
   thumbnail_url?: string | null;
 };
 
+const MIN_WITHDRAWAL_AMOUNT = 10;
+
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
+
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'products' | 'stores' | 'marketing' | 'analytics' | 'settings' | 'orders' | 'verification'
+    | 'overview'
+    | 'products'
+    | 'stores'
+    | 'marketing'
+    | 'analytics'
+    | 'settings'
+    | 'orders'
+    | 'earnings'
+    | 'verification'
   >('overview');
 
   const [stores, setStores] = useState<Store[]>([]);
@@ -107,10 +162,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [frontFile, setFrontFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
 
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletData, setWalletData] = useState<WalletRow | null>(null);
+  const [walletLedger, setWalletLedger] = useState<WalletLedgerRow[]>([]);
+  const [withdrawalRequests, setWithdrawalRequests] = useState<WithdrawalRequestRow[]>([]);
+  const [withdrawalAmount, setWithdrawalAmount] = useState('');
+  const [withdrawalNotes, setWithdrawalNotes] = useState('');
+  const [withdrawalSubmitting, setWithdrawalSubmitting] = useState(false);
+  const [withdrawalError, setWithdrawalError] = useState('');
+  const [withdrawalSuccess, setWithdrawalSuccess] = useState('');
+
   useEffect(() => {
     if (profile) {
       fetchDashboardData();
       fetchIdentityVerification();
+      fetchEarningsData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
@@ -142,13 +208,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     return parts[parts.length - 1] || path;
   };
 
+  const formatCurrency = (value: number | null | undefined) => {
+    const amount = Number(value || 0);
+    return `${amount.toFixed(2)} ريال`;
+  };
+
+  const formatDate = (value: string | null | undefined) => {
+    if (!value) return '—';
+    try {
+      return new Date(value).toLocaleString('ar-SA');
+    } catch {
+      return value;
+    }
+  };
+
   const fetchDashboardData = async () => {
     if (!profile) return;
 
     try {
       setLoading(true);
 
-      // 1) Stores
       const { data: storesData, error: storesErr } = await supabase
         .from('stores')
         .select('*')
@@ -156,7 +235,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       if (storesErr) console.error('stores fetch error:', storesErr);
 
-      // 2) Products (user_id OR merchant_id)
       const { data: rawProductsData, error: productsErr } = await supabase
         .from('products')
         .select('*')
@@ -166,7 +244,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
 
-      // 3) Orders stats
       const { data: ordersData, error: ordersErr } = await supabase
         .from('orders')
         .select('seller_amount, status')
@@ -175,9 +252,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       if (ordersErr) console.error('orders fetch error:', ordersErr);
 
-      // 4) Fetch product images to show thumbnails in dashboard
       const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
-      let thumbMap: Record<string, string> = {};
+      const thumbMap: Record<string, string> = {};
 
       if (productIds.length > 0) {
         const { data: imgs, error: imgsErr } = await supabase
@@ -204,7 +280,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         thumbnail_url: p.thumbnail_url || thumbMap[p.id] || null,
       }));
 
-      // 5) Affiliate links (بدون JOIN حساس باسم FK)
       let affiliateRows: AffiliateLinkRow[] = [];
       if (productIds.length > 0) {
         const { data: links, error: linksErr } = await supabase
@@ -220,9 +295,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         }
       }
 
-      // 6) Get affiliate user names safely
       const affiliateUserIds = Array.from(new Set(affiliateRows.map((l) => l.user_id).filter(Boolean)));
-      let userMap: Record<string, { id: string; name: string }> = {};
+      const userMap: Record<string, { id: string; name: string }> = {};
 
       if (affiliateUserIds.length > 0) {
         const { data: usersData, error: usersErr } = await supabase
@@ -239,7 +313,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         }
       }
 
-      // 7) Add clicks/sales counts per link (safe)
       const linksWithStats: AffiliateLinkUI[] = await Promise.all(
         affiliateRows.map(async (link) => {
           try {
@@ -337,6 +410,50 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       setVerificationError('حدث خطأ أثناء تحميل بيانات التوثيق');
     } finally {
       setVerificationLoading(false);
+    }
+  };
+
+  const fetchEarningsData = async () => {
+    if (!profile) return;
+
+    try {
+      setWalletLoading(true);
+      setWithdrawalError('');
+
+      const [walletRes, ledgerRes, requestsRes] = await Promise.all([
+        supabase.from('wallets').select('*').eq('merchant_id', profile.id).maybeSingle(),
+        supabase
+          .from('wallet_ledger')
+          .select('*')
+          .eq('merchant_id', profile.id)
+          .order('created_at', { ascending: false })
+          .limit(10),
+        supabase
+          .from('withdrawal_requests')
+          .select('*')
+          .eq('merchant_id', profile.id)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (walletRes.error) {
+        console.error('wallet fetch error:', walletRes.error);
+      }
+
+      if (ledgerRes.error) {
+        console.error('wallet_ledger fetch error:', ledgerRes.error);
+      }
+
+      if (requestsRes.error) {
+        console.error('withdrawal_requests fetch error:', requestsRes.error);
+      }
+
+      setWalletData((walletRes.data as WalletRow | null) ?? null);
+      setWalletLedger((safeArray(ledgerRes.data) as any[]) ?? []);
+      setWithdrawalRequests((safeArray(requestsRes.data) as any[]) ?? []);
+    } catch (error) {
+      console.error('Error fetching earnings data:', error);
+    } finally {
+      setWalletLoading(false);
     }
   };
 
@@ -463,6 +580,74 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
   };
 
+  const handleWithdrawalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!profile) {
+      setWithdrawalError('يجب تسجيل الدخول أولاً');
+      return;
+    }
+
+    setWithdrawalError('');
+    setWithdrawalSuccess('');
+
+    if (identityVerification?.status !== 'approved') {
+      setWithdrawalError('يجب اعتماد توثيق الهوية قبل إرسال طلب سحب');
+      return;
+    }
+
+    if (!walletData) {
+      setWithdrawalError('لا توجد محفظة مرتبطة بحسابك حالياً');
+      return;
+    }
+
+    const amount = Number(withdrawalAmount);
+
+    if (!withdrawalAmount.trim() || Number.isNaN(amount)) {
+      setWithdrawalError('يرجى إدخال مبلغ صحيح');
+      return;
+    }
+
+    if (amount <= 0) {
+      setWithdrawalError('مبلغ السحب يجب أن يكون أكبر من صفر');
+      return;
+    }
+
+    if (amount < MIN_WITHDRAWAL_AMOUNT) {
+      setWithdrawalError(`الحد الأدنى لطلب السحب حالياً هو ${MIN_WITHDRAWAL_AMOUNT} ريال`);
+      return;
+    }
+
+    const available = Number(walletData.balance_available || 0);
+    if (amount > available) {
+      setWithdrawalError('المبلغ المطلوب أكبر من الرصيد المتاح');
+      return;
+    }
+
+    try {
+      setWithdrawalSubmitting(true);
+
+      const { error } = await supabase.rpc('create_withdrawal_request', {
+        p_amount: amount,
+      });
+
+      if (error) {
+        console.error('create_withdrawal_request rpc error:', error);
+        throw error;
+      }
+
+      setWithdrawalAmount('');
+      setWithdrawalNotes('');
+      setWithdrawalSuccess('تم إرسال طلب السحب بنجاح، وسيظهر في سجل الطلبات خلال لحظات');
+      await fetchEarningsData();
+    } catch (error: any) {
+      console.error('Withdrawal submit error:', error);
+      setWithdrawalError(error?.message || 'حدث خطأ أثناء إرسال طلب السحب');
+    } finally {
+      setWithdrawalSubmitting(false);
+    }
+  };
+
   const openProduct = (id: string) => {
     onNavigate(`product-${id}`);
   };
@@ -502,9 +687,90 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     };
   }, [identityVerification]);
 
+  const withdrawalStatusMeta = (status: string | null | undefined) => {
+    if (status === 'approved') {
+      return {
+        label: 'مقبول',
+        className: 'bg-green-100 text-green-700',
+      };
+    }
+
+    if (status === 'rejected') {
+      return {
+        label: 'مرفوض',
+        className: 'bg-red-100 text-red-700',
+      };
+    }
+
+    return {
+      label: 'قيد المراجعة',
+      className: 'bg-yellow-100 text-yellow-700',
+    };
+  };
+
+  const ledgerEntryMeta = (entryType: string | null | undefined) => {
+    if (entryType === 'sale_credit') {
+      return {
+        label: 'إيداع مبيعات',
+        icon: ArrowDownLeft,
+        iconClass: 'text-green-600',
+        bgClass: 'bg-green-100',
+      };
+    }
+
+    if (entryType === 'withdrawal_request') {
+      return {
+        label: 'طلب سحب',
+        icon: ArrowUpLeft,
+        iconClass: 'text-yellow-600',
+        bgClass: 'bg-yellow-100',
+      };
+    }
+
+    if (entryType === 'withdrawal_completed') {
+      return {
+        label: 'سحب مكتمل',
+        icon: ArrowUpLeft,
+        iconClass: 'text-blue-600',
+        bgClass: 'bg-blue-100',
+      };
+    }
+
+    if (entryType === 'withdrawal_rejected') {
+      return {
+        label: 'سحب مرفوض',
+        icon: RefreshCw,
+        iconClass: 'text-red-600',
+        bgClass: 'bg-red-100',
+      };
+    }
+
+    return {
+      label: entryType || 'حركة',
+      icon: Wallet,
+      iconClass: 'text-gray-600',
+      bgClass: 'bg-gray-100',
+    };
+  };
+
   const isVerificationPending = identityVerification?.status === 'pending';
   const isVerificationApproved = identityVerification?.status === 'approved';
   const canEditVerification = !isVerificationPending && !isVerificationApproved;
+
+  const availableBalance = Number(walletData?.balance_available || 0);
+  const pendingBalance = Number(walletData?.balance_pending || 0);
+  const approvedWithdrawalsTotal = withdrawalRequests
+    .filter((row) => row.status === 'approved')
+    .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const pendingWithdrawalsCount = withdrawalRequests.filter((row) => row.status === 'pending').length;
+  const latestWithdrawalRequests = withdrawalRequests.slice(0, 5);
+  const latestLedgerEntries = walletLedger.slice(0, 8);
+
+  const canRequestWithdrawal =
+    isVerificationApproved &&
+    !!walletData &&
+    availableBalance >= MIN_WITHDRAWAL_AMOUNT &&
+    !withdrawalSubmitting;
 
   if (loading) {
     return (
@@ -530,9 +796,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <button
               onClick={() => setActiveTab('overview')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'overview'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
+                activeTab === 'overview' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <LayoutDashboard className="w-5 h-5" />
@@ -542,9 +806,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <button
               onClick={() => setActiveTab('products')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'products'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
+                activeTab === 'products' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <Package className="w-5 h-5" />
@@ -554,9 +816,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <button
               onClick={() => setActiveTab('stores')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'stores'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
+                activeTab === 'stores' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <StoreIcon className="w-5 h-5" />
@@ -566,9 +826,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <button
               onClick={() => setActiveTab('marketing')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'marketing'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
+                activeTab === 'marketing' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <Share2 className="w-5 h-5" />
@@ -578,9 +836,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <button
               onClick={() => setActiveTab('orders')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'orders'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
+                activeTab === 'orders' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <ShoppingBag className="w-5 h-5" />
@@ -588,11 +844,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
+              onClick={() => setActiveTab('earnings')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'earnings' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <Wallet className="w-5 h-5" />
+              <span>الأرباح</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('analytics')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'analytics'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
+                activeTab === 'analytics' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <BarChart3 className="w-5 h-5" />
@@ -602,9 +866,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <button
               onClick={() => setActiveTab('verification')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'verification'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
+                activeTab === 'verification' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <ShieldCheck className="w-5 h-5" />
@@ -614,9 +876,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <button
               onClick={() => setActiveTab('settings')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'settings'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
+                activeTab === 'settings' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <Settings className="w-5 h-5" />
@@ -675,9 +935,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 text-white">
               <h2 className="text-2xl font-bold mb-4">ابدأ البيع الآن!</h2>
               <p className="text-blue-100 mb-6">
-                {stores.length === 0
-                  ? 'أنشئ متجرك الأول وابدأ بإضافة المنتجات'
-                  : 'أضف منتجات جديدة لزيادة مبيعاتك'}
+                {stores.length === 0 ? 'أنشئ متجرك الأول وابدأ بإضافة المنتجات' : 'أضف منتجات جديدة لزيادة مبيعاتك'}
               </p>
 
               <div className="flex flex-wrap gap-4">
@@ -731,10 +989,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {products.map((product) => (
-                  <div
-                    key={product.id}
-                    className="bg-white rounded-xl shadow-sm overflow-hidden"
-                  >
+                  <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
                     <div
                       className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center cursor-pointer"
                       onClick={() => openProduct(product.id)}
@@ -772,9 +1027,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
                         <span
                           className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                            product.is_active
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-gray-100 text-gray-700'
+                            product.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
                           }`}
                         >
                           {product.is_active ? 'نشط' : 'غير نشط'}
@@ -836,16 +1089,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       </div>
                     </div>
 
-                    {store.description && (
-                      <p className="text-gray-600 mb-4 line-clamp-2">{store.description}</p>
-                    )}
+                    {store.description && <p className="text-gray-600 mb-4 line-clamp-2">{store.description}</p>}
 
                     <div className="flex items-center justify-between mb-4">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          store.is_active
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-gray-100 text-gray-700'
+                          store.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
                         }`}
                       >
                         {store.is_active ? 'نشط' : 'غير نشط'}
@@ -967,18 +1216,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   {affiliateLinks.slice(0, 5).map((link) => {
                     const product = products.find((p) => p.id === link.product_id);
                     return (
-                      <div
-                        key={link.id}
-                        className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
-                      >
+                      <div key={link.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
                             <LinkIcon className="w-5 h-5 text-blue-600" />
                           </div>
                           <div>
-                            <p className="font-semibold text-gray-900">
-                              {link.affiliate?.name || 'مسوق'}
-                            </p>
+                            <p className="font-semibold text-gray-900">{link.affiliate?.name || 'مسوق'}</p>
                             <p className="text-sm text-gray-600">
                               {product?.name || 'منتج'} - {link.code}
                             </p>
@@ -986,9 +1230,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         </div>
 
                         <div className="text-right">
-                          <p className="text-sm font-semibold text-gray-900">
-                            {link.clicks_count || 0} نقرة
-                          </p>
+                          <p className="text-sm font-semibold text-gray-900">{link.clicks_count || 0} نقرة</p>
                           <p className="text-sm text-green-600">{link.sales_count || 0} مبيعات</p>
                         </div>
                       </div>
@@ -1011,9 +1253,296 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 عرض جميع الطلبات
               </button>
             </div>
-            <p className="text-gray-600">
-              تتبع وإدارة طلبات عملائك، تحديث حالة الطلبات، والتواصل مع المشترين
-            </p>
+            <p className="text-gray-600">تتبع وإدارة طلبات عملائك، تحديث حالة الطلبات، والتواصل مع المشترين</p>
+          </div>
+        )}
+
+        {activeTab === 'earnings' && (
+          <div className="space-y-8">
+            <div className="bg-white rounded-2xl shadow-sm p-8">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">الأرباح والسحب</h2>
+                  <p className="text-gray-600">
+                    من هنا يمكنك متابعة رصيدك، مراجعة سجل المحفظة، وإرسال طلبات سحب الأرباح.
+                  </p>
+                </div>
+
+                <button
+                  onClick={fetchEarningsData}
+                  disabled={walletLoading}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-5 h-5 ${walletLoading ? 'animate-spin' : ''}`} />
+                  <span>تحديث البيانات</span>
+                </button>
+              </div>
+
+              {!isVerificationApproved && (
+                <div className="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-sm flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div>
+                    لا يمكن إرسال طلب سحب حالياً لأن توثيق الهوية غير معتمد بعد. أكمل التوثيق أولاً ثم انتظر الموافقة.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+              <div className="bg-white rounded-2xl shadow-sm p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                    <Wallet className="w-6 h-6 text-green-600" />
+                  </div>
+                  <span className="text-xs font-semibold text-green-700 bg-green-100 px-3 py-1 rounded-full">
+                    متاح للسحب
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(availableBalance)}</div>
+                <p className="text-sm text-gray-500">الرصيد المتاح حالياً</p>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
+                    <Clock3 className="w-6 h-6 text-yellow-600" />
+                  </div>
+                  <span className="text-xs font-semibold text-yellow-700 bg-yellow-100 px-3 py-1 rounded-full">
+                    قيد التعليق
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(pendingBalance)}</div>
+                <p className="text-sm text-gray-500">أرباح لم تصبح متاحة بعد</p>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                    <ArrowUpLeft className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <span className="text-xs font-semibold text-blue-700 bg-blue-100 px-3 py-1 rounded-full">
+                    مسحوب
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(approvedWithdrawalsTotal)}</div>
+                <p className="text-sm text-gray-500">إجمالي السحوبات المعتمدة</p>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
+                    <Landmark className="w-6 h-6 text-purple-600" />
+                  </div>
+                  <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-3 py-1 rounded-full">
+                    الطلبات الحالية
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900 mb-1">{pendingWithdrawalsCount}</div>
+                <p className="text-sm text-gray-500">طلبات سحب بانتظار المراجعة</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+              <div className="xl:col-span-2 bg-white rounded-2xl shadow-sm p-8">
+                <div className="mb-6">
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">طلب سحب جديد</h3>
+                  <p className="text-gray-600 text-sm">
+                    أرسل طلب سحب من رصيدك المتاح، وسيتم مراجعته من الإدارة قبل الاعتماد.
+                  </p>
+                </div>
+
+                {withdrawalError && (
+                  <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+                    {withdrawalError}
+                  </div>
+                )}
+
+                {withdrawalSuccess && (
+                  <div className="mb-4 bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-700">
+                    {withdrawalSuccess}
+                  </div>
+                )}
+
+                <form onSubmit={handleWithdrawalSubmit} className="space-y-5">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">مبلغ السحب</label>
+                    <input
+                      type="number"
+                      min={MIN_WITHDRAWAL_AMOUNT}
+                      step="0.01"
+                      value={withdrawalAmount}
+                      onChange={(e) => setWithdrawalAmount(e.target.value)}
+                      disabled={!canRequestWithdrawal}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
+                      placeholder={`الحد الأدنى ${MIN_WITHDRAWAL_AMOUNT} ريال`}
+                      dir="ltr"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات (اختياري)</label>
+                    <textarea
+                      value={withdrawalNotes}
+                      onChange={(e) => setWithdrawalNotes(e.target.value)}
+                      disabled={!canRequestWithdrawal}
+                      rows={4}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500 resize-none"
+                      placeholder="مثلاً: تحويل على الحساب البنكي المسجل"
+                    />
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 space-y-2">
+                    <p>الرصيد المتاح حالياً: <span className="font-bold">{formatCurrency(availableBalance)}</span></p>
+                    <p>الحد الأدنى الحالي للسحب: <span className="font-bold">{MIN_WITHDRAWAL_AMOUNT} ريال</span></p>
+                    <p>بعد إرسال الطلب سيتم خصمه تنظيمياً كسحب قيد المراجعة حتى تعتمد الإدارة الطلب.</p>
+                  </div>
+
+                  {!walletData && (
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-700">
+                      لا توجد محفظة مرتبطة بحسابك حالياً. إذا كانت لديك مبيعات ولم تظهر المحفظة، جرّب تحديث البيانات أولاً.
+                    </div>
+                  )}
+
+                  {isVerificationApproved ? null : (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                      السحب متاح فقط للتاجر الذي تم اعتماد توثيق هويته.
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={!canRequestWithdrawal}
+                    className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {withdrawalSubmitting ? 'جاري إرسال الطلب...' : 'إرسال طلب السحب'}
+                  </button>
+                </form>
+              </div>
+
+              <div className="xl:col-span-3 bg-white rounded-2xl shadow-sm p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-1">آخر طلبات السحب</h3>
+                    <p className="text-sm text-gray-500">متابعة حالة الطلبات الأخيرة الخاصة بك</p>
+                  </div>
+                </div>
+
+                {walletLoading ? (
+                  <div className="text-center py-10">
+                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <p className="text-gray-600">جاري تحميل بيانات الأرباح...</p>
+                  </div>
+                ) : latestWithdrawalRequests.length === 0 ? (
+                  <div className="bg-gray-50 rounded-2xl p-10 text-center">
+                    <Landmark className="w-14 h-14 text-gray-300 mx-auto mb-4" />
+                    <h4 className="text-lg font-semibold text-gray-900 mb-2">لا توجد طلبات سحب بعد</h4>
+                    <p className="text-gray-600">عند إرسال أول طلب سحب سيظهر هنا مباشرة.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {latestWithdrawalRequests.map((request) => {
+                      const statusMeta = withdrawalStatusMeta(request.status);
+                      return (
+                        <div
+                          key={request.id}
+                          className="border border-gray-200 rounded-2xl p-5 hover:border-gray-300 transition-colors"
+                        >
+                          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                            <div>
+                              <div className="text-lg font-bold text-gray-900">{formatCurrency(request.amount)}</div>
+                              <div className="text-sm text-gray-500">تاريخ الطلب: {formatDate(request.created_at)}</div>
+                            </div>
+
+                            <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusMeta.className}`}>
+                              {statusMeta.label}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                            <div className="bg-gray-50 rounded-xl p-4">
+                              <div className="text-gray-500 mb-1">الحالة</div>
+                              <div className="font-semibold text-gray-900">{statusMeta.label}</div>
+                            </div>
+
+                            <div className="bg-gray-50 rounded-xl p-4">
+                              <div className="text-gray-500 mb-1">تاريخ الاعتماد</div>
+                              <div className="font-semibold text-gray-900">{formatDate(request.approved_at)}</div>
+                            </div>
+
+                            <div className="bg-gray-50 rounded-xl p-4">
+                              <div className="text-gray-500 mb-1">تاريخ الرفض</div>
+                              <div className="font-semibold text-gray-900">{formatDate(request.rejected_at)}</div>
+                            </div>
+                          </div>
+
+                          {request.notes && (
+                            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
+                              ملاحظات الإدارة: {request.notes}
+                            </div>
+                          )}
+
+                          {request.rejection_reason && (
+                            <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+                              سبب الرفض: {request.rejection_reason}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm p-8">
+              <div className="mb-6">
+                <h3 className="text-xl font-bold text-gray-900 mb-1">سجل المحفظة</h3>
+                <p className="text-sm text-gray-500">آخر الحركات المالية المتعلقة بمحفظتك</p>
+              </div>
+
+              {walletLoading ? (
+                <div className="text-center py-10">
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-gray-600">جاري تحميل سجل المحفظة...</p>
+                </div>
+              ) : latestLedgerEntries.length === 0 ? (
+                <div className="bg-gray-50 rounded-2xl p-10 text-center">
+                  <Wallet className="w-14 h-14 text-gray-300 mx-auto mb-4" />
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">لا توجد حركات في المحفظة</h4>
+                  <p className="text-gray-600">ستظهر هنا الإيداعات والسحوبات المرتبطة بمحفظتك.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {latestLedgerEntries.map((entry) => {
+                    const meta = ledgerEntryMeta(entry.entry_type);
+                    const EntryIcon = meta.icon;
+                    return (
+                      <div
+                        key={entry.id}
+                        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border border-gray-200 rounded-2xl p-5"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${meta.bgClass}`}>
+                            <EntryIcon className={`w-6 h-6 ${meta.iconClass}`} />
+                          </div>
+
+                          <div>
+                            <div className="font-bold text-gray-900">{meta.label}</div>
+                            <div className="text-sm text-gray-500">{formatDate(entry.created_at)}</div>
+                            {entry.notes && <div className="text-sm text-gray-500 mt-1">{entry.notes}</div>}
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-lg font-bold text-gray-900">{formatCurrency(entry.amount)}</div>
+                          <div className="text-sm text-gray-500">{entry.status || '—'}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1095,9 +1624,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       <input
                         type="text"
                         value={verificationForm.full_name}
-                        onChange={(e) =>
-                          setVerificationForm((prev) => ({ ...prev, full_name: e.target.value }))
-                        }
+                        onChange={(e) => setVerificationForm((prev) => ({ ...prev, full_name: e.target.value }))}
                         disabled={!canEditVerification || verificationSubmitting}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
                         placeholder="اكتب الاسم الكامل كما هو في الهوية"
@@ -1108,9 +1635,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       <label className="block text-sm font-medium text-gray-700 mb-2">نوع الهوية</label>
                       <select
                         value={verificationForm.identity_type}
-                        onChange={(e) =>
-                          setVerificationForm((prev) => ({ ...prev, identity_type: e.target.value }))
-                        }
+                        onChange={(e) => setVerificationForm((prev) => ({ ...prev, identity_type: e.target.value }))}
                         disabled={!canEditVerification || verificationSubmitting}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
                       >
@@ -1125,9 +1650,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       <input
                         type="text"
                         value={verificationForm.identity_number}
-                        onChange={(e) =>
-                          setVerificationForm((prev) => ({ ...prev, identity_number: e.target.value }))
-                        }
+                        onChange={(e) => setVerificationForm((prev) => ({ ...prev, identity_number: e.target.value }))}
                         disabled={!canEditVerification || verificationSubmitting}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
                         placeholder="أدخل رقم الهوية"
@@ -1140,9 +1663,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       <input
                         type="date"
                         value={verificationForm.date_of_birth}
-                        onChange={(e) =>
-                          setVerificationForm((prev) => ({ ...prev, date_of_birth: e.target.value }))
-                        }
+                        onChange={(e) => setVerificationForm((prev) => ({ ...prev, date_of_birth: e.target.value }))}
                         disabled={!canEditVerification || verificationSubmitting}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
                       />
@@ -1202,9 +1723,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         : 'إرسال طلب التوثيق'}
                     </button>
                   ) : (
-                    <div className="text-sm text-gray-500">
-                      تم إيقاف تعديل النموذج حسب حالة طلب التوثيق الحالية.
-                    </div>
+                    <div className="text-sm text-gray-500">تم إيقاف تعديل النموذج حسب حالة طلب التوثيق الحالية.</div>
                   )}
                 </form>
               )}
@@ -1221,15 +1740,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </div>
 
                 {identityVerification?.submitted_at && (
-                  <p className="text-sm text-gray-500">
-                    تاريخ التقديم: {new Date(identityVerification.submitted_at).toLocaleString('ar-SA')}
-                  </p>
+                  <p className="text-sm text-gray-500">تاريخ التقديم: {new Date(identityVerification.submitted_at).toLocaleString('ar-SA')}</p>
                 )}
 
                 {identityVerification?.reviewed_at && (
-                  <p className="text-sm text-gray-500">
-                    تاريخ المراجعة: {new Date(identityVerification.reviewed_at).toLocaleString('ar-SA')}
-                  </p>
+                  <p className="text-sm text-gray-500">تاريخ المراجعة: {new Date(identityVerification.reviewed_at).toLocaleString('ar-SA')}</p>
                 )}
               </div>
             </div>
