@@ -66,6 +66,20 @@ interface IdentityVerificationRow {
   updated_at: string;
 }
 
+interface BankAccountRow {
+  id: string;
+  merchant_id: string;
+  bank_name: string | null;
+  account_holder_name: string | null;
+  iban: string | null;
+  status: 'pending' | 'approved' | 'rejected' | string;
+  rejection_reason: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 interface WalletRow {
   id: string;
   merchant_id: string;
@@ -128,6 +142,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     | 'orders'
     | 'earnings'
     | 'verification'
+    | 'bankAccount'
   >('overview');
 
   const [stores, setStores] = useState<Store[]>([]);
@@ -162,6 +177,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [frontFile, setFrontFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
 
+  const [bankAccountLoading, setBankAccountLoading] = useState(false);
+  const [bankAccountSubmitting, setBankAccountSubmitting] = useState(false);
+  const [bankAccountError, setBankAccountError] = useState('');
+  const [bankAccountSuccess, setBankAccountSuccess] = useState('');
+  const [bankAccountData, setBankAccountData] = useState<BankAccountRow | null>(null);
+  const [bankAccountForm, setBankAccountForm] = useState({
+    bank_name: '',
+    account_holder_name: '',
+    iban: '',
+  });
+
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletData, setWalletData] = useState<WalletRow | null>(null);
   const [walletLedger, setWalletLedger] = useState<WalletLedgerRow[]>([]);
@@ -176,6 +202,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     if (profile) {
       fetchDashboardData();
       fetchIdentityVerification();
+      fetchBankAccountData();
       fetchEarningsData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -220,6 +247,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     } catch {
       return value;
     }
+  };
+
+  const formatIbanForInput = (value: string | null | undefined) => {
+    if (!value) return '';
+    const clean = value.replace(/\s+/g, '').toUpperCase();
+    return clean.replace(/(.{4})/g, '$1 ').trim();
   };
 
   const fetchDashboardData = async () => {
@@ -413,6 +446,48 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
   };
 
+  const fetchBankAccountData = async () => {
+    if (!profile) return;
+
+    try {
+      setBankAccountLoading(true);
+      setBankAccountError('');
+
+      const { data, error } = await supabase
+        .from('bank_accounts')
+        .select('*')
+        .maybeSingle();
+
+      if (error) {
+        console.error('bank_accounts fetch error:', error);
+        setBankAccountError('حدث خطأ أثناء تحميل بيانات الحساب البنكي');
+        return;
+      }
+
+      const row = (data as BankAccountRow | null) ?? null;
+      setBankAccountData(row);
+
+      if (row) {
+        setBankAccountForm({
+          bank_name: row.bank_name ?? '',
+          account_holder_name: row.account_holder_name ?? '',
+          iban: formatIbanForInput(row.iban),
+        });
+      } else {
+        setBankAccountForm({
+          bank_name: '',
+          account_holder_name: profile.name ?? '',
+          iban: '',
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching bank account:', error);
+      setBankAccountError('حدث خطأ أثناء تحميل بيانات الحساب البنكي');
+    } finally {
+      setBankAccountLoading(false);
+    }
+  };
+
   const fetchEarningsData = async () => {
     if (!profile) return;
 
@@ -580,6 +655,75 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
   };
 
+  const handleBankAccountSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!profile) {
+      setBankAccountError('يجب تسجيل الدخول أولاً');
+      return;
+    }
+
+    setBankAccountError('');
+    setBankAccountSuccess('');
+
+    const normalizedBankName = bankAccountForm.bank_name.trim();
+    const normalizedHolderName = bankAccountForm.account_holder_name.trim();
+    const normalizedIban = bankAccountForm.iban.replace(/\s+/g, '').toUpperCase();
+
+    if (!normalizedBankName) {
+      setBankAccountError('يرجى إدخال اسم البنك');
+      return;
+    }
+
+    if (!normalizedHolderName) {
+      setBankAccountError('يرجى إدخال اسم صاحب الحساب');
+      return;
+    }
+
+    if (!normalizedIban) {
+      setBankAccountError('يرجى إدخال الآيبان');
+      return;
+    }
+
+    if (!normalizedIban.startsWith('SA')) {
+      setBankAccountError('الآيبان السعودي يجب أن يبدأ بـ SA');
+      return;
+    }
+
+    if (normalizedIban.length !== 24) {
+      setBankAccountError('الآيبان السعودي يجب أن يتكون من 24 خانة');
+      return;
+    }
+
+    try {
+      setBankAccountSubmitting(true);
+
+      const { error } = await supabase.rpc('upsert_bank_account', {
+        p_bank_name: normalizedBankName,
+        p_account_holder_name: normalizedHolderName,
+        p_iban: normalizedIban,
+      });
+
+      if (error) {
+        console.error('upsert_bank_account rpc error:', error);
+        throw error;
+      }
+
+      setBankAccountSuccess(
+        bankAccountData
+          ? 'تم تحديث الحساب البنكي بنجاح، وتمت إعادته إلى حالة المراجعة.'
+          : 'تم حفظ الحساب البنكي بنجاح وإرساله للمراجعة.'
+      );
+
+      await fetchBankAccountData();
+    } catch (error: any) {
+      console.error('Bank account submit error:', error);
+      setBankAccountError(error?.message || 'حدث خطأ أثناء حفظ الحساب البنكي');
+    } finally {
+      setBankAccountSubmitting(false);
+    }
+  };
+
   const handleWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -593,6 +737,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
     if (identityVerification?.status !== 'approved') {
       setWithdrawalError('يجب اعتماد توثيق الهوية قبل إرسال طلب سحب');
+      return;
+    }
+
+    if (bankAccountData?.status !== 'approved') {
+      setWithdrawalError('يجب اعتماد الحساب البنكي قبل إرسال طلب سحب');
       return;
     }
 
@@ -687,6 +836,41 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     };
   }, [identityVerification]);
 
+  const bankAccountStatusMeta = useMemo(() => {
+    const status = bankAccountData?.status ?? 'not_submitted';
+
+    if (status === 'approved') {
+      return {
+        label: 'معتمد',
+        className: 'bg-green-100 text-green-700',
+        description: 'تمت مراجعة الحساب البنكي واعتماده ويمكنك استخدامه في السحب.',
+      };
+    }
+
+    if (status === 'pending') {
+      return {
+        label: 'قيد المراجعة',
+        className: 'bg-yellow-100 text-yellow-700',
+        description: 'تم إرسال الحساب البنكي وهو الآن بانتظار المراجعة من الإدارة.',
+      };
+    }
+
+    if (status === 'rejected') {
+      return {
+        label: 'مرفوض',
+        className: 'bg-red-100 text-red-700',
+        description:
+          bankAccountData?.rejection_reason || 'تم رفض الحساب البنكي، يمكنك تعديل البيانات وإعادة الإرسال.',
+      };
+    }
+
+    return {
+      label: 'غير مضاف',
+      className: 'bg-gray-100 text-gray-700',
+      description: 'أضف حسابك البنكي الآن حتى تتمكن من طلب سحب الأرباح بعد المراجعة.',
+    };
+  }, [bankAccountData]);
+
   const withdrawalStatusMeta = (status: string | null | undefined) => {
     if (status === 'approved') {
       return {
@@ -755,6 +939,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   const isVerificationPending = identityVerification?.status === 'pending';
   const isVerificationApproved = identityVerification?.status === 'approved';
+  const isBankAccountApproved = bankAccountData?.status === 'approved';
   const canEditVerification = !isVerificationPending && !isVerificationApproved;
 
   const availableBalance = Number(walletData?.balance_available || 0);
@@ -768,6 +953,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   const canRequestWithdrawal =
     isVerificationApproved &&
+    isBankAccountApproved &&
     !!walletData &&
     availableBalance >= MIN_WITHDRAWAL_AMOUNT &&
     !withdrawalSubmitting;
@@ -854,6 +1040,16 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
+              onClick={() => setActiveTab('bankAccount')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'bankAccount' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <Landmark className="w-5 h-5" />
+              <span>الحساب البنكي</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('analytics')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'analytics' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
@@ -932,30 +1128,64 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               </div>
             </div>
 
-            <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 text-white">
-              <h2 className="text-2xl font-bold mb-4">ابدأ البيع الآن!</h2>
-              <p className="text-blue-100 mb-6">
-                {stores.length === 0 ? 'أنشئ متجرك الأول وابدأ بإضافة المنتجات' : 'أضف منتجات جديدة لزيادة مبيعاتك'}
-              </p>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 text-white">
+                <h2 className="text-2xl font-bold mb-4">ابدأ البيع الآن!</h2>
+                <p className="text-blue-100 mb-6">
+                  {stores.length === 0 ? 'أنشئ متجرك الأول وابدأ بإضافة المنتجات' : 'أضف منتجات جديدة لزيادة مبيعاتك'}
+                </p>
 
-              <div className="flex flex-wrap gap-4">
-                {stores.length === 0 ? (
-                  <button
-                    onClick={() => setShowCreateStoreModal(true)}
-                    className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
-                  >
-                    <Plus className="w-5 h-5" />
-                    <span>إنشاء متجر</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setShowCreateProductModal(true)}
-                    className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
-                  >
-                    <Plus className="w-5 h-5" />
-                    <span>إضافة منتج</span>
-                  </button>
+                <div className="flex flex-wrap gap-4">
+                  {stores.length === 0 ? (
+                    <button
+                      onClick={() => setShowCreateStoreModal(true)}
+                      className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
+                    >
+                      <Plus className="w-5 h-5" />
+                      <span>إنشاء متجر</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setShowCreateProductModal(true)}
+                      className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
+                    >
+                      <Plus className="w-5 h-5" />
+                      <span>إضافة منتج</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-100">
+                <div className="flex items-start justify-between gap-4 mb-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">الحساب البنكي</h2>
+                    <p className="text-gray-600">اربط حسابك البنكي واعرف حالة مراجعته قبل طلب السحب.</p>
+                  </div>
+                  <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center">
+                    <Landmark className="w-7 h-7 text-purple-600" />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 mb-4">
+                  <span className={`px-3 py-1 rounded-full text-sm font-semibold ${bankAccountStatusMeta.className}`}>
+                    {bankAccountStatusMeta.label}
+                  </span>
+                  <span className="text-sm text-gray-500">{bankAccountStatusMeta.description}</span>
+                </div>
+
+                {bankAccountData?.rejection_reason && bankAccountData.status === 'rejected' && (
+                  <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                    سبب الرفض: {bankAccountData.rejection_reason}
+                  </div>
                 )}
+
+                <button
+                  onClick={() => setActiveTab('bankAccount')}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                >
+                  إدارة الحساب البنكي
+                </button>
               </div>
             </div>
           </div>
@@ -1269,11 +1499,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </div>
 
                 <button
-                  onClick={fetchEarningsData}
-                  disabled={walletLoading}
+                  onClick={async () => {
+                    await Promise.all([fetchEarningsData(), fetchBankAccountData(), fetchIdentityVerification()]);
+                  }}
+                  disabled={walletLoading || bankAccountLoading || verificationLoading}
                   className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
                 >
-                  <RefreshCw className={`w-5 h-5 ${walletLoading ? 'animate-spin' : ''}`} />
+                  <RefreshCw
+                    className={`w-5 h-5 ${
+                      walletLoading || bankAccountLoading || verificationLoading ? 'animate-spin' : ''
+                    }`}
+                  />
                   <span>تحديث البيانات</span>
                 </button>
               </div>
@@ -1283,6 +1519,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                   <div>
                     لا يمكن إرسال طلب سحب حالياً لأن توثيق الهوية غير معتمد بعد. أكمل التوثيق أولاً ثم انتظر الموافقة.
+                  </div>
+                </div>
+              )}
+
+              {isVerificationApproved && !isBankAccountApproved && (
+                <div className="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-sm flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div>
+                    لا يمكن إرسال طلب سحب حالياً لأن الحساب البنكي غير معتمد بعد. أضف الحساب البنكي أو انتظر مراجعته من الإدارة.
                   </div>
                 </div>
               )}
@@ -1334,11 +1579,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <Landmark className="w-6 h-6 text-purple-600" />
                   </div>
                   <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-3 py-1 rounded-full">
-                    الطلبات الحالية
+                    الحساب البنكي
                   </span>
                 </div>
-                <div className="text-2xl font-bold text-gray-900 mb-1">{pendingWithdrawalsCount}</div>
-                <p className="text-sm text-gray-500">طلبات سحب بانتظار المراجعة</p>
+                <div className="text-lg font-bold text-gray-900 mb-1">{bankAccountStatusMeta.label}</div>
+                <p className="text-sm text-gray-500">حالة الحساب البنكي المرتبط بالسحب</p>
               </div>
             </div>
 
@@ -1403,9 +1648,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     </div>
                   )}
 
-                  {isVerificationApproved ? null : (
+                  {!isVerificationApproved && (
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
                       السحب متاح فقط للتاجر الذي تم اعتماد توثيق هويته.
+                    </div>
+                  )}
+
+                  {isVerificationApproved && !isBankAccountApproved && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                      يجب اعتماد الحساب البنكي أولاً قبل إرسال طلب السحب. يمكنك إضافته أو تعديله من تبويب "الحساب البنكي".
                     </div>
                   )}
 
@@ -1542,6 +1793,188 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   })}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'bankAccount' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl p-8 shadow-sm">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Landmark className="w-7 h-7 text-purple-600" />
+                  </div>
+
+                  <div className="flex-1">
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">الحساب البنكي</h2>
+                    <p className="text-gray-600 mb-4">
+                      أضف بيانات حسابك البنكي لربطه بطلبات السحب. أي تعديل على البيانات سيعيد الحالة إلى قيد المراجعة.
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${bankAccountStatusMeta.className}`}>
+                        {bankAccountStatusMeta.label}
+                      </span>
+                      <span className="text-sm text-gray-500">{bankAccountStatusMeta.description}</span>
+                    </div>
+
+                    {bankAccountData?.rejection_reason && bankAccountData.status === 'rejected' && (
+                      <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                        سبب الرفض: {bankAccountData.rejection_reason}
+                      </div>
+                    )}
+
+                    {bankAccountData?.reviewed_at && (
+                      <div className="mt-4 text-sm text-gray-500">
+                        تاريخ آخر مراجعة: {formatDate(bankAccountData.reviewed_at)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  onClick={fetchBankAccountData}
+                  disabled={bankAccountLoading}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-5 h-5 ${bankAccountLoading ? 'animate-spin' : ''}`} />
+                  <span>تحديث البيانات</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-8 shadow-sm">
+              <h3 className="text-lg font-bold text-gray-900 mb-6">
+                {bankAccountData ? 'تعديل الحساب البنكي' : 'إضافة حساب بنكي'}
+              </h3>
+
+              {bankAccountLoading ? (
+                <div className="text-center py-8">
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-gray-600">جاري تحميل بيانات الحساب البنكي...</p>
+                </div>
+              ) : (
+                <form onSubmit={handleBankAccountSubmit} className="space-y-6">
+                  {bankAccountError && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                      {bankAccountError}
+                    </div>
+                  )}
+
+                  {bankAccountSuccess && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-700">
+                      {bankAccountSuccess}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">اسم البنك</label>
+                      <input
+                        type="text"
+                        value={bankAccountForm.bank_name}
+                        onChange={(e) => setBankAccountForm((prev) => ({ ...prev, bank_name: e.target.value }))}
+                        disabled={bankAccountSubmitting}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
+                        placeholder="مثال: البنك الأهلي السعودي"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">اسم صاحب الحساب</label>
+                      <input
+                        type="text"
+                        value={bankAccountForm.account_holder_name}
+                        onChange={(e) =>
+                          setBankAccountForm((prev) => ({ ...prev, account_holder_name: e.target.value }))
+                        }
+                        disabled={bankAccountSubmitting}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
+                        placeholder="الاسم كما يظهر في البنك"
+                      />
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">الآيبان</label>
+                      <input
+                        type="text"
+                        value={bankAccountForm.iban}
+                        onChange={(e) => setBankAccountForm((prev) => ({ ...prev, iban: e.target.value.toUpperCase() }))}
+                        disabled={bankAccountSubmitting}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
+                        placeholder="SAxxxxxxxxxxxxxxxxxxxxxx"
+                        dir="ltr"
+                      />
+                      <p className="text-xs text-gray-500 mt-2">
+                        يجب أن يبدأ الآيبان بـ SA وأن يتكون من 24 خانة بعد إزالة المسافات.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800 space-y-2">
+                    <p>بعد الحفظ سيتم إرسال الحساب البنكي للمراجعة من الإدارة.</p>
+                    <p>إذا قمت بتعديل البيانات لاحقاً فسيعود الطلب تلقائياً إلى حالة "قيد المراجعة".</p>
+                    <p>لن تتمكن من السحب حتى تصبح حالة الحساب البنكي "معتمد".</p>
+                  </div>
+
+                  {bankAccountData?.status === 'approved' && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
+                      الحساب البنكي الحالي معتمد. أي تعديل جديد سيعيده إلى حالة المراجعة.
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={bankAccountSubmitting}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {bankAccountSubmitting
+                      ? 'جاري الحفظ...'
+                      : bankAccountData
+                      ? 'حفظ تحديثات الحساب البنكي'
+                      : 'حفظ الحساب البنكي'}
+                  </button>
+                </form>
+              )}
+            </div>
+
+            <div className="bg-white rounded-xl p-8 shadow-sm">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">الحالة الحالية</h3>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className={`px-3 py-1 rounded-full text-sm font-semibold ${bankAccountStatusMeta.className}`}>
+                    {bankAccountStatusMeta.label}
+                  </span>
+                  <span className="text-sm text-gray-500">{bankAccountStatusMeta.description}</span>
+                </div>
+
+                {bankAccountData?.bank_name && (
+                  <p className="text-sm text-gray-600">
+                    اسم البنك: <span className="font-semibold text-gray-900">{bankAccountData.bank_name}</span>
+                  </p>
+                )}
+
+                {bankAccountData?.account_holder_name && (
+                  <p className="text-sm text-gray-600">
+                    صاحب الحساب: <span className="font-semibold text-gray-900">{bankAccountData.account_holder_name}</span>
+                  </p>
+                )}
+
+                {bankAccountData?.iban && (
+                  <p className="text-sm text-gray-600">
+                    الآيبان: <span className="font-semibold text-gray-900" dir="ltr">{formatIbanForInput(bankAccountData.iban)}</span>
+                  </p>
+                )}
+
+                {bankAccountData?.created_at && (
+                  <p className="text-sm text-gray-500">تاريخ الإضافة: {formatDate(bankAccountData.created_at)}</p>
+                )}
+
+                {bankAccountData?.updated_at && (
+                  <p className="text-sm text-gray-500">آخر تحديث: {formatDate(bankAccountData.updated_at)}</p>
+                )}
+              </div>
             </div>
           </div>
         )}
