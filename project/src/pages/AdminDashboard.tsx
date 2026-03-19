@@ -13,11 +13,14 @@ import {
   Shield,
   Save,
   CheckCircle,
-  TestTube,
   Megaphone,
   ShieldCheck,
   Eye,
   XCircle,
+  Landmark,
+  RefreshCw,
+  Building2,
+  Wallet,
 } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -57,11 +60,39 @@ interface IdentityVerificationUI extends IdentityVerificationRow {
   user_email?: string;
 }
 
+interface BankAccountRow {
+  id: string;
+  merchant_id: string;
+  bank_name: string | null;
+  account_holder_name: string | null;
+  iban: string | null;
+  status: 'pending' | 'approved' | 'rejected' | string;
+  rejection_reason: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+interface BankAccountUI extends BankAccountRow {
+  merchant_user_id?: string;
+  merchant_name?: string;
+  merchant_email?: string;
+  store_name?: string;
+  store_slug?: string;
+}
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
 
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'users' | 'stores' | 'products' | 'payment-settings' | 'merchant-verifications'
+    | 'overview'
+    | 'users'
+    | 'stores'
+    | 'products'
+    | 'payment-settings'
+    | 'merchant-verifications'
+    | 'bank-account-verifications'
   >('overview');
 
   const [stats, setStats] = useState<Stats>({
@@ -99,6 +130,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [frontSignedUrl, setFrontSignedUrl] = useState<string | null>(null);
   const [backSignedUrl, setBackSignedUrl] = useState<string | null>(null);
 
+  const [pendingVerificationsCount, setPendingVerificationsCount] = useState(0);
+
+  const [bankAccountsLoading, setBankAccountsLoading] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState<BankAccountUI[]>([]);
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string | null>(null);
+  const [bankAccountFilter, setBankAccountFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [bankAccountActionLoading, setBankAccountActionLoading] = useState(false);
+  const [bankAccountMessage, setBankAccountMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [bankAccountRejectionReason, setBankAccountRejectionReason] = useState('');
+  const [pendingBankAccountsCount, setPendingBankAccountsCount] = useState(0);
+
   useEffect(() => {
     if (profile?.role === 'admin' || profile?.role === 'superadmin') {
       fetchDashboardData();
@@ -109,6 +151,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
       if (activeTab === 'merchant-verifications') {
         fetchMerchantVerifications();
+      }
+
+      if (activeTab === 'bank-account-verifications') {
+        fetchBankAccountVerifications();
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -121,9 +167,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verificationFilter]);
 
+  useEffect(() => {
+    if (activeTab === 'bank-account-verifications' && (profile?.role === 'admin' || profile?.role === 'superadmin')) {
+      fetchBankAccountVerifications();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bankAccountFilter]);
+
   const selectedVerification = useMemo(
     () => verifications.find((v) => v.id === selectedVerificationId) || null,
     [verifications, selectedVerificationId]
+  );
+
+  const selectedBankAccount = useMemo(
+    () => bankAccounts.find((v) => v.id === selectedBankAccountId) || null,
+    [bankAccounts, selectedBankAccountId]
   );
 
   useEffect(() => {
@@ -133,13 +191,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     setRejectionReason(selectedVerification?.rejection_reason || '');
   }, [selectedVerificationId, selectedVerification?.rejection_reason]);
 
+  useEffect(() => {
+    setBankAccountRejectionReason(selectedBankAccount?.rejection_reason || '');
+  }, [selectedBankAccountId, selectedBankAccount?.rejection_reason]);
+
   const fetchDashboardData = async () => {
     try {
-      const [usersRes, storesRes, productsRes, verificationsRes] = await Promise.all([
+      const [usersRes, storesRes, productsRes, verificationsRes, bankAccountsRes] = await Promise.all([
         supabase.from('users_profile').select('*'),
         supabase.from('stores').select('*'),
         supabase.from('products').select('*'),
         supabase.from('identity_verifications').select('id, status'),
+        supabase.from('bank_accounts').select('id, status'),
       ]);
 
       if (usersRes.data) setUsers(usersRes.data);
@@ -156,14 +219,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
       const pendingCount = (verificationsRes.data || []).filter((v: any) => v.status === 'pending').length;
       setPendingVerificationsCount(pendingCount);
+
+      const pendingBankCount = (bankAccountsRes.data || []).filter((v: any) => v.status === 'pending').length;
+      setPendingBankAccountsCount(pendingBankCount);
     } catch (error) {
       console.error('Error fetching admin data:', error);
     } finally {
       setLoading(false);
     }
   };
-
-  const [pendingVerificationsCount, setPendingVerificationsCount] = useState(0);
 
   const fetchMerchantVerifications = async () => {
     try {
@@ -187,7 +251,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       const rows = (verificationRows || []) as IdentityVerificationRow[];
       const userIds = Array.from(new Set(rows.map((r) => r.user_id).filter(Boolean)));
 
-      let userMap: Record<string, { name?: string; email?: string }> = {};
+      const userMap: Record<string, { name?: string; email?: string }> = {};
 
       if (userIds.length > 0) {
         const { data: usersData, error: usersError } = await supabase
@@ -235,6 +299,122 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       });
     } finally {
       setVerificationsLoading(false);
+    }
+  };
+
+  const fetchBankAccountVerifications = async () => {
+    try {
+      setBankAccountsLoading(true);
+      setBankAccountMessage(null);
+
+      let query = supabase
+        .from('bank_accounts')
+        .select('*')
+        .order('updated_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false });
+
+      if (bankAccountFilter !== 'all') {
+        query = query.eq('status', bankAccountFilter);
+      }
+
+      const { data: bankAccountRows, error: bankAccountsError } = await query;
+
+      if (bankAccountsError) throw bankAccountsError;
+
+      const rows = (bankAccountRows || []) as BankAccountRow[];
+      const merchantIds = Array.from(new Set(rows.map((r) => r.merchant_id).filter(Boolean)));
+
+      const merchantMap: Record<
+        string,
+        {
+          user_id?: string;
+          store_name?: string;
+          store_slug?: string;
+        }
+      > = {};
+
+      if (merchantIds.length > 0) {
+        const { data: merchantsData, error: merchantsError } = await supabase
+          .from('merchants')
+          .select('id, user_id, store_name, store_slug')
+          .in('id', merchantIds);
+
+        if (merchantsError) {
+          console.error('merchants fetch for bank accounts error:', merchantsError);
+        } else {
+          for (const merchant of merchantsData || []) {
+            merchantMap[(merchant as any).id] = {
+              user_id: (merchant as any).user_id,
+              store_name: (merchant as any).store_name,
+              store_slug: (merchant as any).store_slug,
+            };
+          }
+        }
+      }
+
+      const userIds = Array.from(
+        new Set(
+          rows
+            .map((row) => merchantMap[row.merchant_id]?.user_id)
+            .filter(Boolean)
+        )
+      ) as string[];
+
+      const userMap: Record<string, { name?: string; email?: string }> = {};
+
+      if (userIds.length > 0) {
+        const { data: usersData, error: usersError } = await supabase
+          .from('users_profile')
+          .select('id, name, email')
+          .in('id', userIds);
+
+        if (usersError) {
+          console.error('users_profile fetch for bank accounts error:', usersError);
+        } else {
+          for (const user of usersData || []) {
+            userMap[(user as any).id] = {
+              name: (user as any).name,
+              email: (user as any).email,
+            };
+          }
+        }
+      }
+
+      const uiRows: BankAccountUI[] = rows.map((row) => {
+        const merchant = merchantMap[row.merchant_id];
+        const merchantUserId = merchant?.user_id;
+        return {
+          ...row,
+          merchant_user_id: merchantUserId,
+          merchant_name: merchantUserId ? userMap[merchantUserId]?.name || '—' : '—',
+          merchant_email: merchantUserId ? userMap[merchantUserId]?.email || '—' : '—',
+          store_name: merchant?.store_name || '—',
+          store_slug: merchant?.store_slug || '',
+        };
+      });
+
+      setBankAccounts(uiRows);
+
+      if (uiRows.length > 0) {
+        const currentExists = uiRows.some((row) => row.id === selectedBankAccountId);
+        if (!currentExists) {
+          setSelectedBankAccountId(uiRows[0].id);
+        }
+      } else {
+        setSelectedBankAccountId(null);
+      }
+
+      const { data: countRows } = await supabase.from('bank_accounts').select('id, status');
+      const pendingCount = (countRows || []).filter((v: any) => v.status === 'pending').length;
+      setPendingBankAccountsCount(pendingCount);
+    } catch (error: any) {
+      console.error('fetchBankAccountVerifications error:', error);
+      setBankAccountMessage({
+        type: 'error',
+        text: error?.message || 'تعذر تحميل طلبات الحسابات البنكية',
+      });
+    } finally {
+      setBankAccountsLoading(false);
     }
   };
 
@@ -544,6 +724,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     }
   };
 
+  const handleApproveBankAccount = async () => {
+    if (!selectedBankAccount) return;
+
+    if (!window.confirm('هل أنت متأكد من الموافقة على هذا الحساب البنكي؟')) {
+      return;
+    }
+
+    try {
+      setBankAccountActionLoading(true);
+      setBankAccountMessage(null);
+
+      const { error } = await supabase.rpc('approve_bank_account', {
+        p_bank_account_id: selectedBankAccount.id,
+      });
+
+      if (error) throw error;
+
+      setBankAccountMessage({
+        type: 'success',
+        text: 'تمت الموافقة على الحساب البنكي بنجاح',
+      });
+
+      await fetchBankAccountVerifications();
+      await fetchDashboardData();
+    } catch (error: any) {
+      console.error('handleApproveBankAccount error:', error);
+      setBankAccountMessage({
+        type: 'error',
+        text: error?.message || 'حدث خطأ أثناء الموافقة على الحساب البنكي',
+      });
+    } finally {
+      setBankAccountActionLoading(false);
+    }
+  };
+
+  const handleRejectBankAccount = async () => {
+    if (!selectedBankAccount) return;
+
+    if (!bankAccountRejectionReason.trim()) {
+      setBankAccountMessage({
+        type: 'error',
+        text: 'يجب كتابة سبب الرفض قبل رفض الحساب البنكي',
+      });
+      return;
+    }
+
+    if (!window.confirm('هل أنت متأكد من رفض هذا الحساب البنكي؟')) {
+      return;
+    }
+
+    try {
+      setBankAccountActionLoading(true);
+      setBankAccountMessage(null);
+
+      const { error } = await supabase.rpc('reject_bank_account', {
+        p_bank_account_id: selectedBankAccount.id,
+        p_rejection_reason: bankAccountRejectionReason.trim(),
+      });
+
+      if (error) throw error;
+
+      setBankAccountMessage({
+        type: 'success',
+        text: 'تم رفض الحساب البنكي وتسجيل سبب الرفض',
+      });
+
+      await fetchBankAccountVerifications();
+      await fetchDashboardData();
+    } catch (error: any) {
+      console.error('handleRejectBankAccount error:', error);
+      setBankAccountMessage({
+        type: 'error',
+        text: error?.message || 'حدث خطأ أثناء رفض الحساب البنكي',
+      });
+    } finally {
+      setBankAccountActionLoading(false);
+    }
+  };
+
   const getIdentityTypeLabel = (value?: string | null) => {
     if (value === 'national_id') return 'هوية وطنية';
     if (value === 'iqama') return 'إقامة';
@@ -577,6 +836,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       label: 'غير مكتمل',
       className: 'bg-gray-100 text-gray-700',
     };
+  };
+
+  const getBankAccountStatusMeta = (status?: string | null) => {
+    if (status === 'approved') {
+      return {
+        label: 'معتمد',
+        className: 'bg-green-100 text-green-700',
+      };
+    }
+
+    if (status === 'pending') {
+      return {
+        label: 'قيد المراجعة',
+        className: 'bg-yellow-100 text-yellow-700',
+      };
+    }
+
+    if (status === 'rejected') {
+      return {
+        label: 'مرفوض',
+        className: 'bg-red-100 text-red-700',
+      };
+    }
+
+    return {
+      label: 'غير مكتمل',
+      className: 'bg-gray-100 text-gray-700',
+    };
+  };
+
+  const formatDate = (value: string | null | undefined) => {
+    if (!value) return '—';
+    try {
+      return new Date(value).toLocaleString('ar-SA');
+    } catch {
+      return value;
+    }
+  };
+
+  const formatIban = (value: string | null | undefined) => {
+    if (!value) return '—';
+    const clean = value.replace(/\s+/g, '').toUpperCase();
+    return clean.replace(/(.{4})/g, '$1 ').trim();
   };
 
   if (profile?.role !== 'admin' && profile?.role !== 'superadmin') {
@@ -632,6 +934,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     const email = (item.user_email ?? '').toLowerCase();
     const identityNumber = (item.identity_number ?? '').toLowerCase();
     return fullName.includes(q) || email.includes(q) || identityNumber.includes(q);
+  });
+
+  const filteredBankAccounts = bankAccounts.filter((item) => {
+    const merchantName = (item.merchant_name ?? '').toLowerCase();
+    const merchantEmail = (item.merchant_email ?? '').toLowerCase();
+    const storeName = (item.store_name ?? '').toLowerCase();
+    const iban = (item.iban ?? '').toLowerCase();
+    const bankName = (item.bank_name ?? '').toLowerCase();
+    const holderName = (item.account_holder_name ?? '').toLowerCase();
+
+    return (
+      merchantName.includes(q) ||
+      merchantEmail.includes(q) ||
+      storeName.includes(q) ||
+      iban.includes(q) ||
+      bankName.includes(q) ||
+      holderName.includes(q)
+    );
   });
 
   return (
@@ -701,6 +1021,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                   }`}
                 >
                   {pendingVerificationsCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('bank-account-verifications')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'bank-account-verifications' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <Landmark className="w-5 h-5" />
+              <span>الحسابات البنكية</span>
+              {pendingBankAccountsCount > 0 && (
+                <span
+                  className={`min-w-[22px] h-[22px] px-1 rounded-full text-[11px] font-bold flex items-center justify-center ${
+                    activeTab === 'bank-account-verifications'
+                      ? 'bg-white text-blue-600'
+                      : 'bg-red-100 text-red-700'
+                  }`}
+                >
+                  {pendingBankAccountsCount}
                 </span>
               )}
             </button>
@@ -818,28 +1159,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                 <p className="text-sm text-gray-600">مراجعة والموافقة أو الرفض لطلبات توثيق الهوية</p>
               </button>
 
-              {profile?.role === 'superadmin' && (
-                <button
-                  onClick={() => onNavigate('admin-management')}
-                  className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
-                >
-                  <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center mb-4">
-                    <Shield className="w-6 h-6 text-red-600" />
-                  </div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-2">إدارة المسؤولين</h3>
-                  <p className="text-sm text-gray-600">إضافة وتعديل حسابات المسؤولين</p>
-                </button>
-              )}
-
               <button
-                onClick={() => onNavigate('admin-verification-apis')}
+                onClick={() => setActiveTab('bank-account-verifications')}
                 className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
               >
                 <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mb-4">
-                  <TestTube className="w-6 h-6 text-indigo-600" />
+                  <Landmark className="w-6 h-6 text-indigo-600" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">مزودي خدمات التحقق</h3>
-                <p className="text-sm text-gray-600">إدارة مزودي SMS والبريد الإلكتروني</p>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <h3 className="text-lg font-bold text-gray-900">توثيق الحسابات البنكية</h3>
+                  {pendingBankAccountsCount > 0 && (
+                    <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">
+                      {pendingBankAccountsCount} معلّق
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600">مراجعة الحسابات البنكية والموافقة أو الرفض</p>
               </button>
 
               <button
@@ -852,6 +1187,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                 <h3 className="text-lg font-bold text-gray-900 mb-2">الرسائل العامة</h3>
                 <p className="text-sm text-gray-600">إدارة الإعلانات للمستخدمين</p>
               </button>
+
+              {profile?.role === 'superadmin' && (
+                <button
+                  onClick={() => onNavigate('admin-management')}
+                  className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
+                >
+                  <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center mb-4">
+                    <Shield className="w-6 h-6 text-red-600" />
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">إدارة المسؤولين</h3>
+                  <p className="text-sm text-gray-600">إضافة وتعديل حسابات المسؤولين</p>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1380,6 +1728,309 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           </div>
         )}
 
+        {activeTab === 'bank-account-verifications' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">توثيق الحسابات البنكية</h2>
+                  <p className="text-gray-600">
+                    راجع الحسابات البنكية المضافة من التجار ثم وافق أو ارفض مع توضيح السبب عند الحاجة.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setBankAccountFilter('all')}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                      bankAccountFilter === 'all'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    الكل
+                  </button>
+
+                  <button
+                    onClick={() => setBankAccountFilter('pending')}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                      bankAccountFilter === 'pending'
+                        ? 'bg-yellow-500 text-white'
+                        : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                    }`}
+                  >
+                    قيد المراجعة
+                  </button>
+
+                  <button
+                    onClick={() => setBankAccountFilter('approved')}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                      bankAccountFilter === 'approved'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-green-100 text-green-700 hover:bg-green-200'
+                    }`}
+                  >
+                    المعتمدة
+                  </button>
+
+                  <button
+                    onClick={() => setBankAccountFilter('rejected')}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                      bankAccountFilter === 'rejected'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-red-100 text-red-700 hover:bg-red-200'
+                    }`}
+                  >
+                    المرفوضة
+                  </button>
+
+                  <button
+                    onClick={fetchBankAccountVerifications}
+                    disabled={bankAccountsLoading}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${bankAccountsLoading ? 'animate-spin' : ''}`} />
+                    تحديث
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {bankAccountMessage && (
+              <div
+                className={`p-4 rounded-lg flex items-center gap-3 ${
+                  bankAccountMessage.type === 'success'
+                    ? 'bg-green-50 border border-green-200'
+                    : 'bg-red-50 border border-red-200'
+                }`}
+              >
+                {bankAccountMessage.type === 'success' ? (
+                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                )}
+                <p className={bankAccountMessage.type === 'success' ? 'text-green-700' : 'text-red-700'}>
+                  {bankAccountMessage.text}
+                </p>
+              </div>
+            )}
+
+            <div className="bg-white rounded-xl shadow-sm p-4">
+              <div className="relative">
+                <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="ابحث باسم التاجر أو البريد أو المتجر أو الآيبان أو البنك..."
+                  className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            {bankAccountsLoading ? (
+              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
+                <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-gray-600">جاري تحميل الحسابات البنكية...</p>
+              </div>
+            ) : filteredBankAccounts.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
+                <Landmark className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد حسابات مطابقة</h3>
+                <p className="text-gray-600">جرّب تغيير الفلتر أو عبارة البحث.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+                <div className="xl:col-span-2 bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                    <h3 className="font-bold text-gray-900">الحسابات</h3>
+                    <span className="text-sm text-gray-500">{filteredBankAccounts.length} حساب</span>
+                  </div>
+
+                  <div className="max-h-[700px] overflow-y-auto divide-y divide-gray-100">
+                    {filteredBankAccounts.map((item) => {
+                      const statusMeta = getBankAccountStatusMeta(item.status);
+                      const isSelected = selectedBankAccountId === item.id;
+
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => setSelectedBankAccountId(item.id)}
+                          className={`w-full text-right p-5 transition-colors ${
+                            isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-4 mb-2">
+                            <div>
+                              <p className="font-bold text-gray-900">{item.merchant_name || '—'}</p>
+                              <p className="text-sm text-gray-500">{item.merchant_email || '—'}</p>
+                            </div>
+
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusMeta.className}`}>
+                              {statusMeta.label}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1 text-sm text-gray-600">
+                            <p>المتجر: {item.store_name || '—'}</p>
+                            <p>البنك: {item.bank_name || '—'}</p>
+                            <p dir="ltr">الآيبان: {formatIban(item.iban)}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="xl:col-span-3 bg-white rounded-xl shadow-sm p-6">
+                  {!selectedBankAccount ? (
+                    <div className="h-full min-h-[400px] flex items-center justify-center text-center">
+                      <div>
+                        <Landmark className="w-14 h-14 text-gray-400 mx-auto mb-4" />
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">اختر حسابًا لعرض التفاصيل</h3>
+                        <p className="text-gray-600">من القائمة اليمنى اختر الحساب البنكي الذي تريد مراجعته.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-8">
+                      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                        <div>
+                          <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                            {selectedBankAccount.merchant_name || '—'}
+                          </h3>
+                          <p className="text-gray-500 mb-2">{selectedBankAccount.merchant_email || '—'}</p>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <span
+                              className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                                getBankAccountStatusMeta(selectedBankAccount.status).className
+                              }`}
+                            >
+                              {getBankAccountStatusMeta(selectedBankAccount.status).label}
+                            </span>
+
+                            {selectedBankAccount.store_name && selectedBankAccount.store_name !== '—' && (
+                              <span className="inline-flex items-center gap-2 text-sm text-gray-600">
+                                <StoreIcon className="w-4 h-4" />
+                                {selectedBankAccount.store_name}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-sm text-gray-500 space-y-1">
+                          <p>تاريخ الإضافة: {formatDate(selectedBankAccount.created_at)}</p>
+                          <p>آخر تحديث: {formatDate(selectedBankAccount.updated_at)}</p>
+                          <p>آخر مراجعة: {formatDate(selectedBankAccount.reviewed_at)}</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-gray-50 rounded-xl p-4">
+                          <p className="text-sm text-gray-500 mb-1">اسم التاجر</p>
+                          <p className="font-semibold text-gray-900">{selectedBankAccount.merchant_name || '—'}</p>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-xl p-4">
+                          <p className="text-sm text-gray-500 mb-1">البريد الإلكتروني</p>
+                          <p className="font-semibold text-gray-900">{selectedBankAccount.merchant_email || '—'}</p>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-xl p-4">
+                          <p className="text-sm text-gray-500 mb-1">المتجر</p>
+                          <p className="font-semibold text-gray-900">{selectedBankAccount.store_name || '—'}</p>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-xl p-4">
+                          <p className="text-sm text-gray-500 mb-1">اسم البنك</p>
+                          <p className="font-semibold text-gray-900">{selectedBankAccount.bank_name || '—'}</p>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-xl p-4">
+                          <p className="text-sm text-gray-500 mb-1">اسم صاحب الحساب</p>
+                          <p className="font-semibold text-gray-900">
+                            {selectedBankAccount.account_holder_name || '—'}
+                          </p>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-xl p-4">
+                          <p className="text-sm text-gray-500 mb-1">الحالة الحالية</p>
+                          <p className="font-semibold text-gray-900">
+                            {getBankAccountStatusMeta(selectedBankAccount.status).label}
+                          </p>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-xl p-4 md:col-span-2">
+                          <p className="text-sm text-gray-500 mb-1">الآيبان</p>
+                          <p className="font-semibold text-gray-900" dir="ltr">
+                            {formatIban(selectedBankAccount.iban)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {selectedBankAccount.rejection_reason && (
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                          <p className="text-sm text-red-600 mb-1">سبب الرفض الحالي</p>
+                          <p className="font-medium text-red-700">{selectedBankAccount.rejection_reason}</p>
+                        </div>
+                      )}
+
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
+                        لا يستطيع التاجر إرسال طلب سحب إلا إذا كانت حالة الحساب البنكي "معتمد".
+                      </div>
+
+                      <div className="border-t border-gray-100 pt-6">
+                        <h4 className="text-lg font-bold text-gray-900 mb-4">قرار الإدارة</h4>
+
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">سبب الرفض</label>
+                            <textarea
+                              value={bankAccountRejectionReason}
+                              onChange={(e) => setBankAccountRejectionReason(e.target.value)}
+                              rows={4}
+                              placeholder="اكتب سبب رفض الحساب البنكي عند الحاجة..."
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                            />
+                            <p className="text-xs text-gray-500 mt-2">
+                              اتركه فارغًا عند الموافقة. مطلوب فقط إذا أردت رفض الحساب البنكي.
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap gap-3">
+                            <button
+                              onClick={handleApproveBankAccount}
+                              disabled={bankAccountActionLoading || selectedBankAccount.status === 'approved'}
+                              className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:opacity-50"
+                            >
+                              <CheckCircle className="w-5 h-5" />
+                              {bankAccountActionLoading ? 'جاري التنفيذ...' : 'الموافقة على الحساب'}
+                            </button>
+
+                            <button
+                              onClick={handleRejectBankAccount}
+                              disabled={bankAccountActionLoading}
+                              className="inline-flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50"
+                            >
+                              <XCircle className="w-5 h-5" />
+                              {bankAccountActionLoading ? 'جاري التنفيذ...' : 'رفض الحساب'}
+                            </button>
+                          </div>
+
+                          {selectedBankAccount.reviewed_at && (
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-gray-600">
+                              تمت آخر مراجعة بتاريخ: {formatDate(selectedBankAccount.reviewed_at)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'payment-settings' && (
           <div>
             <div className="mb-6">
@@ -1473,7 +2124,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                 disabled={testing}
                 className="w-full bg-blue-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-600 disabled:bg-gray-300 flex items-center justify-center gap-2"
               >
-                <TestTube className="w-5 h-5" />
+                <RefreshCw className={`w-5 h-5 ${testing ? 'animate-spin' : ''}`} />
                 {testing ? 'جاري الاختبار...' : 'اختبار الاتصال ببوابة Paymob'}
               </button>
             </div>
