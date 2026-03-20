@@ -75,17 +75,18 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     }, 0);
   };
 
-  const sellerIdsInCart = useMemo(() => {
+  const uniqueSellerIds = useMemo(() => {
     return Array.from(
       new Set(
         cartItems
           .map((item) => item.product?.user_id)
-          .filter((sellerId): sellerId is string => !!sellerId)
+          .filter((id): id is string => !!id)
       )
     );
   }, [cartItems]);
 
-  const hasMixedSellers = sellerIdsInCart.length > 1;
+  const hasMultipleSellers = uniqueSellerIds.length > 1;
+  const singleSellerId = uniqueSellerIds.length === 1 ? uniqueSellerIds[0] : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,20 +114,15 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    if (hasMixedSellers) {
-      setError('لا يمكن إتمام الطلب لأن السلة تحتوي منتجات من أكثر من تاجر. الرجاء شراء منتجات كل تاجر بشكل منفصل.');
+    const missingSeller = cartItems.find((i) => !i.product?.user_id);
+    if (missingSeller) {
+      setError('حدث خطأ: تعذر تحديد التاجر لأحد المنتجات.');
       return;
     }
 
     const totalAmount = calculateTotal();
     if (totalAmount <= 0) {
       setError('المبلغ الإجمالي غير صالح');
-      return;
-    }
-
-    const sellerId = sellerIdsInCart[0];
-    if (!sellerId) {
-      setError('تعذر تحديد التاجر لهذا الطلب');
       return;
     }
 
@@ -151,11 +147,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       const orderPayload = {
         order_number: orderNumber,
         user_id: profile.id,
-        customer_id: profile.id,
-        seller_id: sellerId,
-        merchant_id: sellerId,
+        seller_id: singleSellerId,
+        merchant_id: singleSellerId,
         total_amount: totalAmount,
-        seller_amount: totalAmount,
         status: 'pending_payment',
         currency: 'SAR',
         payment_method: paymentMethod,
@@ -180,16 +174,17 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       }
 
       const orderItems = cartItems.map((item) => {
-        const price = Number(item.product!.price || 0);
+        const price = item.product!.price;
+        const sellerId = item.product!.user_id!;
 
         return {
           order_id: order.id,
           product_id: item.product_id,
-          seller_id: item.product!.user_id || sellerId,
+          seller_id: sellerId,
           quantity: item.quantity,
           price,
           product_price: price,
-          subtotal: price * item.quantity,
+          subtotal: Number((price * item.quantity).toFixed(2)),
           product_name:
             (item.product as any)?.title ??
             (item.product as any)?.name ??
@@ -299,12 +294,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     : 'سيتم تحويلك إلى صفحة PayPal لإتمام العملية.'}
                 </div>
 
-                {hasMixedSellers && (
-                  <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                    السلة الحالية تحتوي منتجات من أكثر من تاجر، والنظام الحالي يدعم إتمام الطلب لتاجر واحد فقط في كل عملية شراء.
-                    الرجاء إكمال شراء منتجات كل تاجر بشكل منفصل.
-                  </div>
-                )}
+                <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+                  {hasMultipleSellers
+                    ? 'السلة الحالية تحتوي منتجات من عدة تجار، وسيتم توزيع الأرباح تلقائيًا على كل تاجر حسب المنتجات الموجودة في الطلب.'
+                    : 'يمكنك إتمام الطلب بشكل طبيعي، وسيتم ربط الأرباح بالتاجر الخاص بهذا المنتج.'}
+                </div>
 
                 <div className="space-y-4">
                   <div>
@@ -386,7 +380,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
                 <button
                   type="submit"
-                  disabled={processing || hasMixedSellers}
+                  disabled={processing}
                   className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {processing ? (
