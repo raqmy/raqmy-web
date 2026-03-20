@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ShoppingCart, Package, AlertCircle, CreditCard } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Product } from '../lib/supabase';
@@ -75,6 +75,18 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     }, 0);
   };
 
+  const sellerIdsInCart = useMemo(() => {
+    return Array.from(
+      new Set(
+        cartItems
+          .map((item) => item.product?.user_id)
+          .filter((sellerId): sellerId is string => !!sellerId)
+      )
+    );
+  }, [cartItems]);
+
+  const hasMixedSellers = sellerIdsInCart.length > 1;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -101,16 +113,20 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       return;
     }
 
+    if (hasMixedSellers) {
+      setError('لا يمكن إتمام الطلب لأن السلة تحتوي منتجات من أكثر من تاجر. الرجاء شراء منتجات كل تاجر بشكل منفصل.');
+      return;
+    }
+
     const totalAmount = calculateTotal();
     if (totalAmount <= 0) {
       setError('المبلغ الإجمالي غير صالح');
       return;
     }
 
-    // حاليًا نفترض أن السلة تخص بائعًا واحدًا
-    const sellerId = cartItems[0]?.product?.user_id;
+    const sellerId = sellerIdsInCart[0];
     if (!sellerId) {
-      setError('تعذر تحديد البائع لهذا الطلب');
+      setError('تعذر تحديد التاجر لهذا الطلب');
       return;
     }
 
@@ -135,8 +151,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       const orderPayload = {
         order_number: orderNumber,
         user_id: profile.id,
+        customer_id: profile.id,
         seller_id: sellerId,
+        merchant_id: sellerId,
         total_amount: totalAmount,
+        seller_amount: totalAmount,
         status: 'pending_payment',
         currency: 'SAR',
         payment_method: paymentMethod,
@@ -161,7 +180,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       }
 
       const orderItems = cartItems.map((item) => {
-        const price = item.product!.price;
+        const price = Number(item.product!.price || 0);
 
         return {
           order_id: order.id,
@@ -169,6 +188,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           seller_id: item.product!.user_id || sellerId,
           quantity: item.quantity,
           price,
+          product_price: price,
+          subtotal: price * item.quantity,
+          product_name:
+            (item.product as any)?.title ??
+            (item.product as any)?.name ??
+            'منتج',
         };
       });
 
@@ -274,6 +299,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     : 'سيتم تحويلك إلى صفحة PayPal لإتمام العملية.'}
                 </div>
 
+                {hasMixedSellers && (
+                  <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                    السلة الحالية تحتوي منتجات من أكثر من تاجر، والنظام الحالي يدعم إتمام الطلب لتاجر واحد فقط في كل عملية شراء.
+                    الرجاء إكمال شراء منتجات كل تاجر بشكل منفصل.
+                  </div>
+                )}
+
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">عنوان الشحن</label>
@@ -354,7 +386,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
                 <button
                   type="submit"
-                  disabled={processing}
+                  disabled={processing || hasMixedSellers}
                   className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {processing ? (
