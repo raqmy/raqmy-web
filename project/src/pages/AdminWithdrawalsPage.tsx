@@ -12,6 +12,10 @@ import {
   User,
   Wallet,
   FileText,
+  Upload,
+  Download,
+  Paperclip,
+  FileImage,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -36,6 +40,12 @@ interface WithdrawalRequestRow {
   rejected_by: string | null;
   rejection_reason: string | null;
   processed_at: string | null;
+  transfer_proof_url?: string | null;
+  transfer_proof_path?: string | null;
+  bank_transfer_reference?: string | null;
+  bank_transfer_at?: string | null;
+  transferred_by?: string | null;
+  transfer_notes?: string | null;
 }
 
 interface UserProfileRow {
@@ -87,6 +97,8 @@ interface Statistics {
   total_amount_rejected: number;
 }
 
+const WITHDRAWAL_PROOFS_BUCKET = 'withdrawal-proofs';
+
 const formatMoney = (value: number | null | undefined) => {
   return `${Number(value || 0).toFixed(2)} ريال`;
 };
@@ -97,6 +109,17 @@ const formatDateTime = (value: string | null | undefined) => {
     return new Date(value).toLocaleString('ar-SA');
   } catch {
     return value;
+  }
+};
+
+const toDateTimeLocalValue = (value: string | null | undefined) => {
+  if (!value) return '';
+  try {
+    const date = new Date(value);
+    const tzOffset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - tzOffset).toISOString().slice(0, 16);
+  } catch {
+    return '';
   }
 };
 
@@ -132,6 +155,13 @@ const withdrawalStatusClass = (status: string | null | undefined) => {
   return 'bg-gray-100 text-gray-700';
 };
 
+const sanitizeFileName = (fileName: string) => {
+  return fileName
+    .replace(/\s+/g, '-')
+    .replace(/[^\w.\-]/g, '')
+    .toLowerCase();
+};
+
 export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
 
@@ -147,6 +177,13 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
   const [notes, setNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
 
+  const [transferReference, setTransferReference] = useState('');
+  const [transferNotes, setTransferNotes] = useState('');
+  const [bankTransferAt, setBankTransferAt] = useState('');
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
+  const [proofLoading, setProofLoading] = useState(false);
+
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const showTimedMessage = (type: 'success' | 'error', text: string) => {
@@ -156,19 +193,62 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
     }, 3500);
   };
 
+  const resetModalState = () => {
+    setNotes('');
+    setRejectionReason('');
+    setTransferReference('');
+    setTransferNotes('');
+    setBankTransferAt('');
+    setProofFile(null);
+    setProofPreviewUrl(null);
+    setProofLoading(false);
+  };
+
   const closeModal = () => {
     if (processing) return;
     setShowModal(false);
     setSelectedPayout(null);
-    setNotes('');
-    setRejectionReason('');
+    resetModalState();
   };
 
-  const openModal = (payout: PayoutRequest) => {
+  const loadProofPreviewUrl = async (proofPath: string | null | undefined) => {
+    if (!proofPath) {
+      setProofPreviewUrl(null);
+      return;
+    }
+
+    try {
+      setProofLoading(true);
+
+      const { data, error } = await supabase.storage
+        .from(WITHDRAWAL_PROOFS_BUCKET)
+        .createSignedUrl(proofPath, 60 * 60);
+
+      if (error) {
+        console.error('createSignedUrl error:', error);
+        setProofPreviewUrl(null);
+        return;
+      }
+
+      setProofPreviewUrl(data?.signedUrl || null);
+    } catch (error) {
+      console.error('loadProofPreviewUrl error:', error);
+      setProofPreviewUrl(null);
+    } finally {
+      setProofLoading(false);
+    }
+  };
+
+  const openModal = async (payout: PayoutRequest) => {
     setSelectedPayout(payout);
     setNotes(payout.notes || '');
     setRejectionReason(payout.rejection_reason || '');
+    setTransferReference(payout.bank_transfer_reference || '');
+    setTransferNotes(payout.transfer_notes || '');
+    setBankTransferAt(toDateTimeLocalValue(payout.bank_transfer_at) || '');
+    setProofFile(null);
     setShowModal(true);
+    await loadProofPreviewUrl(payout.transfer_proof_path);
   };
 
   const loadPayouts = async () => {
@@ -325,10 +405,34 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
     }
   };
 
+  const uploadTransferProof = async (file: File, payout: PayoutRequest) => {
+    const safeName = sanitizeFileName(file.name || 'transfer-proof');
+    const filePath = `${payout.merchant_id}/${payout.id}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(WITHDRAWAL_PROOFS_BUCKET)
+      .upload(filePath, file, {
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error('transfer proof upload error:', uploadError);
+      throw new Error('تعذر رفع وثيقة التحويل');
+    }
+
+    return filePath;
+  };
+
   const handleApprove = async () => {
     if (!selectedPayout || !profile) return;
+
     if (selectedPayout.status !== 'pending') {
       showTimedMessage('error', 'لا يمكن اعتماد هذا الطلب لأن حالته لم تعد قيد المراجعة');
+      return;
+    }
+
+    if (!proofFile && !selectedPayout.transfer_proof_path) {
+      showTimedMessage('error', 'يجب رفع وثيقة التحويل قبل الموافقة على الطلب');
       return;
     }
 
@@ -336,6 +440,18 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
       setProcessing(true);
 
       const nowIso = new Date().toISOString();
+      const transferAtIso = bankTransferAt
+        ? new Date(bankTransferAt).toISOString()
+        : nowIso;
+
+      let uploadedProofPath = selectedPayout.transfer_proof_path || null;
+
+      if (proofFile) {
+        uploadedProofPath = await uploadTransferProof(proofFile, selectedPayout);
+      }
+
+      const approvalNotes = notes.trim() || null;
+      const transferNotesValue = transferNotes.trim() || null;
 
       const { error: updateError } = await supabase
         .from('withdrawal_requests')
@@ -344,10 +460,16 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
           approved_at: nowIso,
           approved_by: profile.id,
           processed_at: nowIso,
-          notes: notes.trim() || null,
+          notes: approvalNotes,
           rejection_reason: null,
           rejected_at: null,
           rejected_by: null,
+          transfer_proof_path: uploadedProofPath,
+          transfer_proof_url: uploadedProofPath,
+          bank_transfer_reference: transferReference.trim() || null,
+          bank_transfer_at: transferAtIso,
+          transferred_by: profile.id,
+          transfer_notes: transferNotesValue,
         })
         .eq('id', selectedPayout.id)
         .eq('status', 'pending');
@@ -361,10 +483,12 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
         selectedPayout.merchant_id,
         Number(selectedPayout.amount || 0),
         'completed',
-        notes.trim() || 'تمت الموافقة على طلب السحب من الإدارة'
+        transferNotesValue ||
+          approvalNotes ||
+          'تمت الموافقة على طلب السحب وإرفاق وثيقة التحويل من الإدارة'
       );
 
-      showTimedMessage('success', 'تمت الموافقة على الطلب بنجاح');
+      showTimedMessage('success', 'تمت الموافقة على الطلب وحفظ وثيقة التحويل بنجاح');
       closeModal();
       await loadPayouts();
     } catch (err: any) {
@@ -682,7 +806,7 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
 
         {showModal && selectedPayout && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6">
               <div className="flex items-center justify-between gap-4 mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">تفاصيل طلب السحب</h2>
                 <span
@@ -723,7 +847,8 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
                     المبلغ المطلوب: <span className="font-bold">{formatMoney(selectedPayout.amount)}</span>
                   </p>
                   <p className="text-sm text-gray-700 mb-2">
-                    الرصيد المتاح الحالي: <span className="font-bold">{formatMoney(selectedPayout.wallet_balance_available)}</span>
+                    الرصيد المتاح الحالي:{' '}
+                    <span className="font-bold">{formatMoney(selectedPayout.wallet_balance_available)}</span>
                   </p>
                   <p className="text-sm text-gray-700">
                     الرصيد المعلّق: <span className="font-bold">{formatMoney(selectedPayout.wallet_balance_pending)}</span>
@@ -752,6 +877,59 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
                 </div>
               </div>
 
+              <div className="mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <div className="flex items-center gap-2 mb-3">
+                  <Paperclip className="w-5 h-5 text-indigo-600" />
+                  <h3 className="font-bold text-gray-900">بيانات التحويل البنكي</h3>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">مرجع التحويل</p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {selectedPayout.bank_transfer_reference || '—'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">وقت التحويل</p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {formatDateTime(selectedPayout.bank_transfer_at)}
+                    </p>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-gray-500 mb-1">ملاحظات التحويل</p>
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                      {selectedPayout.transfer_notes || '—'}
+                    </p>
+                  </div>
+                </div>
+
+                {(selectedPayout.transfer_proof_path || proofPreviewUrl) && (
+                  <div className="mt-4 p-4 bg-white border border-gray-200 rounded-lg">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                      <div className="flex items-center gap-2 text-sm text-gray-700">
+                        <FileImage className="w-4 h-4 text-indigo-600" />
+                        <span>تم إرفاق وثيقة تحويل لهذا الطلب</span>
+                      </div>
+
+                      {proofPreviewUrl && (
+                        <a
+                          href={proofPreviewUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg font-medium hover:bg-indigo-100"
+                        >
+                          <Download className="w-4 h-4" />
+                          فتح الوثيقة
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {selectedPayout.notes && (
                 <div className="mb-4 bg-blue-50 p-4 rounded-lg border border-blue-200">
                   <h3 className="font-bold text-gray-900 mb-2">ملاحظات الإدارة</h3>
@@ -767,7 +945,115 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
               )}
 
               {selectedPayout.status === 'pending' && (
-                <div className="space-y-4 mb-6">
+                <div className="space-y-5 mb-6">
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                    <h3 className="font-bold text-green-900 mb-4">بيانات تنفيذ الحوالة</h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          مرجع التحويل البنكي
+                        </label>
+                        <input
+                          type="text"
+                          value={transferReference}
+                          onChange={(e) => setTransferReference(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          placeholder="مثال: TRX-20260321-001"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          وقت التحويل البنكي
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={bankTransferAt}
+                          onChange={(e) => setBankTransferAt(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          ملاحظات التحويل
+                        </label>
+                        <textarea
+                          value={transferNotes}
+                          onChange={(e) => setTransferNotes(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          rows={3}
+                          placeholder="مثال: تم التحويل من بنك الراجحي وسيظهر للطرف الآخر خلال مدة البنك"
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          وثيقة التحويل <span className="text-red-500">*</span>
+                        </label>
+
+                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 bg-white">
+                          <label className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 cursor-pointer">
+                            <div>
+                              <p className="font-semibold text-gray-900 mb-1">
+                                ارفع صورة أو PDF أو ملف يثبت التحويل
+                              </p>
+                              <p className="text-sm text-gray-500">
+                                الصيغ المناسبة مثل: JPG, PNG, PDF
+                              </p>
+                            </div>
+
+                            <span className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600">
+                              <Upload className="w-4 h-4" />
+                              اختيار ملف
+                            </span>
+
+                            <input
+                              type="file"
+                              className="hidden"
+                              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] || null;
+                                setProofFile(file);
+                              }}
+                            />
+                          </label>
+
+                          <div className="mt-3 space-y-2">
+                            {proofFile && (
+                              <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                                الملف الجديد المحدد: <span className="font-semibold">{proofFile.name}</span>
+                              </div>
+                            )}
+
+                            {!proofFile && selectedPayout.transfer_proof_path && (
+                              <div className="text-sm text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
+                                توجد وثيقة مرفوعة مسبقًا لهذا الطلب
+                              </div>
+                            )}
+
+                            {proofLoading && (
+                              <div className="text-sm text-gray-500">جاري تجهيز رابط الوثيقة...</div>
+                            )}
+
+                            {proofPreviewUrl && (
+                              <a
+                                href={proofPreviewUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 font-medium"
+                              >
+                                <Eye className="w-4 h-4" />
+                                فتح الوثيقة الحالية
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       ملاحظات الإدارة (اختياري)
