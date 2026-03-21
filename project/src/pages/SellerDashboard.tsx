@@ -22,6 +22,10 @@ import {
   Landmark,
   RefreshCw,
   AlertTriangle,
+  FileText,
+  Download,
+  Paperclip,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Store, Product } from '../lib/supabase';
@@ -116,6 +120,12 @@ interface WithdrawalRequestRow {
   rejected_by?: string | null;
   rejection_reason?: string | null;
   processed_at?: string | null;
+  transfer_proof_url?: string | null;
+  transfer_proof_path?: string | null;
+  bank_transfer_reference?: string | null;
+  bank_transfer_at?: string | null;
+  transferred_by?: string | null;
+  transfer_notes?: string | null;
 }
 
 type NormalizedProduct = Product & {
@@ -128,6 +138,7 @@ type NormalizedProduct = Product & {
 };
 
 const MIN_WITHDRAWAL_AMOUNT = 10;
+const WITHDRAWAL_PROOFS_BUCKET = 'withdrawal-proofs';
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
@@ -197,6 +208,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [withdrawalSubmitting, setWithdrawalSubmitting] = useState(false);
   const [withdrawalError, setWithdrawalError] = useState('');
   const [withdrawalSuccess, setWithdrawalSuccess] = useState('');
+
+  const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequestRow | null>(null);
+  const [showWithdrawalDetails, setShowWithdrawalDetails] = useState(false);
+  const [withdrawalProofUrl, setWithdrawalProofUrl] = useState<string | null>(null);
+  const [withdrawalProofLoading, setWithdrawalProofLoading] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -797,8 +813,40 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
   };
 
-  const openProduct = (id: string) => {
-    onNavigate(`product-${id}`);
+  const openWithdrawalDetails = async (request: WithdrawalRequestRow) => {
+    setSelectedWithdrawal(request);
+    setShowWithdrawalDetails(true);
+    setWithdrawalProofUrl(null);
+
+    if (!request.transfer_proof_path) return;
+
+    try {
+      setWithdrawalProofLoading(true);
+
+      const { data, error } = await supabase.storage
+        .from(WITHDRAWAL_PROOFS_BUCKET)
+        .createSignedUrl(request.transfer_proof_path, 60 * 60);
+
+      if (error) {
+        console.error('createSignedUrl withdrawal proof error:', error);
+        setWithdrawalProofUrl(null);
+        return;
+      }
+
+      setWithdrawalProofUrl(data?.signedUrl || null);
+    } catch (error) {
+      console.error('openWithdrawalDetails error:', error);
+      setWithdrawalProofUrl(null);
+    } finally {
+      setWithdrawalProofLoading(false);
+    }
+  };
+
+  const closeWithdrawalDetails = () => {
+    setSelectedWithdrawal(null);
+    setShowWithdrawalDetails(false);
+    setWithdrawalProofUrl(null);
+    setWithdrawalProofLoading(false);
   };
 
   const verificationStatusMeta = useMemo(() => {
@@ -1693,6 +1741,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div className="space-y-4">
                     {latestWithdrawalRequests.map((request) => {
                       const statusMeta = withdrawalStatusMeta(request.status);
+                      const hasProof = !!request.transfer_proof_path;
                       return (
                         <div
                           key={request.id}
@@ -1737,6 +1786,31 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                               سبب الرفض: {request.rejection_reason}
                             </div>
                           )}
+
+                          <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              {request.status === 'approved' && hasProof && (
+                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-green-100 text-green-700 font-semibold">
+                                  <Paperclip className="w-3.5 h-3.5" />
+                                  توجد وثيقة حوالة
+                                </span>
+                              )}
+
+                              {request.status === 'approved' && !hasProof && (
+                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-gray-100 text-gray-600 font-semibold">
+                                  لا توجد وثيقة مرفقة
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={() => openWithdrawalDetails(request)}
+                              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-xl font-semibold hover:bg-blue-100 transition-colors"
+                            >
+                              <Eye className="w-4 h-4" />
+                              عرض التفاصيل
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
@@ -1963,7 +2037,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
                 {bankAccountData?.iban && (
                   <p className="text-sm text-gray-600">
-                    الآيبان: <span className="font-semibold text-gray-900" dir="ltr">{formatIbanForInput(bankAccountData.iban)}</span>
+                    الآيبان:{' '}
+                    <span className="font-semibold text-gray-900" dir="ltr">
+                      {formatIbanForInput(bankAccountData.iban)}
+                    </span>
                   </p>
                 )}
 
@@ -2214,6 +2291,174 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           </div>
         )}
       </div>
+
+      {showWithdrawalDetails && selectedWithdrawal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900">تفاصيل طلب السحب</h3>
+                <p className="text-sm text-gray-500 mt-1">يمكنك مراجعة حالة الطلب ووثيقة الحوالة إن كانت متاحة</p>
+              </div>
+
+              <button
+                onClick={closeWithdrawalDetails}
+                className="w-10 h-10 rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 flex items-center justify-center"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="flex flex-wrap items-center gap-3">
+                <span
+                  className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                    withdrawalStatusMeta(selectedWithdrawal.status).className
+                  }`}
+                >
+                  {withdrawalStatusMeta(selectedWithdrawal.status).label}
+                </span>
+
+                <span className="text-sm text-gray-500">
+                  رقم الطلب: <span className="font-semibold text-gray-800">{selectedWithdrawal.id}</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-gray-50 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Wallet className="w-5 h-5 text-green-600" />
+                    <h4 className="font-bold text-gray-900">بيانات السحب</h4>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <p className="text-gray-700">
+                      المبلغ: <span className="font-bold text-gray-900">{formatCurrency(selectedWithdrawal.amount)}</span>
+                    </p>
+                    <p className="text-gray-700">
+                      تاريخ الطلب: <span className="font-semibold">{formatDate(selectedWithdrawal.created_at)}</span>
+                    </p>
+                    <p className="text-gray-700">
+                      تاريخ المعالجة: <span className="font-semibold">{formatDate(selectedWithdrawal.processed_at)}</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Landmark className="w-5 h-5 text-blue-600" />
+                    <h4 className="font-bold text-gray-900">بيانات التحويل البنكي</h4>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <p className="text-gray-700">
+                      مرجع التحويل:{' '}
+                      <span className="font-semibold text-gray-900">
+                        {selectedWithdrawal.bank_transfer_reference || '—'}
+                      </span>
+                    </p>
+                    <p className="text-gray-700">
+                      وقت التحويل:{' '}
+                      <span className="font-semibold text-gray-900">
+                        {formatDate(selectedWithdrawal.bank_transfer_at)}
+                      </span>
+                    </p>
+                    <p className="text-gray-700">
+                      حالة وجود وثيقة:{' '}
+                      <span className="font-semibold text-gray-900">
+                        {selectedWithdrawal.transfer_proof_path ? 'مرفقة' : 'غير مرفقة'}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {selectedWithdrawal.notes && (
+                <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className="w-5 h-5 text-blue-600" />
+                    <h4 className="font-bold text-blue-900">ملاحظات الإدارة</h4>
+                  </div>
+                  <p className="text-sm text-blue-800 whitespace-pre-wrap">{selectedWithdrawal.notes}</p>
+                </div>
+              )}
+
+              {selectedWithdrawal.transfer_notes && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Paperclip className="w-5 h-5 text-indigo-600" />
+                    <h4 className="font-bold text-indigo-900">ملاحظات التحويل</h4>
+                  </div>
+                  <p className="text-sm text-indigo-800 whitespace-pre-wrap">{selectedWithdrawal.transfer_notes}</p>
+                </div>
+              )}
+
+              {selectedWithdrawal.rejection_reason && (
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="w-5 h-5 text-red-600" />
+                    <h4 className="font-bold text-red-900">سبب الرفض</h4>
+                  </div>
+                  <p className="text-sm text-red-700 whitespace-pre-wrap">{selectedWithdrawal.rejection_reason}</p>
+                </div>
+              )}
+
+              <div className="bg-white border border-gray-200 rounded-2xl p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Paperclip className="w-5 h-5 text-gray-700" />
+                  <h4 className="font-bold text-gray-900">وثيقة الحوالة</h4>
+                </div>
+
+                {withdrawalProofLoading ? (
+                  <div className="text-sm text-gray-500">جاري تجهيز الوثيقة...</div>
+                ) : selectedWithdrawal.transfer_proof_path && withdrawalProofUrl ? (
+                  <div className="space-y-4">
+                    <div className="text-sm text-gray-600">
+                      اسم الملف: <span className="font-semibold text-gray-900">{getFileNameFromPath(selectedWithdrawal.transfer_proof_path)}</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                      <a
+                        href={withdrawalProofUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700"
+                      >
+                        <Eye className="w-4 h-4" />
+                        فتح الوثيقة
+                      </a>
+
+                      <a
+                        href={withdrawalProofUrl}
+                        download
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 rounded-xl font-semibold hover:bg-gray-200"
+                      >
+                        <Download className="w-4 h-4" />
+                        تحميل الوثيقة
+                      </a>
+                    </div>
+
+                    <div className="text-xs text-gray-500">
+                      في حال تأخر وصول الحوالة للبنك، يمكنك الرجوع لهذه الوثيقة للتحقق من أن التحويل تم من الإدارة.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
+                    لا توجد وثيقة حوالة مرفقة لهذا الطلب حالياً.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  onClick={closeWithdrawalDetails}
+                  className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <CreateStoreModal
         isOpen={showCreateStoreModal}
