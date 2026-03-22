@@ -212,6 +212,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequestRow | null>(null);
   const [showWithdrawalDetails, setShowWithdrawalDetails] = useState(false);
   const [withdrawalProofUrl, setWithdrawalProofUrl] = useState<string | null>(null);
+  const [withdrawalProofResolvedPath, setWithdrawalProofResolvedPath] = useState<string | null>(null);
   const [withdrawalProofLoading, setWithdrawalProofLoading] = useState(false);
   const [withdrawalProofError, setWithdrawalProofError] = useState('');
 
@@ -316,69 +317,37 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       path = path.slice(1);
     }
 
-    return decodeURIComponent(path);
+    try {
+      return decodeURIComponent(path);
+    } catch {
+      return path;
+    }
   };
 
-  const buildProofPathCandidates = (request: WithdrawalRequestRow) => {
-    const rawValues = [
-      request.transfer_proof_path,
-      request.transfer_proof_url,
-      normalizeStoragePath(request.transfer_proof_path),
-      normalizeStoragePath(request.transfer_proof_url),
-    ].filter(Boolean) as string[];
+  const hasWithdrawalProofReference = (request: WithdrawalRequestRow | null | undefined) => {
+    if (!request) return false;
+    return Boolean(request.transfer_proof_path || request.transfer_proof_url);
+  };
 
-    const candidates = new Set<string>();
+  const resolveWithdrawalProofPath = async (request: WithdrawalRequestRow) => {
+    try {
+      const { data, error } = await supabase.rpc('resolve_withdrawal_proof_path', {
+        p_withdrawal_id: request.id,
+      });
 
-    for (const raw of rawValues) {
-      const normalized = normalizeStoragePath(raw);
-      if (!normalized) continue;
-
-      candidates.add(normalized);
-
-      if (request.merchant_id && !normalized.startsWith(`${request.merchant_id}/`)) {
-        candidates.add(`${request.merchant_id}/${normalized}`);
+      if (error) {
+        console.error('resolve_withdrawal_proof_path error:', error);
       }
 
-      const parts = normalized.split('/').filter(Boolean);
-
-      if (
-        request.merchant_id &&
-        parts.length >= 2 &&
-        parts[0] !== request.merchant_id &&
-        parts[1] !== request.merchant_id
-      ) {
-        candidates.add(`${request.merchant_id}/${normalized}`);
+      const resolvedPath = typeof data === 'string' ? data : null;
+      if (resolvedPath) {
+        return resolvedPath;
       }
-
-      if (
-        request.merchant_id &&
-        parts.length >= 2 &&
-        parts[0] === request.id &&
-        !normalized.startsWith(`${request.merchant_id}/`)
-      ) {
-        candidates.add(`${request.merchant_id}/${normalized}`);
-      }
-
-      if (
-        request.merchant_id &&
-        parts.length >= 3 &&
-        parts[0] === request.merchant_id &&
-        parts[1] === request.id
-      ) {
-        candidates.add(normalized);
-      }
-
-      if (
-        request.merchant_id &&
-        parts.length >= 2 &&
-        parts[0] === request.merchant_id &&
-        parts[1] !== request.id
-      ) {
-        candidates.add(normalized);
-      }
+    } catch (error) {
+      console.error('resolveWithdrawalProofPath error:', error);
     }
 
-    return Array.from(candidates);
+    return normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url) || null;
   };
 
   const fetchDashboardData = async () => {
@@ -927,39 +896,35 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     setSelectedWithdrawal(request);
     setShowWithdrawalDetails(true);
     setWithdrawalProofUrl(null);
+    setWithdrawalProofResolvedPath(null);
     setWithdrawalProofError('');
 
-    const candidates = buildProofPathCandidates(request);
-
-    if (candidates.length === 0) {
+    if (!hasWithdrawalProofReference(request)) {
       return;
     }
 
     try {
       setWithdrawalProofLoading(true);
 
-      let signedUrl: string | null = null;
+      const resolvedPath = await resolveWithdrawalProofPath(request);
 
-      for (const candidate of candidates) {
+      if (resolvedPath) {
         const { data, error } = await supabase.storage
           .from(WITHDRAWAL_PROOFS_BUCKET)
-          .createSignedUrl(candidate, 60 * 60);
+          .createSignedUrl(resolvedPath, 60 * 60);
 
         if (!error && data?.signedUrl) {
-          signedUrl = data.signedUrl;
-          break;
+          setWithdrawalProofResolvedPath(resolvedPath);
+          setWithdrawalProofUrl(data.signedUrl);
+          return;
         }
 
-        console.error('createSignedUrl withdrawal proof error for candidate:', candidate, error);
-      }
-
-      if (signedUrl) {
-        setWithdrawalProofUrl(signedUrl);
-        return;
+        console.error('createSignedUrl withdrawal proof error:', error);
       }
 
       if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
         setWithdrawalProofUrl(request.transfer_proof_url);
+        setWithdrawalProofResolvedPath(normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url) || null);
       } else {
         setWithdrawalProofError('تعذر تحميل وثيقة الحوالة حالياً.');
       }
@@ -968,6 +933,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
         setWithdrawalProofUrl(request.transfer_proof_url);
+        setWithdrawalProofResolvedPath(normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url) || null);
       } else {
         setWithdrawalProofError('تعذر تحميل وثيقة الحوالة حالياً.');
       }
@@ -980,6 +946,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     setSelectedWithdrawal(null);
     setShowWithdrawalDetails(false);
     setWithdrawalProofUrl(null);
+    setWithdrawalProofResolvedPath(null);
     setWithdrawalProofLoading(false);
     setWithdrawalProofError('');
   };
@@ -1876,7 +1843,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div className="space-y-4">
                     {latestWithdrawalRequests.map((request) => {
                       const statusMeta = withdrawalStatusMeta(request.status);
-                      const hasProof = buildProofPathCandidates(request).length > 0;
+                      const hasProof = hasWithdrawalProofReference(request);
 
                       return (
                         <div
@@ -2500,7 +2467,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <p className="text-gray-700">
                       حالة وجود وثيقة:{' '}
                       <span className="font-semibold text-gray-900">
-                        {buildProofPathCandidates(selectedWithdrawal).length ? 'مرفقة' : 'غير مرفقة'}
+                        {hasWithdrawalProofReference(selectedWithdrawal) ? 'مرفقة' : 'غير مرفقة'}
                       </span>
                     </p>
                   </div>
@@ -2545,7 +2512,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
                 {withdrawalProofLoading ? (
                   <div className="text-sm text-gray-500">جاري تجهيز الوثيقة...</div>
-                ) : !buildProofPathCandidates(selectedWithdrawal).length ? (
+                ) : !hasWithdrawalProofReference(selectedWithdrawal) ? (
                   <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
                     لا توجد وثيقة حوالة مرفقة لهذا الطلب حالياً.
                   </div>
@@ -2554,13 +2521,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <div className="text-sm text-gray-600">
                       اسم الملف:{' '}
                       <span className="font-semibold text-gray-900">
-                        {getFileNameFromPath(
-                          normalizeStoragePath(selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url)
-                        )}
+                        {getFileNameFromPath(withdrawalProofResolvedPath || selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url)}
                       </span>
                     </div>
 
-                    {isImageFile(selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url) && (
+                    {isImageFile(withdrawalProofResolvedPath || selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url) && (
                       <div className="border border-gray-200 rounded-2xl overflow-hidden bg-gray-50">
                         <img
                           src={withdrawalProofUrl}
