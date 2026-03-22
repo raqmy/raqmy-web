@@ -201,6 +201,11 @@ const normalizeStoragePath = (value: string | null | undefined) => {
   }
 };
 
+const isCanonicalProofPath = (path: string, merchantId: string, withdrawalId: string) => {
+  if (!path || !merchantId || !withdrawalId) return false;
+  return path.startsWith(`${merchantId}/${withdrawalId}/`);
+};
+
 export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
 
@@ -250,7 +255,34 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
     resetModalState();
   };
 
-  const resolveWithdrawalProofPath = async (payout: Pick<PayoutRequest, 'id' | 'transfer_proof_path' | 'transfer_proof_url'>) => {
+  const getFreshMerchantId = async (withdrawalId: string) => {
+    const { data, error } = await supabase
+      .from('withdrawal_requests')
+      .select('merchant_id')
+      .eq('id', withdrawalId)
+      .single();
+
+    if (error) {
+      console.error('getFreshMerchantId error:', error);
+      throw new Error('تعذر جلب merchant_id الحقيقي للطلب');
+    }
+
+    const merchantId = data?.merchant_id;
+    if (!merchantId) {
+      throw new Error('merchant_id غير موجود لهذا الطلب');
+    }
+
+    return merchantId as string;
+  };
+
+  const buildCanonicalProofPath = (merchantId: string, withdrawalId: string, fileName: string) => {
+    const safeName = sanitizeFileName(fileName || 'transfer-proof');
+    return `${merchantId}/${withdrawalId}/${Date.now()}-${safeName}`;
+  };
+
+  const resolveWithdrawalProofPath = async (
+    payout: Pick<PayoutRequest, 'id' | 'merchant_id' | 'transfer_proof_path' | 'transfer_proof_url'>
+  ) => {
     try {
       const { data, error } = await supabase.rpc('resolve_withdrawal_proof_path', {
         p_withdrawal_id: payout.id,
@@ -268,10 +300,23 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
       console.error('resolveWithdrawalProofPath error:', error);
     }
 
-    return normalizeStoragePath(payout.transfer_proof_path || payout.transfer_proof_url);
+    const rawPath = normalizeStoragePath(payout.transfer_proof_path || payout.transfer_proof_url);
+    if (!rawPath) return '';
+
+    if (isCanonicalProofPath(rawPath, payout.merchant_id, payout.id)) {
+      return rawPath;
+    }
+
+    if (rawPath.startsWith(`${payout.id}/`)) {
+      return `${payout.merchant_id}/${rawPath}`;
+    }
+
+    return rawPath;
   };
 
-  const loadProofPreviewUrl = async (payout: Pick<PayoutRequest, 'id' | 'transfer_proof_path' | 'transfer_proof_url'>) => {
+  const loadProofPreviewUrl = async (
+    payout: Pick<PayoutRequest, 'id' | 'merchant_id' | 'transfer_proof_path' | 'transfer_proof_url'>
+  ) => {
     const proofPath = await resolveWithdrawalProofPath(payout);
 
     if (!proofPath) {
@@ -468,12 +513,20 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
   };
 
   const uploadTransferProof = async (file: File, payout: PayoutRequest) => {
-    const safeName = sanitizeFileName(file.name || 'transfer-proof');
-    const filePath = `${payout.merchant_id}/${payout.id}/${Date.now()}-${safeName}`;
+    const freshMerchantId = await getFreshMerchantId(payout.id);
+    const canonicalPath = buildCanonicalProofPath(freshMerchantId, payout.id, file.name || 'transfer-proof');
+
+    console.log('Uploading withdrawal proof with canonical path:', {
+      withdrawalId: payout.id,
+      payoutMerchantId: payout.merchant_id,
+      freshMerchantId,
+      canonicalPath,
+      originalFileName: file.name,
+    });
 
     const { data, error: uploadError } = await supabase.storage
       .from(WITHDRAWAL_PROOFS_BUCKET)
-      .upload(filePath, file, {
+      .upload(canonicalPath, file, {
         upsert: false,
         contentType: file.type || 'application/octet-stream',
       });
@@ -483,7 +536,20 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
       throw new Error('تعذر رفع وثيقة التحويل');
     }
 
-    return data?.path || filePath;
+    const uploadedPath = data?.path || canonicalPath;
+
+    if (!isCanonicalProofPath(uploadedPath, freshMerchantId, payout.id)) {
+      console.error('Uploaded proof path is not canonical:', {
+        uploadedPath,
+        expectedPrefix: `${freshMerchantId}/${payout.id}/`,
+      });
+      throw new Error('تم رفع الملف لكن المسار الناتج غير صحيح، تم إيقاف الحفظ لحماية البيانات');
+    }
+
+    return {
+      uploadedPath,
+      freshMerchantId,
+    };
   };
 
   const handleApprove = async () => {
@@ -503,14 +569,31 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
       setProcessing(true);
 
       const nowIso = new Date().toISOString();
-      const transferAtIso = bankTransferAt
-        ? new Date(bankTransferAt).toISOString()
-        : nowIso;
+      const transferAtIso = bankTransferAt ? new Date(bankTransferAt).toISOString() : nowIso;
 
-      let uploadedProofPath = normalizeStoragePath(selectedPayout.transfer_proof_path || selectedPayout.transfer_proof_url) || null;
+      const freshMerchantId = await getFreshMerchantId(selectedPayout.id);
+
+      let uploadedProofPath =
+        (await resolveWithdrawalProofPath({
+          id: selectedPayout.id,
+          merchant_id: freshMerchantId,
+          transfer_proof_path: selectedPayout.transfer_proof_path,
+          transfer_proof_url: selectedPayout.transfer_proof_url,
+        })) || null;
 
       if (proofFile) {
-        uploadedProofPath = await uploadTransferProof(proofFile, selectedPayout);
+        const uploadResult = await uploadTransferProof(proofFile, selectedPayout);
+        uploadedProofPath = uploadResult.uploadedPath;
+      } else if (uploadedProofPath && uploadedProofPath.startsWith(`${selectedPayout.id}/`)) {
+        uploadedProofPath = `${freshMerchantId}/${uploadedProofPath}`;
+      }
+
+      if (!uploadedProofPath) {
+        throw new Error('تعذر تحديد مسار وثيقة التحويل');
+      }
+
+      if (!isCanonicalProofPath(uploadedProofPath, freshMerchantId, selectedPayout.id)) {
+        throw new Error('مسار وثيقة التحويل غير صحيح ولم يتم حفظ الموافقة');
       }
 
       const approvalNotes = notes.trim() || null;
@@ -543,7 +626,7 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
       }
 
       await updateMatchingWalletLedger(
-        selectedPayout.merchant_id,
+        freshMerchantId,
         Number(selectedPayout.amount || 0),
         'completed',
         transferNotesValue ||
