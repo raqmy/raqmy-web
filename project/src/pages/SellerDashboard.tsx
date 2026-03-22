@@ -288,7 +288,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     if (!value) return '';
 
     let path = value.trim();
-
     if (!path) return '';
 
     if (path.includes('/object/sign/')) {
@@ -318,6 +317,68 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
 
     return decodeURIComponent(path);
+  };
+
+  const buildProofPathCandidates = (request: WithdrawalRequestRow) => {
+    const rawValues = [
+      request.transfer_proof_path,
+      request.transfer_proof_url,
+      normalizeStoragePath(request.transfer_proof_path),
+      normalizeStoragePath(request.transfer_proof_url),
+    ].filter(Boolean) as string[];
+
+    const candidates = new Set<string>();
+
+    for (const raw of rawValues) {
+      const normalized = normalizeStoragePath(raw);
+      if (!normalized) continue;
+
+      candidates.add(normalized);
+
+      if (request.merchant_id && !normalized.startsWith(`${request.merchant_id}/`)) {
+        candidates.add(`${request.merchant_id}/${normalized}`);
+      }
+
+      const parts = normalized.split('/').filter(Boolean);
+
+      if (
+        request.merchant_id &&
+        parts.length >= 2 &&
+        parts[0] !== request.merchant_id &&
+        parts[1] !== request.merchant_id
+      ) {
+        candidates.add(`${request.merchant_id}/${normalized}`);
+      }
+
+      if (
+        request.merchant_id &&
+        parts.length >= 2 &&
+        parts[0] === request.id &&
+        !normalized.startsWith(`${request.merchant_id}/`)
+      ) {
+        candidates.add(`${request.merchant_id}/${normalized}`);
+      }
+
+      if (
+        request.merchant_id &&
+        parts.length >= 3 &&
+        parts[0] === request.merchant_id &&
+        parts[1] === request.id
+      ) {
+        candidates.add(normalized);
+      }
+
+      if (
+        request.merchant_id &&
+        parts.length >= 2 &&
+        parts[0] === request.merchant_id &&
+        parts[1] !== request.id
+      ) {
+        candidates.add(normalized);
+      }
+    }
+
+    return Array.from(candidates);
   };
 
   const fetchDashboardData = async () => {
@@ -868,32 +929,40 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     setWithdrawalProofUrl(null);
     setWithdrawalProofError('');
 
-    const normalizedPath = normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url);
+    const candidates = buildProofPathCandidates(request);
 
-    if (!normalizedPath) {
+    if (candidates.length === 0) {
       return;
     }
 
     try {
       setWithdrawalProofLoading(true);
 
-      const { data, error } = await supabase.storage
-        .from(WITHDRAWAL_PROOFS_BUCKET)
-        .createSignedUrl(normalizedPath, 60 * 60);
+      let signedUrl: string | null = null;
 
-      if (error) {
-        console.error('createSignedUrl withdrawal proof error:', error);
+      for (const candidate of candidates) {
+        const { data, error } = await supabase.storage
+          .from(WITHDRAWAL_PROOFS_BUCKET)
+          .createSignedUrl(candidate, 60 * 60);
 
-        if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
-          setWithdrawalProofUrl(request.transfer_proof_url);
-        } else {
-          setWithdrawalProofError('تعذر تحميل وثيقة الحوالة حالياً.');
+        if (!error && data?.signedUrl) {
+          signedUrl = data.signedUrl;
+          break;
         }
 
+        console.error('createSignedUrl withdrawal proof error for candidate:', candidate, error);
+      }
+
+      if (signedUrl) {
+        setWithdrawalProofUrl(signedUrl);
         return;
       }
 
-      setWithdrawalProofUrl(data?.signedUrl || null);
+      if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
+        setWithdrawalProofUrl(request.transfer_proof_url);
+      } else {
+        setWithdrawalProofError('تعذر تحميل وثيقة الحوالة حالياً.');
+      }
     } catch (error) {
       console.error('openWithdrawalDetails error:', error);
 
@@ -1807,7 +1876,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div className="space-y-4">
                     {latestWithdrawalRequests.map((request) => {
                       const statusMeta = withdrawalStatusMeta(request.status);
-                      const hasProof = !!normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url);
+                      const hasProof = buildProofPathCandidates(request).length > 0;
 
                       return (
                         <div
@@ -2431,9 +2500,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <p className="text-gray-700">
                       حالة وجود وثيقة:{' '}
                       <span className="font-semibold text-gray-900">
-                        {normalizeStoragePath(selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url)
-                          ? 'مرفقة'
-                          : 'غير مرفقة'}
+                        {buildProofPathCandidates(selectedWithdrawal).length ? 'مرفقة' : 'غير مرفقة'}
                       </span>
                     </p>
                   </div>
@@ -2478,7 +2545,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
                 {withdrawalProofLoading ? (
                   <div className="text-sm text-gray-500">جاري تجهيز الوثيقة...</div>
-                ) : !normalizeStoragePath(selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url) ? (
+                ) : !buildProofPathCandidates(selectedWithdrawal).length ? (
                   <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
                     لا توجد وثيقة حوالة مرفقة لهذا الطلب حالياً.
                   </div>
