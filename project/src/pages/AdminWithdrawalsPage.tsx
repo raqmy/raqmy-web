@@ -162,6 +162,45 @@ const sanitizeFileName = (fileName: string) => {
     .toLowerCase();
 };
 
+const normalizeStoragePath = (value: string | null | undefined) => {
+  if (!value) return '';
+
+  let path = value.trim();
+  if (!path) return '';
+
+  if (path.includes('/object/sign/')) {
+    const marker = `/object/sign/${WITHDRAWAL_PROOFS_BUCKET}/`;
+    const idx = path.indexOf(marker);
+    if (idx !== -1) {
+      path = path.slice(idx + marker.length);
+      const qIndex = path.indexOf('?');
+      if (qIndex !== -1) path = path.slice(0, qIndex);
+    }
+  }
+
+  if (path.includes('/object/public/')) {
+    const marker = `/object/public/${WITHDRAWAL_PROOFS_BUCKET}/`;
+    const idx = path.indexOf(marker);
+    if (idx !== -1) {
+      path = path.slice(idx + marker.length);
+    }
+  }
+
+  if (path.startsWith(`${WITHDRAWAL_PROOFS_BUCKET}/`)) {
+    path = path.slice(WITHDRAWAL_PROOFS_BUCKET.length + 1);
+  }
+
+  if (path.startsWith('/')) {
+    path = path.slice(1);
+  }
+
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+};
+
 export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
 
@@ -211,7 +250,30 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
     resetModalState();
   };
 
-  const loadProofPreviewUrl = async (proofPath: string | null | undefined) => {
+  const resolveWithdrawalProofPath = async (payout: Pick<PayoutRequest, 'id' | 'transfer_proof_path' | 'transfer_proof_url'>) => {
+    try {
+      const { data, error } = await supabase.rpc('resolve_withdrawal_proof_path', {
+        p_withdrawal_id: payout.id,
+      });
+
+      if (error) {
+        console.error('resolve_withdrawal_proof_path error:', error);
+      }
+
+      const resolvedPath = typeof data === 'string' ? data : null;
+      if (resolvedPath) {
+        return resolvedPath;
+      }
+    } catch (error) {
+      console.error('resolveWithdrawalProofPath error:', error);
+    }
+
+    return normalizeStoragePath(payout.transfer_proof_path || payout.transfer_proof_url);
+  };
+
+  const loadProofPreviewUrl = async (payout: Pick<PayoutRequest, 'id' | 'transfer_proof_path' | 'transfer_proof_url'>) => {
+    const proofPath = await resolveWithdrawalProofPath(payout);
+
     if (!proofPath) {
       setProofPreviewUrl(null);
       return;
@@ -248,7 +310,7 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
     setBankTransferAt(toDateTimeLocalValue(payout.bank_transfer_at) || '');
     setProofFile(null);
     setShowModal(true);
-    await loadProofPreviewUrl(payout.transfer_proof_path);
+    await loadProofPreviewUrl(payout);
   };
 
   const loadPayouts = async () => {
@@ -409,10 +471,11 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
     const safeName = sanitizeFileName(file.name || 'transfer-proof');
     const filePath = `${payout.merchant_id}/${payout.id}/${Date.now()}-${safeName}`;
 
-    const { error: uploadError } = await supabase.storage
+    const { data, error: uploadError } = await supabase.storage
       .from(WITHDRAWAL_PROOFS_BUCKET)
       .upload(filePath, file, {
-        upsert: true,
+        upsert: false,
+        contentType: file.type || 'application/octet-stream',
       });
 
     if (uploadError) {
@@ -420,7 +483,7 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
       throw new Error('تعذر رفع وثيقة التحويل');
     }
 
-    return filePath;
+    return data?.path || filePath;
   };
 
   const handleApprove = async () => {
@@ -431,7 +494,7 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
       return;
     }
 
-    if (!proofFile && !selectedPayout.transfer_proof_path) {
+    if (!proofFile && !selectedPayout.transfer_proof_path && !selectedPayout.transfer_proof_url) {
       showTimedMessage('error', 'يجب رفع وثيقة التحويل قبل الموافقة على الطلب');
       return;
     }
@@ -444,7 +507,7 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
         ? new Date(bankTransferAt).toISOString()
         : nowIso;
 
-      let uploadedProofPath = selectedPayout.transfer_proof_path || null;
+      let uploadedProofPath = normalizeStoragePath(selectedPayout.transfer_proof_path || selectedPayout.transfer_proof_url) || null;
 
       if (proofFile) {
         uploadedProofPath = await uploadTransferProof(proofFile, selectedPayout);
@@ -465,7 +528,7 @@ export const AdminWithdrawalsPage: React.FC<AdminWithdrawalsPageProps> = ({ onNa
           rejected_at: null,
           rejected_by: null,
           transfer_proof_path: uploadedProofPath,
-          transfer_proof_url: uploadedProofPath,
+          transfer_proof_url: null,
           bank_transfer_reference: transferReference.trim() || null,
           bank_transfer_at: transferAtIso,
           transferred_by: profile.id,
