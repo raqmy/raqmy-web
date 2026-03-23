@@ -318,6 +318,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
     return buildProofPathCandidates(request).length > 0;
   };
+
+  // Defensive alias to avoid any stale/typo reference causing a runtime crash.
+  const hashWithdrawalProofReference = hasWithdrawalProofReference;
   const buildProofPathCandidates = (request: WithdrawalRequestRow) => {
     const rawValues = [
       request.transfer_proof_path,
