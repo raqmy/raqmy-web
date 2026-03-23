@@ -23,6 +23,7 @@ import {
   RefreshCw,
   AlertTriangle,
   FileText,
+  Download,
   Paperclip,
   X,
 } from 'lucide-react';
@@ -271,6 +272,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     return clean.replace(/(.{4})/g, '$1 ').trim();
   };
 
+  const isImageFile = (pathOrUrl: string | null | undefined) => {
+    if (!pathOrUrl) return false;
+    const lower = pathOrUrl.toLowerCase();
+    return (
+      lower.endsWith('.png') ||
+      lower.endsWith('.jpg') ||
+      lower.endsWith('.jpeg') ||
+      lower.endsWith('.webp') ||
+      lower.endsWith('.gif')
+    );
+  };
 
   const normalizeStoragePath = (value: string | null | undefined) => {
     if (!value) return '';
@@ -943,32 +955,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       return;
     }
 
+    if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
+      setWithdrawalProofUrl(request.transfer_proof_url);
+      window.open(request.transfer_proof_url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
     try {
       setWithdrawalProofLoading(true);
 
-      if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
-        setWithdrawalProofUrl(request.transfer_proof_url);
-        window.open(request.transfer_proof_url, '_blank', 'noopener,noreferrer');
-        return;
-      }
-
-      let resolvedPath: string | null = null;
-
-      try {
-        const { data, error } = await supabase.rpc('resolve_withdrawal_proof_path', {
-          p_withdrawal_id: request.id,
-        });
-
-        if (error) {
-          console.error('resolve_withdrawal_proof_path error:', error);
-        } else if (typeof data === 'string' && data) {
-          resolvedPath = data;
-        }
-      } catch (error) {
-        console.error('resolve withdrawal proof path failed:', error);
-      }
-
-      const candidates = resolvedPath ? [resolvedPath] : buildProofPathCandidates(request);
+      const candidates = buildProofPathCandidates(request);
+      let signedUrl: string | null = null;
 
       for (const candidate of candidates) {
         const { data, error } = await supabase.storage
@@ -976,16 +973,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           .createSignedUrl(candidate, 60 * 60);
 
         if (!error && data?.signedUrl) {
-          setWithdrawalProofUrl(data.signedUrl);
-          window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
-          return;
+          signedUrl = data.signedUrl;
+          break;
         }
 
         console.error('createSignedUrl withdrawal proof error for candidate:', candidate, error);
       }
 
-      setWithdrawalProofUrl(null);
-      setWithdrawalProofError('تعذر فتح وثيقة الحوالة حالياً.');
+      if (!signedUrl) {
+        setWithdrawalProofUrl(null);
+        setWithdrawalProofError('تعذر فتح وثيقة الحوالة حالياً.');
+        return;
+      }
+
+      setWithdrawalProofUrl(signedUrl);
+      window.open(signedUrl, '_blank', 'noopener,noreferrer');
     } catch (error) {
       console.error('handleOpenWithdrawalProof error:', error);
       setWithdrawalProofUrl(null);
@@ -1895,7 +1897,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div className="space-y-4">
                     {latestWithdrawalRequests.map((request) => {
                       const statusMeta = withdrawalStatusMeta(request.status);
-                      const hasProof = buildProofPathCandidates(request).length > 0;
+                      const hasProof = hasWithdrawalProofReference(request);
 
                       return (
                         <div
@@ -2519,7 +2521,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <p className="text-gray-700">
                       حالة وجود وثيقة:{' '}
                       <span className="font-semibold text-gray-900">
-                        {hasWithdrawalProofReference(selectedWithdrawal) ? 'مرفقة' : 'غير مرفقة'}
+                        {buildProofPathCandidates(selectedWithdrawal).length ? 'مرفقة' : 'غير مرفقة'}
                       </span>
                     </p>
                   </div>
@@ -2573,7 +2575,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       <span className="font-semibold text-gray-900">
                         {getFileNameFromPath(
                           normalizeStoragePath(selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url)
-                        ) || 'وثيقة-حوالة'}
+                        )}
                       </span>
                     </div>
 
@@ -2582,7 +2584,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                         type="button"
                         onClick={() => handleOpenWithdrawalProof(selectedWithdrawal)}
                         disabled={withdrawalProofLoading}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         <Eye className="w-4 h-4" />
                         {withdrawalProofLoading ? 'جاري فتح الوثيقة...' : 'عرض الملف'}
@@ -2595,14 +2597,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                           rel="noreferrer"
                           className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 rounded-xl font-semibold hover:bg-gray-200"
                         >
-                          <Paperclip className="w-4 h-4" />
-                          إعادة فتح الرابط
+                          <Download className="w-4 h-4" />
+                          فتح آخر رابط
                         </a>
                       )}
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      عند الضغط على زر عرض الملف سيتم فتح وثيقة الحوالة في صفحة جديدة مثل ملفات التوثيق.
                     </div>
 
                     {withdrawalProofError && (
