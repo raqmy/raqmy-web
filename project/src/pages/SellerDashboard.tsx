@@ -304,23 +304,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       path = path.slice(1);
     }
 
-    return decodeURIComponent(path);
-  };
-
-
-
-  const hasWithdrawalProofReference = (request: WithdrawalRequestRow | null | undefined) => {
-    if (!request) return false;
-
-    if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
-      return true;
+    try {
+      return decodeURIComponent(path);
+    } catch {
+      return path;
     }
-
-    return buildProofPathCandidates(request).length > 0;
   };
 
-  // Defensive alias to avoid any stale/typo reference causing a runtime crash.
-  const hashWithdrawalProofReference = hasWithdrawalProofReference;
   const buildProofPathCandidates = (request: WithdrawalRequestRow) => {
     const rawValues = [
       request.transfer_proof_path,
@@ -381,6 +371,16 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
 
     return Array.from(candidates);
+  };
+
+  const hasWithdrawalProofReference = (request: WithdrawalRequestRow | null | undefined) => {
+    if (!request) return false;
+
+    if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
+      return true;
+    }
+
+    return buildProofPathCandidates(request).length > 0;
   };
 
   const fetchDashboardData = async () => {
@@ -584,6 +584,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       const { data, error } = await supabase
         .from('bank_accounts')
         .select('*')
+        .eq('merchant_id', profile.id)
         .maybeSingle();
 
       if (error) {
@@ -2518,7 +2519,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <p className="text-gray-700">
                       حالة وجود وثيقة:{' '}
                       <span className="font-semibold text-gray-900">
-                        {buildProofPathCandidates(selectedWithdrawal).length ? 'مرفقة' : 'غير مرفقة'}
+                        {hasWithdrawalProofReference(selectedWithdrawal) ? 'مرفقة' : 'غير مرفقة'}
                       </span>
                     </p>
                   </div>
