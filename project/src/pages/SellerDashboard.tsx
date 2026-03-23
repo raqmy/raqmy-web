@@ -23,7 +23,6 @@ import {
   RefreshCw,
   AlertTriangle,
   FileText,
-  Download,
   Paperclip,
   X,
 } from 'lucide-react';
@@ -212,7 +211,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequestRow | null>(null);
   const [showWithdrawalDetails, setShowWithdrawalDetails] = useState(false);
   const [withdrawalProofUrl, setWithdrawalProofUrl] = useState<string | null>(null);
-  const [withdrawalProofResolvedPath, setWithdrawalProofResolvedPath] = useState<string | null>(null);
   const [withdrawalProofLoading, setWithdrawalProofLoading] = useState(false);
   const [withdrawalProofError, setWithdrawalProofError] = useState('');
 
@@ -273,17 +271,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     return clean.replace(/(.{4})/g, '$1 ').trim();
   };
 
-  const isImageFile = (pathOrUrl: string | null | undefined) => {
-    if (!pathOrUrl) return false;
-    const lower = pathOrUrl.toLowerCase();
-    return (
-      lower.endsWith('.png') ||
-      lower.endsWith('.jpg') ||
-      lower.endsWith('.jpeg') ||
-      lower.endsWith('.webp') ||
-      lower.endsWith('.gif')
-    );
-  };
 
   const normalizeStoragePath = (value: string | null | undefined) => {
     if (!value) return '';
@@ -317,37 +304,69 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       path = path.slice(1);
     }
 
-    try {
-      return decodeURIComponent(path);
-    } catch {
-      return path;
-    }
+    return decodeURIComponent(path);
   };
 
-  const hasWithdrawalProofReference = (request: WithdrawalRequestRow | null | undefined) => {
-    if (!request) return false;
-    return Boolean(request.transfer_proof_path || request.transfer_proof_url);
-  };
+  const buildProofPathCandidates = (request: WithdrawalRequestRow) => {
+    const rawValues = [
+      request.transfer_proof_path,
+      request.transfer_proof_url,
+      normalizeStoragePath(request.transfer_proof_path),
+      normalizeStoragePath(request.transfer_proof_url),
+    ].filter(Boolean) as string[];
 
-  const resolveWithdrawalProofPath = async (request: WithdrawalRequestRow) => {
-    try {
-      const { data, error } = await supabase.rpc('resolve_withdrawal_proof_path', {
-        p_withdrawal_id: request.id,
-      });
+    const candidates = new Set<string>();
 
-      if (error) {
-        console.error('resolve_withdrawal_proof_path error:', error);
+    for (const raw of rawValues) {
+      const normalized = normalizeStoragePath(raw);
+      if (!normalized) continue;
+
+      candidates.add(normalized);
+
+      if (request.merchant_id && !normalized.startsWith(`${request.merchant_id}/`)) {
+        candidates.add(`${request.merchant_id}/${normalized}`);
       }
 
-      const resolvedPath = typeof data === 'string' ? data : null;
-      if (resolvedPath) {
-        return resolvedPath;
+      const parts = normalized.split('/').filter(Boolean);
+
+      if (
+        request.merchant_id &&
+        parts.length >= 2 &&
+        parts[0] !== request.merchant_id &&
+        parts[1] !== request.merchant_id
+      ) {
+        candidates.add(`${request.merchant_id}/${normalized}`);
       }
-    } catch (error) {
-      console.error('resolveWithdrawalProofPath error:', error);
+
+      if (
+        request.merchant_id &&
+        parts.length >= 2 &&
+        parts[0] === request.id &&
+        !normalized.startsWith(`${request.merchant_id}/`)
+      ) {
+        candidates.add(`${request.merchant_id}/${normalized}`);
+      }
+
+      if (
+        request.merchant_id &&
+        parts.length >= 3 &&
+        parts[0] === request.merchant_id &&
+        parts[1] === request.id
+      ) {
+        candidates.add(normalized);
+      }
+
+      if (
+        request.merchant_id &&
+        parts.length >= 2 &&
+        parts[0] === request.merchant_id &&
+        parts[1] !== request.id
+      ) {
+        candidates.add(normalized);
+      }
     }
 
-    return normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url) || null;
+    return Array.from(candidates);
   };
 
   const fetchDashboardData = async () => {
@@ -892,51 +911,70 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
   };
 
-  const openWithdrawalDetails = async (request: WithdrawalRequestRow) => {
+  const openWithdrawalDetails = (request: WithdrawalRequestRow) => {
     setSelectedWithdrawal(request);
     setShowWithdrawalDetails(true);
     setWithdrawalProofUrl(null);
-    setWithdrawalProofResolvedPath(null);
+    setWithdrawalProofLoading(false);
+    setWithdrawalProofError('');
+  };
+
+  const handleOpenWithdrawalProof = async (request: WithdrawalRequestRow) => {
     setWithdrawalProofError('');
 
     if (!hasWithdrawalProofReference(request)) {
+      setWithdrawalProofUrl(null);
+      setWithdrawalProofError('لا توجد وثيقة حوالة مرفقة لهذا الطلب حالياً.');
       return;
     }
 
     try {
       setWithdrawalProofLoading(true);
 
-      const resolvedPath = await resolveWithdrawalProofPath(request);
+      if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
+        setWithdrawalProofUrl(request.transfer_proof_url);
+        window.open(request.transfer_proof_url, '_blank', 'noopener,noreferrer');
+        return;
+      }
 
-      if (resolvedPath) {
+      let resolvedPath: string | null = null;
+
+      try {
+        const { data, error } = await supabase.rpc('resolve_withdrawal_proof_path', {
+          p_withdrawal_id: request.id,
+        });
+
+        if (error) {
+          console.error('resolve_withdrawal_proof_path error:', error);
+        } else if (typeof data === 'string' && data) {
+          resolvedPath = data;
+        }
+      } catch (error) {
+        console.error('resolve withdrawal proof path failed:', error);
+      }
+
+      const candidates = resolvedPath ? [resolvedPath] : buildProofPathCandidates(request);
+
+      for (const candidate of candidates) {
         const { data, error } = await supabase.storage
           .from(WITHDRAWAL_PROOFS_BUCKET)
-          .createSignedUrl(resolvedPath, 60 * 60);
+          .createSignedUrl(candidate, 60 * 60);
 
         if (!error && data?.signedUrl) {
-          setWithdrawalProofResolvedPath(resolvedPath);
           setWithdrawalProofUrl(data.signedUrl);
+          window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
           return;
         }
 
-        console.error('createSignedUrl withdrawal proof error:', error);
+        console.error('createSignedUrl withdrawal proof error for candidate:', candidate, error);
       }
 
-      if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
-        setWithdrawalProofUrl(request.transfer_proof_url);
-        setWithdrawalProofResolvedPath(normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url) || null);
-      } else {
-        setWithdrawalProofError('تعذر تحميل وثيقة الحوالة حالياً.');
-      }
+      setWithdrawalProofUrl(null);
+      setWithdrawalProofError('تعذر فتح وثيقة الحوالة حالياً.');
     } catch (error) {
-      console.error('openWithdrawalDetails error:', error);
-
-      if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
-        setWithdrawalProofUrl(request.transfer_proof_url);
-        setWithdrawalProofResolvedPath(normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url) || null);
-      } else {
-        setWithdrawalProofError('تعذر تحميل وثيقة الحوالة حالياً.');
-      }
+      console.error('handleOpenWithdrawalProof error:', error);
+      setWithdrawalProofUrl(null);
+      setWithdrawalProofError('تعذر فتح وثيقة الحوالة حالياً.');
     } finally {
       setWithdrawalProofLoading(false);
     }
@@ -946,7 +984,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     setSelectedWithdrawal(null);
     setShowWithdrawalDetails(false);
     setWithdrawalProofUrl(null);
-    setWithdrawalProofResolvedPath(null);
     setWithdrawalProofLoading(false);
     setWithdrawalProofError('');
   };
@@ -1843,7 +1880,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div className="space-y-4">
                     {latestWithdrawalRequests.map((request) => {
                       const statusMeta = withdrawalStatusMeta(request.status);
-                      const hasProof = hasWithdrawalProofReference(request);
+                      const hasProof = buildProofPathCandidates(request).length > 0;
 
                       return (
                         <div
@@ -2467,7 +2504,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <p className="text-gray-700">
                       حالة وجود وثيقة:{' '}
                       <span className="font-semibold text-gray-900">
-                        {hasWithdrawalProofReference(selectedWithdrawal) ? 'مرفقة' : 'غير مرفقة'}
+                        {buildProofPathCandidates(selectedWithdrawal).length ? 'مرفقة' : 'غير مرفقة'}
                       </span>
                     </p>
                   </div>
@@ -2510,59 +2547,54 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <h4 className="font-bold text-gray-900">وثيقة الحوالة</h4>
                 </div>
 
-                {withdrawalProofLoading ? (
-                  <div className="text-sm text-gray-500">جاري تجهيز الوثيقة...</div>
-                ) : !hasWithdrawalProofReference(selectedWithdrawal) ? (
+                {!hasWithdrawalProofReference(selectedWithdrawal) ? (
                   <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
                     لا توجد وثيقة حوالة مرفقة لهذا الطلب حالياً.
                   </div>
-                ) : withdrawalProofUrl ? (
+                ) : (
                   <div className="space-y-4">
                     <div className="text-sm text-gray-600">
                       اسم الملف:{' '}
                       <span className="font-semibold text-gray-900">
-                        {getFileNameFromPath(withdrawalProofResolvedPath || selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url)}
+                        {getFileNameFromPath(
+                          normalizeStoragePath(selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url)
+                        ) || 'وثيقة-حوالة'}
                       </span>
                     </div>
 
-                    {isImageFile(withdrawalProofResolvedPath || selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url) && (
-                      <div className="border border-gray-200 rounded-2xl overflow-hidden bg-gray-50">
-                        <img
-                          src={withdrawalProofUrl}
-                          alt="وثيقة الحوالة"
-                          className="w-full max-h-[420px] object-contain"
-                        />
-                      </div>
-                    )}
-
                     <div className="flex flex-wrap gap-3">
-                      <a
-                        href={withdrawalProofUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700"
+                      <button
+                        type="button"
+                        onClick={() => handleOpenWithdrawalProof(selectedWithdrawal)}
+                        disabled={withdrawalProofLoading}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Eye className="w-4 h-4" />
-                        فتح الوثيقة
-                      </a>
+                        {withdrawalProofLoading ? 'جاري فتح الوثيقة...' : 'عرض الملف'}
+                      </button>
 
-                      <a
-                        href={withdrawalProofUrl}
-                        download
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 rounded-xl font-semibold hover:bg-gray-200"
-                      >
-                        <Download className="w-4 h-4" />
-                        تحميل الوثيقة
-                      </a>
+                      {withdrawalProofUrl && (
+                        <a
+                          href={withdrawalProofUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 rounded-xl font-semibold hover:bg-gray-200"
+                        >
+                          <Paperclip className="w-4 h-4" />
+                          إعادة فتح الرابط
+                        </a>
+                      )}
                     </div>
 
                     <div className="text-xs text-gray-500">
-                      في حال تأخر وصول الحوالة للبنك، يمكنك الرجوع لهذه الوثيقة للتحقق من أن التحويل تم من الإدارة.
+                      عند الضغط على زر عرض الملف سيتم فتح وثيقة الحوالة في صفحة جديدة مثل ملفات التوثيق.
                     </div>
-                  </div>
-                ) : (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-                    {withdrawalProofError || 'تعذر تحميل وثيقة الحوالة حالياً.'}
+
+                    {withdrawalProofError && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+                        {withdrawalProofError}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
