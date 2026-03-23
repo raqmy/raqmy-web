@@ -307,6 +307,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     return decodeURIComponent(path);
   };
 
+
+
+  const hasWithdrawalProofReference = (request: WithdrawalRequestRow | null | undefined) => {
+    if (!request) return false;
+
+    if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
+      return true;
+    }
+
+    return buildProofPathCandidates(request).length > 0;
+  };
   const buildProofPathCandidates = (request: WithdrawalRequestRow) => {
     const rawValues = [
       request.transfer_proof_path,
