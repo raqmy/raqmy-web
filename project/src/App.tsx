@@ -108,32 +108,77 @@ function AppContent() {
 
       try {
         const paymobReturnParams = Object.fromEntries(searchParams.entries());
+        const paymobSuccess = String(searchParams.get('success') || '').toLowerCase() === 'true';
 
-        const { data, error } = await supabase.functions.invoke('verify-paymob-transaction', {
-          body: {
-            order_id: pendingOrderId,
-            transaction_id: searchParams.get('id'),
-            paymob_return_params: paymobReturnParams,
-          },
-        });
+        const verifyOnce = async () => {
+          const { data, error } = await supabase.functions.invoke('verify-paymob-transaction', {
+            body: {
+              order_id: pendingOrderId,
+              transaction_id: searchParams.get('id'),
+              paymob_return_params: paymobReturnParams,
+            },
+          });
 
-        if (error) {
-          console.error('verify-paymob-transaction error:', error);
-          setCurrentPage(`payment-failed-${pendingOrderId}`);
-        } else if (
-          data?.success &&
-          (
-            data?.verified === true ||
-            data?.paid === true ||
-            data?.status === 'paid' ||
-            data?.status === 'success' ||
-            data?.order?.status === 'paid'
-          )
-        ) {
-          setCurrentPage(`payment-success-${pendingOrderId}`);
-        } else {
-          setCurrentPage(`payment-failed-${pendingOrderId}`);
+          return { data, error };
+        };
+
+        const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        let finalData: any = null;
+        let finalError: any = null;
+
+        for (let attempt = 1; attempt <= 8; attempt++) {
+          const { data, error } = await verifyOnce();
+
+          finalData = data;
+          finalError = error;
+
+          if (!error && data?.success) {
+            if (
+              data?.verified === true ||
+              data?.paid === true ||
+              data?.status === 'paid' ||
+              data?.order?.status === 'paid'
+            ) {
+              setCurrentPage(`payment-success-${pendingOrderId}`);
+              localStorage.removeItem('pending_payment_order_id');
+              localStorage.removeItem('pending_payment_started_at');
+              localStorage.removeItem('pending_payment_return_expected');
+
+              if (window.location.search) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+              }
+
+              setIsHandlingPaymentReturn(false);
+              return;
+            }
+
+            if (
+              data?.failed === true ||
+              data?.status === 'failed' ||
+              data?.order?.status === 'failed'
+            ) {
+              setCurrentPage(`payment-failed-${pendingOrderId}`);
+              localStorage.removeItem('pending_payment_order_id');
+              localStorage.removeItem('pending_payment_started_at');
+              localStorage.removeItem('pending_payment_return_expected');
+
+              if (window.location.search) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+              }
+
+              setIsHandlingPaymentReturn(false);
+              return;
+            }
+          }
+
+          if (attempt < 8) {
+            await sleep(paymobSuccess ? 2000 : 1200);
+          }
         }
+
+        console.error('Payment verification final result:', { finalData, finalError });
+        setCurrentPage(`payment-failed-${pendingOrderId}`);
       } catch (err) {
         console.error('Error handling Paymob return:', err);
         setCurrentPage(`payment-failed-${pendingOrderId}`);
