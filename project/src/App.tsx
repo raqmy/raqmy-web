@@ -104,6 +104,18 @@ function AppContent() {
         return;
       }
 
+      const cleanupPaymentReturn = () => {
+        localStorage.removeItem('pending_payment_order_id');
+        localStorage.removeItem('pending_payment_started_at');
+        localStorage.removeItem('pending_payment_return_expected');
+
+        if (window.location.search) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        setIsHandlingPaymentReturn(false);
+      };
+
       setIsHandlingPaymentReturn(true);
 
       try {
@@ -141,15 +153,7 @@ function AppContent() {
               data?.order?.status === 'paid'
             ) {
               setCurrentPage(`payment-success-${pendingOrderId}`);
-              localStorage.removeItem('pending_payment_order_id');
-              localStorage.removeItem('pending_payment_started_at');
-              localStorage.removeItem('pending_payment_return_expected');
-
-              if (window.location.search) {
-                window.history.replaceState({}, document.title, window.location.pathname);
-              }
-
-              setIsHandlingPaymentReturn(false);
+              cleanupPaymentReturn();
               return;
             }
 
@@ -159,15 +163,7 @@ function AppContent() {
               data?.order?.status === 'failed'
             ) {
               setCurrentPage(`payment-failed-${pendingOrderId}`);
-              localStorage.removeItem('pending_payment_order_id');
-              localStorage.removeItem('pending_payment_started_at');
-              localStorage.removeItem('pending_payment_return_expected');
-
-              if (window.location.search) {
-                window.history.replaceState({}, document.title, window.location.pathname);
-              }
-
-              setIsHandlingPaymentReturn(false);
+              cleanupPaymentReturn();
               return;
             }
           }
@@ -178,20 +174,54 @@ function AppContent() {
         }
 
         console.error('Payment verification final result:', { finalData, finalError });
-        setCurrentPage(`payment-failed-${pendingOrderId}`);
-      } catch (err) {
-        console.error('Error handling Paymob return:', err);
-        setCurrentPage(`payment-failed-${pendingOrderId}`);
-      } finally {
-        localStorage.removeItem('pending_payment_order_id');
-        localStorage.removeItem('pending_payment_started_at');
-        localStorage.removeItem('pending_payment_return_expected');
 
-        if (window.location.search) {
-          window.history.replaceState({}, document.title, window.location.pathname);
+        // fallback أخير: تحقق مباشر من قاعدة البيانات قبل الحكم بالفشل
+        const { data: directOrder, error: directOrderError } = await supabase
+          .from('orders')
+          .select('id, status')
+          .eq('id', pendingOrderId)
+          .maybeSingle();
+
+        if (directOrderError) {
+          console.error('Direct DB fallback check failed:', directOrderError);
         }
 
-        setIsHandlingPaymentReturn(false);
+        if (directOrder?.status === 'paid') {
+          setCurrentPage(`payment-success-${pendingOrderId}`);
+        } else if (paymobSuccess) {
+          // لو Paymob رجع success لكن التحقق تأخر، لا نظهر فشل مباشرة
+          setCurrentPage(`payment-success-${pendingOrderId}`);
+        } else {
+          setCurrentPage(`payment-failed-${pendingOrderId}`);
+        }
+      } catch (err) {
+        console.error('Error handling Paymob return:', err);
+
+        // fallback داخل catch
+        try {
+          const pendingOrderIdInCatch = localStorage.getItem('pending_payment_order_id');
+
+          if (pendingOrderIdInCatch) {
+            const { data: directOrder } = await supabase
+              .from('orders')
+              .select('id, status')
+              .eq('id', pendingOrderIdInCatch)
+              .maybeSingle();
+
+            if (directOrder?.status === 'paid') {
+              setCurrentPage(`payment-success-${pendingOrderIdInCatch}`);
+            } else {
+              setCurrentPage(`payment-failed-${pendingOrderIdInCatch}`);
+            }
+          } else {
+            setCurrentPage('payment-failed');
+          }
+        } catch (fallbackErr) {
+          console.error('Fallback DB check after catch failed:', fallbackErr);
+          setCurrentPage(`payment-failed-${pendingOrderId}`);
+        }
+      } finally {
+        cleanupPaymentReturn();
       }
     };
 
