@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { XCircle, RotateCcw, Home, HelpCircle } from 'lucide-react';
 
 interface PaymentFailedPageProps {
@@ -7,6 +7,12 @@ interface PaymentFailedPageProps {
 }
 
 export const PaymentFailedPage: React.FC<PaymentFailedPageProps> = ({ onNavigate, orderId }) => {
+  useEffect(() => {
+    localStorage.removeItem('pending_payment_order_id');
+    localStorage.removeItem('pending_payment_started_at');
+    localStorage.removeItem('pending_payment_return_expected');
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
