@@ -48,6 +48,7 @@ function AppContent() {
   const { user, profile, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState('home');
   const [hasBankDetails, setHasBankDetails] = useState<boolean | null>(null);
+  const [isHandlingPaymentReturn, setIsHandlingPaymentReturn] = useState(false);
 
   useEffect(() => {
     const checkBankDetails = async () => {
@@ -82,6 +83,70 @@ function AppContent() {
   }, [user, profile]);
 
   useEffect(() => {
+    const handlePaymobReturn = async () => {
+      if (loading) return;
+
+      const pendingOrderId = localStorage.getItem('pending_payment_order_id');
+      const expectedReturn = localStorage.getItem('pending_payment_return_expected');
+      const searchParams = new URLSearchParams(window.location.search);
+
+      const hasPaymobParams =
+        searchParams.has('id') ||
+        searchParams.has('success') ||
+        searchParams.has('pending') ||
+        searchParams.has('txn_response_code') ||
+        searchParams.has('amount_cents') ||
+        searchParams.has('is_voided') ||
+        searchParams.has('is_refunded') ||
+        searchParams.has('is_capture');
+
+      if (!pendingOrderId || expectedReturn !== 'true' || !hasPaymobParams) {
+        return;
+      }
+
+      setIsHandlingPaymentReturn(true);
+
+      try {
+        const paymobReturnParams = Object.fromEntries(searchParams.entries());
+
+        const { data, error } = await supabase.functions.invoke('verify-paymob-transaction', {
+          body: {
+            order_id: pendingOrderId,
+            transaction_id: searchParams.get('id'),
+            paymob_return_params: paymobReturnParams,
+          },
+        });
+
+        if (error) {
+          console.error('verify-paymob-transaction error:', error);
+          setCurrentPage(`payment-failed-${pendingOrderId}`);
+        } else if (data?.success && (data?.paid === true || data?.status === 'paid' || data?.status === 'success')) {
+          setCurrentPage(`payment-success-${pendingOrderId}`);
+        } else {
+          setCurrentPage(`payment-failed-${pendingOrderId}`);
+        }
+      } catch (err) {
+        console.error('Error handling Paymob return:', err);
+        setCurrentPage(`payment-failed-${pendingOrderId}`);
+      } finally {
+        localStorage.removeItem('pending_payment_order_id');
+        localStorage.removeItem('pending_payment_started_at');
+        localStorage.removeItem('pending_payment_return_expected');
+
+        if (window.location.search) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        setIsHandlingPaymentReturn(false);
+      }
+    };
+
+    handlePaymobReturn();
+  }, [loading]);
+
+  useEffect(() => {
+    if (isHandlingPaymentReturn) return;
+
     if (user && !loading && profile) {
       if (!profile.phone_verified && currentPage !== 'verify-phone') {
         setCurrentPage('verify-phone');
@@ -103,14 +168,16 @@ function AppContent() {
         }
       }
     }
-  }, [user, profile, loading, currentPage, hasBankDetails]);
+  }, [user, profile, loading, currentPage, hasBankDetails, isHandlingPaymentReturn]);
 
-  if (loading) {
+  if (loading || isHandlingPaymentReturn) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-xl text-gray-600">جاري التحميل...</p>
+          <p className="text-xl text-gray-600">
+            {isHandlingPaymentReturn ? 'جاري التحقق من حالة الدفع...' : 'جاري التحميل...'}
+          </p>
         </div>
       </div>
     );
@@ -244,7 +311,7 @@ function AppContent() {
       case 'privacy':
         return <PrivacyPolicyPage />;
       case 'terms':
-        return <TermsPage />;   // ✅ التعديل هنا
+        return <TermsPage />;
       default:
         return <HomePage onNavigate={setCurrentPage} />;
     }
