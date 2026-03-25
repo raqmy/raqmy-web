@@ -120,7 +120,16 @@ function AppContent() {
         if (error) {
           console.error('verify-paymob-transaction error:', error);
           setCurrentPage(`payment-failed-${pendingOrderId}`);
-        } else if (data?.success && (data?.paid === true || data?.status === 'paid' || data?.status === 'success')) {
+        } else if (
+          data?.success &&
+          (
+            data?.verified === true ||
+            data?.paid === true ||
+            data?.status === 'paid' ||
+            data?.status === 'success' ||
+            data?.order?.status === 'paid'
+          )
+        ) {
           setCurrentPage(`payment-success-${pendingOrderId}`);
         } else {
           setCurrentPage(`payment-failed-${pendingOrderId}`);
