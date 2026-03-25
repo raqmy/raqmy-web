@@ -47,20 +47,33 @@ interface OrderItemView {
 }
 
 export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNavigate, orderId }) => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItemView[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (profile && orderId) {
+    localStorage.removeItem('pending_payment_order_id');
+    localStorage.removeItem('pending_payment_started_at');
+    localStorage.removeItem('pending_payment_return_expected');
+  }, []);
+
+  useEffect(() => {
+    if ((profile || user) && orderId) {
       fetchOrderDetails();
     }
-  }, [profile, orderId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile, user, orderId]);
 
   const fetchOrderDetails = async () => {
     try {
-      const ownerFilter = `user_id.eq.${profile!.id},customer_id.eq.${profile!.id}`;
+      const ownerId = user?.id || profile?.id;
+
+      if (!ownerId) {
+        throw new Error('User not found');
+      }
+
+      const ownerFilter = `user_id.eq.${ownerId},customer_id.eq.${ownerId}`;
 
       const { data: orderData, error: orderError } = await supabase
         .from('orders')
