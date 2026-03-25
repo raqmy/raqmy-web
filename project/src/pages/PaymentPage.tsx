@@ -21,25 +21,33 @@ interface Order {
 }
 
 export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId }) => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (profile && orderId) {
+    if ((profile || user) && orderId) {
       fetchOrder();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, orderId]);
+  }, [profile, user, orderId]);
 
   const fetchOrder = async () => {
     setLoading(true);
     setError('');
 
     try {
-      const ownerFilter = `customer_id.eq.${profile!.id},user_id.eq.${profile!.id}`;
+      const ownerId = user?.id || profile?.id;
+
+      if (!ownerId) {
+        setOrder(null);
+        setError('يجب تسجيل الدخول أولًا');
+        return;
+      }
+
+      const ownerFilter = `customer_id.eq.${ownerId},user_id.eq.${ownerId}`;
 
       const { data, error } = await supabase
         .from('orders')
@@ -185,6 +193,10 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
         console.error('Unexpected create-paymob-payment response:', result);
         throw new Error('تعذر الحصول على رابط الدفع من Paymob');
       }
+
+      localStorage.setItem('pending_payment_order_id', orderId);
+      localStorage.setItem('pending_payment_started_at', new Date().toISOString());
+      localStorage.setItem('pending_payment_return_expected', 'true');
 
       window.location.href = redirectUrl;
     } catch (err: any) {
