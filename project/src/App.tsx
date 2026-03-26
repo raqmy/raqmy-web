@@ -42,6 +42,8 @@ import { AffiliatePolicyPage } from './pages/AffiliatePolicyPage';
 import { MerchantAgreementPage } from './pages/MerchantAgreementPage';
 import { VerifyPhonePage } from './pages/VerifyPhonePage';
 import { MerchantBankDetailsPage } from './pages/MerchantBankDetailsPage';
+import { TermsPage } from './pages/TermsPage';
+import { UserDashboardPlaceholder } from './pages/UserDashboardPlaceholder';
 import { supabase } from './lib/supabase';
 
 function AppContent() {
@@ -90,6 +92,13 @@ function AppContent() {
       const expectedReturn = localStorage.getItem('pending_payment_return_expected');
       const searchParams = new URLSearchParams(window.location.search);
 
+      const paymobTransactionId = searchParams.get('id');
+      const paymobOrderId =
+        searchParams.get('order') ||
+        searchParams.get('order_id') ||
+        searchParams.get('merchant_order_id');
+      const paymobSuccess = String(searchParams.get('success') || '').toLowerCase() === 'true';
+
       const hasPaymobParams =
         searchParams.has('id') ||
         searchParams.has('success') ||
@@ -98,9 +107,12 @@ function AppContent() {
         searchParams.has('amount_cents') ||
         searchParams.has('is_voided') ||
         searchParams.has('is_refunded') ||
-        searchParams.has('is_capture');
+        searchParams.has('is_capture') ||
+        searchParams.has('order') ||
+        searchParams.has('order_id') ||
+        searchParams.has('merchant_order_id');
 
-      if (!pendingOrderId || expectedReturn !== 'true' || !hasPaymobParams) {
+      if (expectedReturn !== 'true' || !hasPaymobParams) {
         return;
       }
 
@@ -116,17 +128,72 @@ function AppContent() {
         setIsHandlingPaymentReturn(false);
       };
 
+      const goToSuccess = (resolvedOrderId?: string | null) => {
+        const finalOrderId = resolvedOrderId || pendingOrderId;
+        if (finalOrderId) {
+          setCurrentPage(`payment-success-${finalOrderId}`);
+        } else {
+          setCurrentPage('orders');
+        }
+      };
+
+      const goToFailed = (resolvedOrderId?: string | null) => {
+        const finalOrderId = resolvedOrderId || pendingOrderId;
+        if (finalOrderId) {
+          setCurrentPage(`payment-failed-${finalOrderId}`);
+        } else {
+          setCurrentPage('payment-failed');
+        }
+      };
+
+      const findOrderDirectly = async () => {
+        // 1) الأفضل: transaction id
+        if (paymobTransactionId) {
+          const { data } = await supabase
+            .from('orders')
+            .select('id, status, payment_transaction_id, payment_provider_order_id')
+            .eq('payment_transaction_id', String(paymobTransactionId))
+            .maybeSingle();
+
+          if (data) return data;
+        }
+
+        // 2) ثم paymob order id
+        if (paymobOrderId) {
+          const { data } = await supabase
+            .from('orders')
+            .select('id, status, payment_transaction_id, payment_provider_order_id')
+            .eq('payment_provider_order_id', String(paymobOrderId))
+            .maybeSingle();
+
+          if (data) return data;
+        }
+
+        // 3) ثم order id المحلي
+        if (pendingOrderId) {
+          const { data } = await supabase
+            .from('orders')
+            .select('id, status, payment_transaction_id, payment_provider_order_id')
+            .eq('id', String(pendingOrderId))
+            .maybeSingle();
+
+          if (data) return data;
+        }
+
+        return null;
+      };
+
       setIsHandlingPaymentReturn(true);
 
       try {
         const paymobReturnParams = Object.fromEntries(searchParams.entries());
-        const paymobSuccess = String(searchParams.get('success') || '').toLowerCase() === 'true';
 
         const verifyOnce = async () => {
           const { data, error } = await supabase.functions.invoke('verify-paymob-transaction', {
             body: {
               order_id: pendingOrderId,
-              transaction_id: searchParams.get('id'),
+              transaction_id: paymobTransactionId,
+              paymob_order_id: paymobOrderId,
               paymob_return_params: paymobReturnParams,
             },
           });
@@ -145,24 +212,34 @@ function AppContent() {
           finalData = data;
           finalError = error;
 
+          console.log('verify-paymob-transaction attempt:', attempt, {
+            paymobTransactionId,
+            paymobOrderId,
+            pendingOrderId,
+            data,
+            error,
+          });
+
           if (!error && data?.success) {
+            const resolvedOrderId = data?.order?.id || pendingOrderId;
+            const resolvedStatus = data?.status || data?.order?.status;
+
             if (
               data?.verified === true ||
               data?.paid === true ||
-              data?.status === 'paid' ||
-              data?.order?.status === 'paid'
+              resolvedStatus === 'paid'
             ) {
-              setCurrentPage(`payment-success-${pendingOrderId}`);
+              goToSuccess(resolvedOrderId);
               cleanupPaymentReturn();
               return;
             }
 
             if (
               data?.failed === true ||
-              data?.status === 'failed' ||
-              data?.order?.status === 'failed'
+              resolvedStatus === 'failed' ||
+              resolvedStatus === 'cancelled'
             ) {
-              setCurrentPage(`payment-failed-${pendingOrderId}`);
+              goToFailed(resolvedOrderId);
               cleanupPaymentReturn();
               return;
             }
@@ -175,50 +252,53 @@ function AppContent() {
 
         console.error('Payment verification final result:', { finalData, finalError });
 
-        // fallback أخير: تحقق مباشر من قاعدة البيانات قبل الحكم بالفشل
-        const { data: directOrder, error: directOrderError } = await supabase
-          .from('orders')
-          .select('id, status')
-          .eq('id', pendingOrderId)
-          .maybeSingle();
-
-        if (directOrderError) {
-          console.error('Direct DB fallback check failed:', directOrderError);
-        }
+        // fallback مباشر من قاعدة البيانات باستخدام كل المعرفات الممكنة
+        const directOrder = await findOrderDirectly();
 
         if (directOrder?.status === 'paid') {
-          setCurrentPage(`payment-success-${pendingOrderId}`);
-        } else if (paymobSuccess) {
-          // لو Paymob رجع success لكن التحقق تأخر، لا نظهر فشل مباشرة
-          setCurrentPage(`payment-success-${pendingOrderId}`);
-        } else {
-          setCurrentPage(`payment-failed-${pendingOrderId}`);
+          goToSuccess(directOrder.id);
+          cleanupPaymentReturn();
+          return;
         }
+
+        if (
+          directOrder?.status === 'failed' ||
+          directOrder?.status === 'cancelled'
+        ) {
+          goToFailed(directOrder.id);
+          cleanupPaymentReturn();
+          return;
+        }
+
+        // إذا Paymob رجع success=true لكن التحقق تأخر، اعتبرها نجاح بدل فشل
+        if (paymobSuccess) {
+          goToSuccess(directOrder?.id || pendingOrderId);
+          cleanupPaymentReturn();
+          return;
+        }
+
+        goToFailed(directOrder?.id || pendingOrderId);
       } catch (err) {
         console.error('Error handling Paymob return:', err);
 
-        // fallback داخل catch
         try {
-          const pendingOrderIdInCatch = localStorage.getItem('pending_payment_order_id');
+          const directOrder = await findOrderDirectly();
 
-          if (pendingOrderIdInCatch) {
-            const { data: directOrder } = await supabase
-              .from('orders')
-              .select('id, status')
-              .eq('id', pendingOrderIdInCatch)
-              .maybeSingle();
-
-            if (directOrder?.status === 'paid') {
-              setCurrentPage(`payment-success-${pendingOrderIdInCatch}`);
-            } else {
-              setCurrentPage(`payment-failed-${pendingOrderIdInCatch}`);
-            }
+          if (directOrder?.status === 'paid') {
+            goToSuccess(directOrder.id);
+          } else if (paymobSuccess) {
+            goToSuccess(directOrder?.id || pendingOrderId);
           } else {
-            setCurrentPage('payment-failed');
+            goToFailed(directOrder?.id || pendingOrderId);
           }
         } catch (fallbackErr) {
           console.error('Fallback DB check after catch failed:', fallbackErr);
-          setCurrentPage(`payment-failed-${pendingOrderId}`);
+
+          if (paymobSuccess) {
+            goToSuccess(pendingOrderId);
+          } else {
+            goToFailed(pendingOrderId);
+          }
         }
       } finally {
         cleanupPaymentReturn();
@@ -237,7 +317,12 @@ function AppContent() {
         return;
       }
 
-      if (profile.phone_verified && profile.role === 'seller' && hasBankDetails === false && currentPage !== 'merchant-bank-details') {
+      if (
+        profile.phone_verified &&
+        profile.role === 'seller' &&
+        hasBankDetails === false &&
+        currentPage !== 'merchant-bank-details'
+      ) {
         setCurrentPage('merchant-bank-details');
         return;
       }
