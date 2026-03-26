@@ -45,6 +45,9 @@ interface OrderItemView {
   subtotal: number;
 }
 
+const RETRY_COUNT = 8;
+const RETRY_DELAY_MS = 1500;
+
 export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNavigate, orderId }) => {
   const [order, setOrder] = useState<Order | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItemView[]>([]);
@@ -58,13 +61,13 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
   }, []);
 
   useEffect(() => {
-    if (orderId) {
-      fetchOrderDetailsWithRetry();
-    } else {
+    if (!orderId) {
       setErrorMessage('رقم الطلب غير موجود');
       setLoading(false);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    void fetchOrderDetailsWithRetry();
   }, [orderId]);
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,8 +79,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
     try {
       let foundOrder: Order | null = null;
 
-      // نحاول عدة مرات لأن webhook أو تحديث قاعدة البيانات قد يتأخر ثواني قليلة
-      for (let attempt = 1; attempt <= 8; attempt++) {
+      for (let attempt = 1; attempt <= RETRY_COUNT; attempt++) {
         const { data: orderData, error: orderError } = await supabase
           .from('orders')
           .select(`
@@ -101,14 +103,13 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
         if (orderData) {
           foundOrder = orderData as Order;
 
-          // نكتفي لو كانت الحالة paid أو completed
           if (foundOrder.status === 'paid' || foundOrder.status === 'completed') {
             break;
           }
         }
 
-        if (attempt < 8) {
-          await sleep(1500);
+        if (attempt < RETRY_COUNT) {
+          await sleep(RETRY_DELAY_MS);
         }
       }
 
@@ -119,7 +120,6 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
         return;
       }
 
-      // إذا الطلب موجود لكن حالته ليست مدفوعة، نعرض رسالة أوضح
       if (foundOrder.status !== 'paid' && foundOrder.status !== 'completed') {
         setOrder(null);
         setOrderItems([]);
@@ -161,8 +161,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
         const product = productsMap.get(item.product_id);
 
         const quantity = Number(item.quantity ?? 1) || 1;
-        const unitPrice =
-          Number(item.product_price ?? item.price ?? product?.price ?? 0) || 0;
+        const unitPrice = Number(item.product_price ?? item.price ?? product?.price ?? 0) || 0;
         const subtotal = Number(item.subtotal ?? unitPrice * quantity) || 0;
         const productName =
           item.product_name ||
