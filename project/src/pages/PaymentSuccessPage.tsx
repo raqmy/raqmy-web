@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle, Package, Home, ShoppingBag } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
 interface PaymentSuccessPageProps {
@@ -47,10 +46,10 @@ interface OrderItemView {
 }
 
 export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNavigate, orderId }) => {
-  const { profile, user } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItemView[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     localStorage.removeItem('pending_payment_order_id');
@@ -59,38 +58,84 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
   }, []);
 
   useEffect(() => {
-    if ((profile || user) && orderId) {
-      fetchOrderDetails();
+    if (orderId) {
+      fetchOrderDetailsWithRetry();
+    } else {
+      setErrorMessage('رقم الطلب غير موجود');
+      setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, user, orderId]);
+  }, [orderId]);
 
-  const fetchOrderDetails = async () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const fetchOrderDetailsWithRetry = async () => {
+    setLoading(true);
+    setErrorMessage('');
+
     try {
-      const ownerId = user?.id || profile?.id;
+      let foundOrder: Order | null = null;
 
-      if (!ownerId) {
-        throw new Error('User not found');
+      // نحاول عدة مرات لأن webhook أو تحديث قاعدة البيانات قد يتأخر ثواني قليلة
+      for (let attempt = 1; attempt <= 8; attempt++) {
+        const { data: orderData, error: orderError } = await supabase
+          .from('orders')
+          .select(`
+            id,
+            order_number,
+            total_amount,
+            status,
+            customer_name,
+            customer_email,
+            customer_phone,
+            created_at,
+            payment_reference
+          `)
+          .eq('id', orderId)
+          .maybeSingle();
+
+        if (orderError) {
+          console.error(`Error fetching order on attempt ${attempt}:`, orderError);
+        }
+
+        if (orderData) {
+          foundOrder = orderData as Order;
+
+          // نكتفي لو كانت الحالة paid أو completed
+          if (foundOrder.status === 'paid' || foundOrder.status === 'completed') {
+            break;
+          }
+        }
+
+        if (attempt < 8) {
+          await sleep(1500);
+        }
       }
 
-      const ownerFilter = `user_id.eq.${ownerId},customer_id.eq.${ownerId}`;
+      if (!foundOrder) {
+        setOrder(null);
+        setOrderItems([]);
+        setErrorMessage('لم يتم العثور على الطلب');
+        return;
+      }
 
-      const { data: orderData, error: orderError } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('id', orderId)
-        .or(ownerFilter)
-        .maybeSingle();
-
-      if (orderError) throw orderError;
-      if (!orderData) throw new Error('Order not found');
+      // إذا الطلب موجود لكن حالته ليست مدفوعة، نعرض رسالة أوضح
+      if (foundOrder.status !== 'paid' && foundOrder.status !== 'completed') {
+        setOrder(null);
+        setOrderItems([]);
+        setErrorMessage(`تم العثور على الطلب لكن حالته الحالية هي: ${foundOrder.status}`);
+        return;
+      }
 
       const { data: itemsData, error: itemsError } = await supabase
         .from('order_items')
         .select('*')
         .eq('order_id', orderId);
 
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        console.error('Error fetching order items:', itemsError);
+        throw itemsError;
+      }
 
       const rawItems = (itemsData || []) as RawOrderItem[];
       const productIds = [...new Set(rawItems.map((item) => item.product_id).filter(Boolean))];
@@ -135,12 +180,14 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
         };
       });
 
-      setOrder(orderData as Order);
+      setOrder(foundOrder);
       setOrderItems(normalizedItems);
-    } catch (error) {
+      setErrorMessage('');
+    } catch (error: any) {
       console.error('Error fetching order details:', error);
       setOrder(null);
       setOrderItems([]);
+      setErrorMessage(error?.message || 'حدث خطأ أثناء جلب بيانات الطلب');
     } finally {
       setLoading(false);
     }
@@ -150,8 +197,8 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">جاري التحميل...</p>
+          <div className="w-12 h-12 border-4 border-green-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">جاري التحقق من حالة الطلب...</p>
         </div>
       </div>
     );
@@ -161,13 +208,23 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="bg-white rounded-xl p-8 shadow-sm text-center max-w-md">
-          <p className="text-gray-600 mb-6">لم يتم العثور على الطلب</p>
-          <button
-            onClick={() => onNavigate('home')}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-          >
-            العودة للرئيسية
-          </button>
+          <p className="text-gray-600 mb-6">{errorMessage || 'لم يتم العثور على الطلب'}</p>
+
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => onNavigate('orders')}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+            >
+              الذهاب إلى مشترياتي
+            </button>
+
+            <button
+              onClick={() => onNavigate('home')}
+              className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200 transition-colors"
+            >
+              العودة للرئيسية
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -189,7 +246,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
             <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
               <div className="text-center mb-4">
                 <p className="text-sm text-blue-600 font-medium mb-1">رقم الطلب</p>
-                <p className="text-2xl font-bold text-blue-900">{order.order_number}</p>
+                <p className="text-2xl font-bold text-blue-900">{order.order_number || order.id}</p>
               </div>
 
               {order.payment_reference && (
