@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Store as StoreIcon, User, LogOut, ShoppingBag, Home, Package, Filter } from 'lucide-react';
+import { Store as StoreIcon, User, LogOut, ShoppingBag, Home, Package, Filter, Share2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -19,50 +19,165 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
   useEffect(() => {
     fetchStoreAndProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeSlug, sortBy]);
+
+  useEffect(() => {
+    if (!store) return;
+
+    const canonicalUrl = `${window.location.origin}/s/${encodeURIComponent(storeSlug)}`;
+    const pageTitle = `${store.name} | رقمي`;
+    const pageDescription =
+      store.description || `تصفح منتجات متجر ${store.name} على منصة رقمي.`;
+
+    document.title = pageTitle;
+    updateMetaTag('name', 'description', pageDescription);
+    updateMetaTag('property', 'og:title', pageTitle);
+    updateMetaTag('property', 'og:description', pageDescription);
+    updateMetaTag('property', 'og:type', 'website');
+    updateMetaTag('property', 'og:url', canonicalUrl);
+    updateMetaTag('name', 'twitter:card', 'summary_large_image');
+    updateMetaTag('name', 'twitter:title', pageTitle);
+    updateMetaTag('name', 'twitter:description', pageDescription);
+    updateCanonicalUrl(canonicalUrl);
+  }, [store, storeSlug]);
+
+  const updateMetaTag = (attribute: 'name' | 'property', key: string, content: string) => {
+    let element = document.head.querySelector(`meta[${attribute}="${key}"]`) as HTMLMetaElement | null;
+
+    if (!element) {
+      element = document.createElement('meta');
+      element.setAttribute(attribute, key);
+      document.head.appendChild(element);
+    }
+
+    element.setAttribute('content', content);
+  };
+
+  const updateCanonicalUrl = (href: string) => {
+    let element = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+
+    if (!element) {
+      element = document.createElement('link');
+      element.setAttribute('rel', 'canonical');
+      document.head.appendChild(element);
+    }
+
+    element.setAttribute('href', href);
+  };
+
+  const fetchProductsForStore = async (storeRecord: any, source: 'stores' | 'merchants') => {
+    let query = supabase.from('products').select('*').eq('is_active', true);
+
+    if (source === 'stores') {
+      query = query.eq('store_id', storeRecord.id);
+    } else {
+      const merchantUserId = storeRecord.user_id || storeRecord.id;
+      query = query.eq('user_id', merchantUserId);
+    }
+
+    if (sortBy === 'newest') {
+      query = query.order('created_at', { ascending: false });
+    } else if (sortBy === 'price_low') {
+      query = query.order('price', { ascending: true });
+    } else if (sortBy === 'price_high') {
+      query = query.order('price', { ascending: false });
+    } else if (sortBy === 'popular') {
+      query = query.order('sales_count', { ascending: false });
+    }
+
+    return query;
+  };
 
   const fetchStoreAndProducts = async () => {
     setLoading(true);
+
     try {
-      const { data: storeData } = await supabase
+      let resolvedStore: any = null;
+      let source: 'stores' | 'merchants' = 'stores';
+
+      const { data: storeData, error: storeError } = await supabase
         .from('stores')
         .select('*')
         .eq('slug', storeSlug)
         .eq('is_active', true)
         .maybeSingle();
 
-      if (!storeData) {
-        onNavigate('marketplace');
+      if (!storeError && storeData) {
+        resolvedStore = storeData;
+        source = 'stores';
+      }
+
+      if (!resolvedStore) {
+        const { data: merchantData, error: merchantError } = await supabase
+          .from('merchants')
+          .select('*')
+          .eq('slug', storeSlug)
+          .maybeSingle();
+
+        if (!merchantError && merchantData) {
+          resolvedStore = {
+            ...merchantData,
+            name:
+              merchantData.store_name ||
+              merchantData.business_name ||
+              merchantData.name ||
+              'متجر رقمي',
+            description: merchantData.description || merchantData.bio || '',
+            category: merchantData.category || 'متجر رقمي',
+            email: merchantData.email || '',
+            slug: merchantData.slug,
+          };
+          source = 'merchants';
+        }
+      }
+
+      if (!resolvedStore) {
+        setStore(null);
+        setProducts([]);
         return;
       }
 
-      setStore(storeData);
+      setStore(resolvedStore);
 
-      let query = supabase
-        .from('products')
-        .select('*')
-        .eq('store_id', storeData.id)
-        .eq('is_active', true);
+      const { data: productsData, error: productsError } = await fetchProductsForStore(
+        resolvedStore,
+        source
+      );
 
-      if (sortBy === 'newest') {
-        query = query.order('created_at', { ascending: false });
-      } else if (sortBy === 'price_low') {
-        query = query.order('price', { ascending: true });
-      } else if (sortBy === 'price_high') {
-        query = query.order('price', { ascending: false });
-      } else if (sortBy === 'popular') {
-        query = query.order('sales_count', { ascending: false });
+      if (productsError) {
+        console.error('Error fetching store products:', productsError);
+        setProducts([]);
+        return;
       }
 
-      const { data: productsData } = await query;
-
-      if (productsData) {
-        setProducts(productsData);
-      }
+      setProducts(productsData || []);
     } catch (error) {
       console.error('Error fetching store:', error);
+      setStore(null);
+      setProducts([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleShareStore = async () => {
+    const shareUrl = `${window.location.origin}/s/${encodeURIComponent(storeSlug)}`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: store?.name || 'متجر رقمي',
+          text: store?.description || `تصفح متجر ${store?.name || 'رقمي'}`,
+          url: shareUrl,
+        });
+        return;
+      }
+
+      await navigator.clipboard.writeText(shareUrl);
+      alert('تم نسخ رابط المتجر');
+    } catch (error) {
+      console.error('Error sharing store:', error);
     }
   };
 
@@ -137,6 +252,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
             </div>
 
             <div className="flex items-center gap-4">
+              <button
+                onClick={handleShareStore}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>مشاركة</span>
+              </button>
+
               {user && profile ? (
                 <>
                   {profile.role === 'customer' && (
@@ -195,12 +318,13 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-8 mb-8 text-white">
           <h1 className="text-4xl font-bold mb-2">{store.name}</h1>
-          {store.description && (
-            <p className="text-lg text-blue-50 mb-4">{store.description}</p>
-          )}
-          <div className="flex items-center gap-4">
+          {store.description && <p className="text-lg text-blue-50 mb-4">{store.description}</p>}
+          <div className="flex flex-wrap items-center gap-4">
             <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm">
               {products.length} منتج
+            </span>
+            <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm" dir="ltr">
+              /s/{storeSlug}
             </span>
             {store.email && (
               <a
@@ -241,20 +365,28 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
             {products.map((product) => (
               <div
                 key={product.id}
-                onClick={() => onNavigate(`product-${product.id}`)}
+                onClick={() =>
+                  onNavigate(product.slug ? `product-slug-${product.slug}` : `product-${product.id}`)
+                }
                 className="bg-white rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden group"
               >
-                <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                  <Package className="w-16 h-16 text-blue-600 group-hover:scale-110 transition-transform" />
+                <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center overflow-hidden">
+                  {product.thumbnail_url ? (
+                    <img
+                      src={product.thumbnail_url}
+                      alt={product.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                    />
+                  ) : (
+                    <Package className="w-16 h-16 text-blue-600 group-hover:scale-110 transition-transform" />
+                  )}
                 </div>
                 <div className="p-6">
-                  <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2">
-                    {product.name}
-                  </h3>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2">{product.name}</h3>
                   <p className="text-gray-600 text-sm mb-4 line-clamp-2">
                     {product.description || 'منتج رقمي'}
                   </p>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-3">
                     <span className="text-2xl font-bold text-blue-600">
                       {product.price} {product.currency}
                     </span>
@@ -262,10 +394,13 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                       عرض التفاصيل
                     </button>
                   </div>
-                  {product.sales_count > 0 && (
-                    <div className="mt-3 text-sm text-gray-500">
-                      تم بيع {product.sales_count} مرة
+                  {product.slug && (
+                    <div className="mt-3 text-xs text-gray-500" dir="ltr">
+                      /p/{product.slug}
                     </div>
+                  )}
+                  {product.sales_count > 0 && (
+                    <div className="mt-2 text-sm text-gray-500">تم بيع {product.sales_count} مرة</div>
                   )}
                 </div>
               </div>
@@ -382,9 +517,7 @@ const StorefrontAuthModal: React.FC<StorefrontAuthModalProps> = ({
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              البريد الإلكتروني
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
             <input
               type="email"
               value={formData.email}
