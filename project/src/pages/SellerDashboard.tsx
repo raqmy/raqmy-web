@@ -23,6 +23,7 @@ import {
   RefreshCw,
   AlertTriangle,
   FileText,
+  Download,
   Paperclip,
   X,
 } from 'lucide-react';
@@ -127,6 +128,20 @@ interface WithdrawalRequestRow {
   transfer_notes?: string | null;
 }
 
+interface WithdrawalLimitSettingsRow {
+  is_enabled: boolean;
+  max_requests: number;
+  period_type: 'daily' | 'weekly' | 'monthly' | 'yearly' | string;
+  min_withdrawal_amount: number;
+  period_start?: string | null;
+  period_end?: string | null;
+}
+
+interface WithdrawalLimitStatusRow extends WithdrawalLimitSettingsRow {
+  used_requests: number;
+  remaining_requests: number;
+}
+
 type NormalizedProduct = Product & {
   name: string;
   user_id?: string | null;
@@ -136,7 +151,7 @@ type NormalizedProduct = Product & {
   thumbnail_url?: string | null;
 };
 
-const MIN_WITHDRAWAL_AMOUNT = 10;
+const FALLBACK_MIN_WITHDRAWAL_AMOUNT = 10;
 const WITHDRAWAL_PROOFS_BUCKET = 'withdrawal-proofs';
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
@@ -207,11 +222,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [withdrawalSubmitting, setWithdrawalSubmitting] = useState(false);
   const [withdrawalError, setWithdrawalError] = useState('');
   const [withdrawalSuccess, setWithdrawalSuccess] = useState('');
+  const [withdrawalLimitLoading, setWithdrawalLimitLoading] = useState(false);
+  const [withdrawalLimitStatus, setWithdrawalLimitStatus] = useState<WithdrawalLimitStatusRow | null>(null);
+  const [withdrawalLimitSettings, setWithdrawalLimitSettings] = useState<WithdrawalLimitSettingsRow | null>(null);
 
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequestRow | null>(null);
   const [showWithdrawalDetails, setShowWithdrawalDetails] = useState(false);
   const [withdrawalProofUrl, setWithdrawalProofUrl] = useState<string | null>(null);
-  const [withdrawalProofResolvedPath, setWithdrawalProofResolvedPath] = useState<string | null>(null);
   const [withdrawalProofLoading, setWithdrawalProofLoading] = useState(false);
   const [withdrawalProofError, setWithdrawalProofError] = useState('');
 
@@ -221,6 +238,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       fetchIdentityVerification();
       fetchBankAccountData();
       fetchEarningsData();
+      fetchWithdrawalLimitData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
@@ -272,6 +290,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     return clean.replace(/(.{4})/g, '$1 ').trim();
   };
 
+  const isImageFile = (pathOrUrl: string | null | undefined) => {
+    if (!pathOrUrl) return false;
+    const lower = pathOrUrl.toLowerCase();
+    return (
+      lower.endsWith('.png') ||
+      lower.endsWith('.jpg') ||
+      lower.endsWith('.jpeg') ||
+      lower.endsWith('.webp') ||
+      lower.endsWith('.gif')
+    );
+  };
 
   const normalizeStoragePath = (value: string | null | undefined) => {
     if (!value) return '';
@@ -305,42 +334,69 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       path = path.slice(1);
     }
 
-    try {
-      return decodeURIComponent(path);
-    } catch {
-      return path;
-    }
+    return decodeURIComponent(path);
   };
 
-  const hasWithdrawalProofReference = (request: WithdrawalRequestRow | null | undefined) => {
-    if (!request) return false;
+  const buildProofPathCandidates = (request: WithdrawalRequestRow) => {
+    const rawValues = [
+      request.transfer_proof_path,
+      request.transfer_proof_url,
+      normalizeStoragePath(request.transfer_proof_path),
+      normalizeStoragePath(request.transfer_proof_url),
+    ].filter(Boolean) as string[];
 
-    if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
-      return true;
-    }
+    const candidates = new Set<string>();
 
-    return Boolean(normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url));
-  };
+    for (const raw of rawValues) {
+      const normalized = normalizeStoragePath(raw);
+      if (!normalized) continue;
 
-  const resolveWithdrawalProofPath = async (request: WithdrawalRequestRow) => {
-    try {
-      const { data, error } = await supabase.rpc('resolve_withdrawal_proof_path', {
-        p_withdrawal_id: request.id,
-      });
+      candidates.add(normalized);
 
-      if (error) {
-        console.error('resolve_withdrawal_proof_path error:', error);
+      if (request.merchant_id && !normalized.startsWith(`${request.merchant_id}/`)) {
+        candidates.add(`${request.merchant_id}/${normalized}`);
       }
 
-      const resolvedPath = typeof data === 'string' ? data : null;
-      if (resolvedPath) {
-        return normalizeStoragePath(resolvedPath);
+      const parts = normalized.split('/').filter(Boolean);
+
+      if (
+        request.merchant_id &&
+        parts.length >= 2 &&
+        parts[0] !== request.merchant_id &&
+        parts[1] !== request.merchant_id
+      ) {
+        candidates.add(`${request.merchant_id}/${normalized}`);
       }
-    } catch (error) {
-      console.error('resolveWithdrawalProofPath error:', error);
+
+      if (
+        request.merchant_id &&
+        parts.length >= 2 &&
+        parts[0] === request.id &&
+        !normalized.startsWith(`${request.merchant_id}/`)
+      ) {
+        candidates.add(`${request.merchant_id}/${normalized}`);
+      }
+
+      if (
+        request.merchant_id &&
+        parts.length >= 3 &&
+        parts[0] === request.merchant_id &&
+        parts[1] === request.id
+      ) {
+        candidates.add(normalized);
+      }
+
+      if (
+        request.merchant_id &&
+        parts.length >= 2 &&
+        parts[0] === request.merchant_id &&
+        parts[1] !== request.id
+      ) {
+        candidates.add(normalized);
+      }
     }
 
-    return normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url) || null;
+    return Array.from(candidates);
   };
 
   const fetchDashboardData = async () => {
@@ -812,6 +868,63 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
   };
 
+  const formatPeriodLabel = (periodType: string | null | undefined) => {
+    if (periodType === 'daily') return 'يومي';
+    if (periodType === 'weekly') return 'أسبوعي';
+    if (periodType === 'monthly') return 'شهري';
+    if (periodType === 'yearly') return 'سنوي';
+    return 'الدورة الحالية';
+  };
+
+  const formatPeriodRange = (start: string | null | undefined, end: string | null | undefined) => {
+    if (!start || !end) return '—';
+    try {
+      const startText = new Date(start).toLocaleDateString('ar-SA');
+      const endText = new Date(end).toLocaleDateString('ar-SA');
+      return `${startText} - ${endText}`;
+    } catch {
+      return '—';
+    }
+  };
+
+  const fetchWithdrawalLimitData = async () => {
+    if (!profile) return;
+
+    try {
+      setWithdrawalLimitLoading(true);
+
+      const { data: statusData, error: statusError } = await supabase.rpc('get_user_withdrawal_limit_status');
+
+      if (!statusError && statusData) {
+        const normalizedStatus = Array.isArray(statusData) ? statusData[0] : statusData;
+        setWithdrawalLimitStatus(normalizedStatus as WithdrawalLimitStatusRow);
+      } else {
+        if (statusError) {
+          console.error('get_user_withdrawal_limit_status rpc error:', statusError);
+        }
+        setWithdrawalLimitStatus(null);
+      }
+
+      const { data: settingsData, error: settingsError } = await supabase.rpc('get_withdrawal_limit_settings');
+
+      if (!settingsError && settingsData) {
+        const normalizedSettings = Array.isArray(settingsData) ? settingsData[0] : settingsData;
+        setWithdrawalLimitSettings(normalizedSettings as WithdrawalLimitSettingsRow);
+      } else {
+        if (settingsError) {
+          console.error('get_withdrawal_limit_settings rpc error:', settingsError);
+        }
+        setWithdrawalLimitSettings(null);
+      }
+    } catch (error) {
+      console.error('Error fetching withdrawal limit data:', error);
+      setWithdrawalLimitStatus(null);
+      setWithdrawalLimitSettings(null);
+    } finally {
+      setWithdrawalLimitLoading(false);
+    }
+  };
+
   const handleWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -850,8 +963,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       return;
     }
 
-    if (amount < MIN_WITHDRAWAL_AMOUNT) {
-      setWithdrawalError(`الحد الأدنى لطلب السحب حالياً هو ${MIN_WITHDRAWAL_AMOUNT} ريال`);
+    if (amount < effectiveMinWithdrawalAmount) {
+      setWithdrawalError(`الحد الأدنى لطلب السحب حالياً هو ${effectiveMinWithdrawalAmount} ريال`);
+      return;
+    }
+
+    if (hasReachedWithdrawalLimit) {
+      setWithdrawalError(
+        `لقد وصلت إلى الحد الأقصى لطلبات السحب في ${formatPeriodLabel(withdrawalPeriodType)} الحالية`
+      );
       return;
     }
 
@@ -876,7 +996,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       setWithdrawalAmount('');
       setWithdrawalNotes('');
       setWithdrawalSuccess('تم إرسال طلب السحب بنجاح، وسيظهر في سجل الطلبات خلال لحظات');
-      await fetchEarningsData();
+      await Promise.all([fetchEarningsData(), fetchWithdrawalLimitData()]);
     } catch (error: any) {
       console.error('Withdrawal submit error:', error);
       setWithdrawalError(error?.message || 'حدث خطأ أثناء إرسال طلب السحب');
@@ -885,63 +1005,54 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     }
   };
 
-  const openWithdrawalDetails = (request: WithdrawalRequestRow) => {
+  const openWithdrawalDetails = async (request: WithdrawalRequestRow) => {
     setSelectedWithdrawal(request);
     setShowWithdrawalDetails(true);
     setWithdrawalProofUrl(null);
-    setWithdrawalProofResolvedPath(null);
-    setWithdrawalProofLoading(false);
-    setWithdrawalProofError('');
-  };
-
-  const handleOpenWithdrawalProof = async (request: WithdrawalRequestRow) => {
     setWithdrawalProofError('');
 
-    if (!hasWithdrawalProofReference(request)) {
-      setWithdrawalProofUrl(null);
-      setWithdrawalProofResolvedPath(null);
-      setWithdrawalProofError('لا توجد وثيقة حوالة مرفقة لهذا الطلب حالياً.');
-      return;
-    }
+    const candidates = buildProofPathCandidates(request);
 
-    if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
-      setWithdrawalProofResolvedPath(normalizeStoragePath(request.transfer_proof_path || request.transfer_proof_url) || null);
-      setWithdrawalProofUrl(request.transfer_proof_url);
-      window.open(request.transfer_proof_url, '_blank', 'noopener,noreferrer');
+    if (candidates.length === 0) {
       return;
     }
 
     try {
       setWithdrawalProofLoading(true);
 
-      const resolvedPath = await resolveWithdrawalProofPath(request);
+      let signedUrl: string | null = null;
 
-      if (!resolvedPath) {
-        setWithdrawalProofUrl(null);
-        setWithdrawalProofResolvedPath(null);
-        setWithdrawalProofError('تعذر تحديد مسار وثيقة الحوالة.');
+      for (const candidate of candidates) {
+        const { data, error } = await supabase.storage
+          .from(WITHDRAWAL_PROOFS_BUCKET)
+          .createSignedUrl(candidate, 60 * 60);
+
+        if (!error && data?.signedUrl) {
+          signedUrl = data.signedUrl;
+          break;
+        }
+
+        console.error('createSignedUrl withdrawal proof error for candidate:', candidate, error);
+      }
+
+      if (signedUrl) {
+        setWithdrawalProofUrl(signedUrl);
         return;
       }
 
-      const { data, error } = await supabase.storage
-        .from(WITHDRAWAL_PROOFS_BUCKET)
-        .createSignedUrl(resolvedPath, 60 * 60);
-
-      if (error || !data?.signedUrl) {
-        console.error('createSignedUrl withdrawal proof error:', resolvedPath, error);
-        setWithdrawalProofUrl(null);
-        setWithdrawalProofResolvedPath(resolvedPath);
-        setWithdrawalProofError('تعذر فتح وثيقة الحوالة حالياً.');
-        return;
+      if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
+        setWithdrawalProofUrl(request.transfer_proof_url);
+      } else {
+        setWithdrawalProofError('تعذر تحميل وثيقة الحوالة حالياً.');
       }
-
-      setWithdrawalProofResolvedPath(resolvedPath);
-      setWithdrawalProofUrl(data.signedUrl);
-      window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
     } catch (error) {
-      console.error('handleOpenWithdrawalProof error:', error);
-      setWithdrawalProofUrl(null);
-      setWithdrawalProofError('تعذر فتح وثيقة الحوالة حالياً.');
+      console.error('openWithdrawalDetails error:', error);
+
+      if (request.transfer_proof_url && /^https?:\/\//i.test(request.transfer_proof_url)) {
+        setWithdrawalProofUrl(request.transfer_proof_url);
+      } else {
+        setWithdrawalProofError('تعذر تحميل وثيقة الحوالة حالياً.');
+      }
     } finally {
       setWithdrawalProofLoading(false);
     }
@@ -951,7 +1062,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     setSelectedWithdrawal(null);
     setShowWithdrawalDetails(false);
     setWithdrawalProofUrl(null);
-    setWithdrawalProofResolvedPath(null);
     setWithdrawalProofLoading(false);
     setWithdrawalProofError('');
   };
@@ -1106,11 +1216,34 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const latestWithdrawalRequests = withdrawalRequests.slice(0, 5);
   const latestLedgerEntries = walletLedger.slice(0, 8);
 
+  const effectiveMinWithdrawalAmount = Number(
+    withdrawalLimitStatus?.min_withdrawal_amount ??
+      withdrawalLimitSettings?.min_withdrawal_amount ??
+      FALLBACK_MIN_WITHDRAWAL_AMOUNT
+  );
+
+  const withdrawalLimitsEnabled = Boolean(
+    withdrawalLimitStatus?.is_enabled ?? withdrawalLimitSettings?.is_enabled ?? false
+  );
+
+  const withdrawalRequestsUsed = Number(withdrawalLimitStatus?.used_requests || 0);
+  const withdrawalRequestsRemaining = Math.max(Number(withdrawalLimitStatus?.remaining_requests || 0), 0);
+  const withdrawalRequestsMax = Number(withdrawalLimitStatus?.max_requests || withdrawalLimitSettings?.max_requests || 0);
+  const withdrawalPeriodType = withdrawalLimitStatus?.period_type || withdrawalLimitSettings?.period_type || 'monthly';
+  const withdrawalPeriodStart = withdrawalLimitStatus?.period_start || withdrawalLimitSettings?.period_start || null;
+  const withdrawalPeriodEnd = withdrawalLimitStatus?.period_end || withdrawalLimitSettings?.period_end || null;
+
+  const hasReachedWithdrawalLimit =
+    withdrawalLimitsEnabled &&
+    withdrawalRequestsMax > 0 &&
+    withdrawalRequestsRemaining <= 0;
+
   const canRequestWithdrawal =
     isVerificationApproved &&
     isBankAccountApproved &&
     !!walletData &&
-    availableBalance >= MIN_WITHDRAWAL_AMOUNT &&
+    availableBalance >= effectiveMinWithdrawalAmount &&
+    !hasReachedWithdrawalLimit &&
     !withdrawalSubmitting;
 
   if (loading) {
@@ -1655,14 +1788,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
                 <button
                   onClick={async () => {
-                    await Promise.all([fetchEarningsData(), fetchBankAccountData(), fetchIdentityVerification()]);
+                    await Promise.all([
+                      fetchEarningsData(),
+                      fetchBankAccountData(),
+                      fetchIdentityVerification(),
+                      fetchWithdrawalLimitData(),
+                    ]);
                   }}
-                  disabled={walletLoading || bankAccountLoading || verificationLoading}
+                  disabled={walletLoading || bankAccountLoading || verificationLoading || withdrawalLimitLoading}
                   className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
                 >
                   <RefreshCw
                     className={`w-5 h-5 ${
-                      walletLoading || bankAccountLoading || verificationLoading ? 'animate-spin' : ''
+                      walletLoading || bankAccountLoading || verificationLoading || withdrawalLimitLoading ? 'animate-spin' : ''
                     }`}
                   />
                   <span>تحديث البيانات</span>
@@ -1751,6 +1889,72 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   </p>
                 </div>
 
+                <div className="mt-5 mb-6 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                      <Clock3 className="w-5 h-5 text-blue-600" />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                        <h4 className="text-sm font-bold text-gray-900">سياسة طلبات السحب</h4>
+
+                        {withdrawalLimitsEnabled ? (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                            مفعلة
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
+                            غير مفعلة
+                          </span>
+                        )}
+
+                        {hasReachedWithdrawalLimit && (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+                            تم بلوغ الحد الأقصى
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="rounded-xl bg-white border border-gray-100 p-3">
+                          <p className="text-xs text-gray-500 mb-1">الحد الأدنى</p>
+                          <p className="text-base font-bold text-gray-900">{effectiveMinWithdrawalAmount} ريال</p>
+                        </div>
+
+                        <div className="rounded-xl bg-white border border-gray-100 p-3">
+                          <p className="text-xs text-gray-500 mb-1">عدد الطلبات المسموح</p>
+                          <p className="text-base font-bold text-gray-900">
+                            {withdrawalLimitsEnabled ? `${withdrawalRequestsMax} / ${formatPeriodLabel(withdrawalPeriodType)}` : 'غير محدود'}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl bg-white border border-gray-100 p-3">
+                          <p className="text-xs text-gray-500 mb-1">المتبقي لك الآن</p>
+                          <p className={`text-base font-bold ${hasReachedWithdrawalLimit ? 'text-red-600' : 'text-gray-900'}`}>
+                            {withdrawalLimitsEnabled ? withdrawalRequestsRemaining : '—'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {withdrawalLimitsEnabled && (
+                        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-600">
+                          <span>المستخدم: <strong>{withdrawalRequestsUsed}</strong></span>
+                          <span>المتبقي: <strong>{withdrawalRequestsRemaining}</strong></span>
+                          <span>الدورة: <strong>{formatPeriodLabel(withdrawalPeriodType)}</strong></span>
+                          <span>الفترة: <strong>{formatPeriodRange(withdrawalPeriodStart, withdrawalPeriodEnd)}</strong></span>
+                        </div>
+                      )}
+
+                      {hasReachedWithdrawalLimit && (
+                        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                          وصلت إلى الحد الأقصى لطلبات السحب في هذه الفترة. يمكنك تقديم طلب جديد عند بداية الفترة التالية.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 {withdrawalError && (
                   <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
                     {withdrawalError}
@@ -1768,13 +1972,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <label className="block text-sm font-medium text-gray-700 mb-2">مبلغ السحب</label>
                     <input
                       type="number"
-                      min={MIN_WITHDRAWAL_AMOUNT}
+                      min={effectiveMinWithdrawalAmount}
                       step="0.01"
                       value={withdrawalAmount}
                       onChange={(e) => setWithdrawalAmount(e.target.value)}
                       disabled={!canRequestWithdrawal}
                       className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
-                      placeholder={`الحد الأدنى ${MIN_WITHDRAWAL_AMOUNT} ريال`}
+                      placeholder={`الحد الأدنى ${effectiveMinWithdrawalAmount} ريال`}
                       dir="ltr"
                     />
                   </div>
@@ -1793,7 +1997,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 space-y-2">
                     <p>الرصيد المتاح حالياً: <span className="font-bold">{formatCurrency(availableBalance)}</span></p>
-                    <p>الحد الأدنى الحالي للسحب: <span className="font-bold">{MIN_WITHDRAWAL_AMOUNT} ريال</span></p>
+                    <p>الحد الأدنى الحالي للسحب: <span className="font-bold">{effectiveMinWithdrawalAmount} ريال</span></p>
+                    {withdrawalLimitsEnabled && (
+                      <>
+                        <p>الحد الأقصى للطلبات: <span className="font-bold">{withdrawalRequestsMax}</span> لكل {formatPeriodLabel(withdrawalPeriodType)}</p>
+                        <p>استخدمت: <span className="font-bold">{withdrawalRequestsUsed}</span> / المتبقي: <span className="font-bold">{withdrawalRequestsRemaining}</span></p>
+                      </>
+                    )}
                     <p>بعد إرسال الطلب سيتم خصمه تنظيمياً كسحب قيد المراجعة حتى تعتمد الإدارة الطلب.</p>
                   </div>
 
@@ -1848,7 +2058,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div className="space-y-4">
                     {latestWithdrawalRequests.map((request) => {
                       const statusMeta = withdrawalStatusMeta(request.status);
-                      const hasProof = hasWithdrawalProofReference(request);
+                      const hasProof = buildProofPathCandidates(request).length > 0;
 
                       return (
                         <div
@@ -2472,7 +2682,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <p className="text-gray-700">
                       حالة وجود وثيقة:{' '}
                       <span className="font-semibold text-gray-900">
-                        {hasWithdrawalProofReference(selectedWithdrawal) ? 'مرفقة' : 'غير مرفقة'}
+                        {buildProofPathCandidates(selectedWithdrawal).length ? 'مرفقة' : 'غير مرفقة'}
                       </span>
                     </p>
                   </div>
@@ -2517,55 +2727,59 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
                 {withdrawalProofLoading ? (
                   <div className="text-sm text-gray-500">جاري تجهيز الوثيقة...</div>
-                ) : !hasWithdrawalProofReference(selectedWithdrawal) ? (
+                ) : !buildProofPathCandidates(selectedWithdrawal).length ? (
                   <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
                     لا توجد وثيقة حوالة مرفقة لهذا الطلب حالياً.
                   </div>
-                ) : (
+                ) : withdrawalProofUrl ? (
                   <div className="space-y-4">
                     <div className="text-sm text-gray-600">
                       اسم الملف:{' '}
                       <span className="font-semibold text-gray-900">
                         {getFileNameFromPath(
-                          withdrawalProofResolvedPath ||
-                            normalizeStoragePath(selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url)
-                        ) || 'وثيقة حوالة'}
+                          normalizeStoragePath(selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url)
+                        )}
                       </span>
                     </div>
 
+                    {isImageFile(selectedWithdrawal.transfer_proof_path || selectedWithdrawal.transfer_proof_url) && (
+                      <div className="border border-gray-200 rounded-2xl overflow-hidden bg-gray-50">
+                        <img
+                          src={withdrawalProofUrl}
+                          alt="وثيقة الحوالة"
+                          className="w-full max-h-[420px] object-contain"
+                        />
+                      </div>
+                    )}
+
                     <div className="flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenWithdrawalProof(selectedWithdrawal)}
-                        disabled={withdrawalProofLoading}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      <a
+                        href={withdrawalProofUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700"
                       >
                         <Eye className="w-4 h-4" />
-                        {withdrawalProofLoading ? 'جاري فتح الوثيقة...' : 'عرض الملف'}
-                      </button>
+                        فتح الوثيقة
+                      </a>
 
-                      {withdrawalProofUrl && (
-                        <a
-                          href={withdrawalProofUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 rounded-xl font-semibold hover:bg-gray-200"
-                        >
-                          <Paperclip className="w-4 h-4" />
-                          إعادة فتح الرابط
-                        </a>
-                      )}
+                      <a
+                        href={withdrawalProofUrl}
+                        download
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 rounded-xl font-semibold hover:bg-gray-200"
+                      >
+                        <Download className="w-4 h-4" />
+                        تحميل الوثيقة
+                      </a>
                     </div>
 
                     <div className="text-xs text-gray-500">
-                      عند الضغط على زر عرض الملف سيتم فتح وثيقة الحوالة في صفحة جديدة مثل ملفات التوثيق.
+                      في حال تأخر وصول الحوالة للبنك، يمكنك الرجوع لهذه الوثيقة للتحقق من أن التحويل تم من الإدارة.
                     </div>
-
-                    {withdrawalProofError && (
-                      <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-                        {withdrawalProofError}
-                      </div>
-                    )}
+                  </div>
+                ) : (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+                    {withdrawalProofError || 'تعذر تحميل وثيقة الحوالة حالياً.'}
                   </div>
                 )}
               </div>
