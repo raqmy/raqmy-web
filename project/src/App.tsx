@@ -110,7 +110,7 @@ const parsePathToPage = (pathname: string) => {
   return staticRoutes[segments[0]] || 'home';
 };
 
-const getPathFromPage = (page: string) => {
+const getPublicPathFromPage = (page: string) => {
   if (page.startsWith('storefront-')) {
     return `/s/${encodeURIComponent(page.replace('storefront-', ''))}`;
   }
@@ -131,46 +131,21 @@ const getPathFromPage = (page: string) => {
     return `/payment/${encodeURIComponent(page.replace('payment-', ''))}`;
   }
 
-  const staticRoutes: Record<string, string> = {
+  const publicRoutes: Record<string, string> = {
     home: '/',
     auth: '/auth',
     pricing: '/pricing',
     marketplace: '/marketplace',
-    'seller-dashboard': '/seller-dashboard',
-    'user-dashboard': '/user-dashboard',
-    admin: '/admin',
-    'affiliate-dashboard': '/affiliate-dashboard',
-    'coupons-management': '/coupons-management',
-    'affiliate-management': '/affiliate-management',
-    cart: '/cart',
-    checkout: '/checkout',
-    'payment-failed': '/payment-failed',
-    orders: '/orders',
-    'orders-management': '/orders-management',
-    'payment-settings': '/payment-settings',
-    'bank-account': '/bank-account',
-    'withdrawal-requests': '/withdrawal-requests',
-    'admin-withdrawals': '/admin-withdrawals',
-    transactions: '/transactions',
-    'admin-management': '/admin-management',
-    'admin-verification-apis': '/admin-verification-apis',
-    'merchant-withdraw': '/merchant-withdraw',
-    'admin-announcements': '/admin-announcements',
-    favorites: '/favorites',
-    'viewed-products': '/viewed-products',
     support: '/support',
-    profile: '/profile',
     'privacy-policy': '/privacy-policy',
     'refund-policy': '/refund-policy',
     'affiliate-policy': '/affiliate-policy',
     'merchant-agreement': '/merchant-agreement',
     privacy: '/privacy',
     terms: '/terms',
-    'verify-phone': '/verify-phone',
-    'merchant-bank-details': '/merchant-bank-details',
   };
 
-  return staticRoutes[page] || '/';
+  return publicRoutes[page] || null;
 };
 
 function AppContent() {
@@ -192,18 +167,27 @@ function AppContent() {
   useEffect(() => {
     if (isHandlingPaymentReturn) return;
 
-    const targetPath = getPathFromPage(currentPage);
+    const targetPath = getPublicPathFromPage(currentPage);
     const currentPath = window.location.pathname.replace(/\/+$/, '') || '/';
-    const normalizedTargetPath = targetPath.replace(/\/+$/, '') || '/';
 
     if (!hasInitializedRouteSync.current) {
       hasInitializedRouteSync.current = true;
 
-      if (currentPath !== normalizedTargetPath) {
-        window.history.replaceState({}, document.title, normalizedTargetPath);
+      if (targetPath) {
+        const normalizedTargetPath = targetPath.replace(/\/+$/, '') || '/';
+
+        if (currentPath !== normalizedTargetPath) {
+          window.history.replaceState({}, document.title, normalizedTargetPath);
+        }
       }
       return;
     }
+
+    if (!targetPath) {
+      return;
+    }
+
+    const normalizedTargetPath = targetPath.replace(/\/+$/, '') || '/';
 
     if (currentPath !== normalizedTargetPath) {
       window.history.pushState({}, document.title, normalizedTargetPath);
