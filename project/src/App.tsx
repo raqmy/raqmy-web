@@ -42,7 +42,6 @@ import { AffiliatePolicyPage } from './pages/AffiliatePolicyPage';
 import { MerchantAgreementPage } from './pages/MerchantAgreementPage';
 import { VerifyPhonePage } from './pages/VerifyPhonePage';
 import { MerchantBankDetailsPage } from './pages/MerchantBankDetailsPage';
-import { TermsPage } from './pages/TermsPage';
 import { UserDashboardPlaceholder } from './pages/UserDashboardPlaceholder';
 import { supabase } from './lib/supabase';
 
@@ -147,7 +146,6 @@ function AppContent() {
       };
 
       const findOrderDirectly = async () => {
-        // 1) الأفضل: transaction id
         if (paymobTransactionId) {
           const { data } = await supabase
             .from('orders')
@@ -158,7 +156,6 @@ function AppContent() {
           if (data) return data;
         }
 
-        // 2) ثم paymob order id
         if (paymobOrderId) {
           const { data } = await supabase
             .from('orders')
@@ -169,7 +166,6 @@ function AppContent() {
           if (data) return data;
         }
 
-        // 3) ثم order id المحلي
         if (pendingOrderId) {
           const { data } = await supabase
             .from('orders')
@@ -224,11 +220,7 @@ function AppContent() {
             const resolvedOrderId = data?.order?.id || pendingOrderId;
             const resolvedStatus = data?.status || data?.order?.status;
 
-            if (
-              data?.verified === true ||
-              data?.paid === true ||
-              resolvedStatus === 'paid'
-            ) {
+            if (data?.verified === true || data?.paid === true || resolvedStatus === 'paid') {
               goToSuccess(resolvedOrderId);
               cleanupPaymentReturn();
               return;
@@ -252,7 +244,6 @@ function AppContent() {
 
         console.error('Payment verification final result:', { finalData, finalError });
 
-        // fallback مباشر من قاعدة البيانات باستخدام كل المعرفات الممكنة
         const directOrder = await findOrderDirectly();
 
         if (directOrder?.status === 'paid') {
@@ -261,16 +252,12 @@ function AppContent() {
           return;
         }
 
-        if (
-          directOrder?.status === 'failed' ||
-          directOrder?.status === 'cancelled'
-        ) {
+        if (directOrder?.status === 'failed' || directOrder?.status === 'cancelled') {
           goToFailed(directOrder.id);
           cleanupPaymentReturn();
           return;
         }
 
-        // إذا Paymob رجع success=true لكن التحقق تأخر، اعتبرها نجاح بدل فشل
         if (paymobSuccess) {
           goToSuccess(directOrder?.id || pendingOrderId);
           cleanupPaymentReturn();
@@ -480,7 +467,7 @@ function AppContent() {
       case 'privacy':
         return <PrivacyPolicyPage />;
       case 'terms':
-        return <TermsPage />;
+        return <MerchantAgreementPage />;
       default:
         return <HomePage onNavigate={setCurrentPage} />;
     }
