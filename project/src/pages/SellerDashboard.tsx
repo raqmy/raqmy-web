@@ -1246,6 +1246,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     !hasReachedWithdrawalLimit &&
     !withdrawalSubmitting;
 
+  const openProduct = (productId: string) => {
+    onNavigate(`product-detail-${productId}`);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
