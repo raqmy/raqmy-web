@@ -42,7 +42,6 @@ import { AffiliatePolicyPage } from './pages/AffiliatePolicyPage';
 import { MerchantAgreementPage } from './pages/MerchantAgreementPage';
 import { VerifyPhonePage } from './pages/VerifyPhonePage';
 import { MerchantBankDetailsPage } from './pages/MerchantBankDetailsPage';
-import { UserDashboardPlaceholder } from './pages/UserDashboardPlaceholder';
 import { supabase } from './lib/supabase';
 
 function AppContent() {
@@ -395,7 +394,7 @@ function AppContent() {
           <HomePage onNavigate={setCurrentPage} />
         );
       case 'user-dashboard':
-        return <UserDashboardPlaceholder onNavigate={setCurrentPage} />;
+        return <ProfilePage onNavigate={setCurrentPage} />;
       case 'admin':
         return profile?.role === 'admin' ? (
           <AdminDashboard onNavigate={setCurrentPage} />
