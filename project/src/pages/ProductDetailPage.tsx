@@ -122,6 +122,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     updateCanonicalUrl(canonicalUrl);
   }, [product, resolvedProductId, productId, productSlug]);
 
+  useEffect(() => {
+    if (!productSlug && productId && product?.slug) {
+      onNavigate(`product-slug-${product.slug}`);
+    }
+  }, [productSlug, productId, product?.slug, onNavigate]);
+
   const updateMetaTag = (attribute: 'name' | 'property', key: string, content: string) => {
     let element = document.head.querySelector(`meta[${attribute}="${key}"]`) as HTMLMetaElement | null;
 
@@ -487,9 +493,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const handleShareProduct = async () => {
     if (!product) return;
 
-    const shareUrl = product.slug
-      ? `${window.location.origin}/p/${encodeURIComponent(product.slug)}`
-      : window.location.href;
+    const slugOrId = product.slug || resolvedProductId || productId || productSlug;
+    const shareUrl = `${window.location.origin}/p/${encodeURIComponent(slugOrId || '')}`;
 
     try {
       if (navigator.share) {
@@ -596,14 +601,19 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           <div className="bg-white rounded-xl p-8 shadow-sm">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                {product.store ? (
+                {product.store?.slug ? (
                   <button
-                    onClick={() => onNavigate(`storefront-${product.store?.slug}`)}
+                    onClick={() => onNavigate(`storefront-${product.store.slug}`)}
                     className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 mb-2"
                   >
                     <StoreIcon className="w-4 h-4" />
                     <span className="font-medium">{product.store.name}</span>
                   </button>
+                ) : product.store ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                    <StoreIcon className="w-4 h-4" />
+                    <span className="font-medium">{product.store.name}</span>
+                  </div>
                 ) : (
                   <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
                     <User className="w-4 h-4" />
