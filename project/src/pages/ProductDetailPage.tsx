@@ -16,11 +16,13 @@ import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ProductDetailPageProps {
-  productId: string;
+  productId?: string;
+  productSlug?: string;
   onNavigate: (page: string) => void;
 }
 
 interface ProductWithDetails extends Product {
+  slug?: string;
   store?: Store | null;
   seller?: UserProfile | null;
 }
@@ -43,10 +45,12 @@ interface ProductAttachment {
 
 export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   productId,
+  productSlug,
   onNavigate,
 }) => {
   const { user } = useAuth();
   const [product, setProduct] = useState<ProductWithDetails | null>(null);
+  const [resolvedProductId, setResolvedProductId] = useState<string | null>(productId || null);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
@@ -59,13 +63,19 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   useEffect(() => {
     fetchProduct();
-    fetchProductImages();
-    incrementViewCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId]);
+  }, [productId, productSlug]);
 
   useEffect(() => {
-    if (user && productId) {
+    if (resolvedProductId) {
+      fetchProductImages();
+      incrementViewCount();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedProductId]);
+
+  useEffect(() => {
+    if (user && resolvedProductId) {
       checkFavoriteStatus();
       checkPurchaseStatus();
     } else {
@@ -74,37 +84,104 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       setAttachments([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, productId]);
+  }, [user, resolvedProductId]);
 
   useEffect(() => {
-    if (productId && (isOwner || hasPurchased)) {
+    if (resolvedProductId && (isOwner || hasPurchased)) {
       fetchAttachments();
     } else {
       setAttachments([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId, isOwner, hasPurchased]);
+  }, [resolvedProductId, isOwner, hasPurchased]);
+
+  useEffect(() => {
+    if (!product) return;
+
+    const slugOrId = product.slug || resolvedProductId || productId || productSlug || '';
+    const canonicalUrl = product.slug
+      ? `${window.location.origin}/p/${encodeURIComponent(product.slug)}`
+      : `${window.location.origin}/p/${encodeURIComponent(slugOrId)}`;
+    const pageTitle = `${product.name} | رقمي`;
+    const pageDescription =
+      product.description || `اشترِ الآن ${product.name} من خلال منصة رقمي.`;
+
+    document.title = pageTitle;
+    updateMetaTag('name', 'description', pageDescription);
+    updateMetaTag('property', 'og:title', pageTitle);
+    updateMetaTag('property', 'og:description', pageDescription);
+    updateMetaTag('property', 'og:type', 'product');
+    updateMetaTag('property', 'og:url', canonicalUrl);
+    updateMetaTag('name', 'twitter:card', 'summary_large_image');
+    updateMetaTag('name', 'twitter:title', pageTitle);
+    updateMetaTag('name', 'twitter:description', pageDescription);
+    if (product.thumbnail_url) {
+      updateMetaTag('property', 'og:image', product.thumbnail_url);
+      updateMetaTag('name', 'twitter:image', product.thumbnail_url);
+    }
+    updateCanonicalUrl(canonicalUrl);
+  }, [product, resolvedProductId, productId, productSlug]);
+
+  const updateMetaTag = (attribute: 'name' | 'property', key: string, content: string) => {
+    let element = document.head.querySelector(`meta[${attribute}="${key}"]`) as HTMLMetaElement | null;
+
+    if (!element) {
+      element = document.createElement('meta');
+      element.setAttribute(attribute, key);
+      document.head.appendChild(element);
+    }
+
+    element.setAttribute('content', content);
+  };
+
+  const updateCanonicalUrl = (href: string) => {
+    let element = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+
+    if (!element) {
+      element = document.createElement('link');
+      element.setAttribute('rel', 'canonical');
+      document.head.appendChild(element);
+    }
+
+    element.setAttribute('href', href);
+  };
 
   const fetchProduct = async () => {
+    setLoading(true);
+
     try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('id', productId)
-        .maybeSingle();
+      let query = supabase.from('products').select('*');
+
+      if (productSlug) {
+        query = query.eq('slug', productSlug);
+      } else if (productId) {
+        query = query.eq('id', productId);
+      } else {
+        setProduct(null);
+        setResolvedProductId(null);
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await query.maybeSingle();
 
       if (error) {
         console.error('Error fetching product:', error);
         setProduct(null);
+        setResolvedProductId(null);
         setLoading(false);
         return;
       }
 
       if (!data) {
         setProduct(null);
+        setResolvedProductId(null);
         setLoading(false);
         return;
       }
+
+      const finalProductId = data.id;
+      setResolvedProductId(finalProductId);
 
       let store = null;
       let seller = null;
@@ -145,17 +222,20 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     } catch (error) {
       console.error('Error fetching product:', error);
       setProduct(null);
+      setResolvedProductId(null);
     } finally {
       setLoading(false);
     }
   };
 
   const fetchProductImages = async () => {
+    if (!resolvedProductId) return;
+
     try {
       const { data, error } = await supabase
         .from('product_images')
         .select('*')
-        .eq('product_id', productId)
+        .eq('product_id', resolvedProductId)
         .order('display_order');
 
       if (!error && data) {
@@ -169,11 +249,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   };
 
   const fetchAttachments = async () => {
+    if (!resolvedProductId) return;
+
     try {
       const { data, error } = await supabase
         .from('product_attachments')
         .select('*')
-        .eq('product_id', productId)
+        .eq('product_id', resolvedProductId)
         .order('display_order');
 
       if (error) {
@@ -190,7 +272,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   };
 
   const checkPurchaseStatus = async () => {
-    if (!user) return;
+    if (!user || !resolvedProductId) return;
 
     try {
       const validStatuses = ['paid', 'completed', 'delivered'];
@@ -217,7 +299,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       const { data: itemsData, error: itemsError } = await supabase
         .from('order_items')
         .select('id')
-        .eq('product_id', productId)
+        .eq('product_id', resolvedProductId)
         .in('order_id', orderIds)
         .limit(1);
 
@@ -240,6 +322,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       return;
     }
 
+    if (!resolvedProductId) {
+      alert('تعذر تحديد المنتج');
+      return;
+    }
+
     if (isOwner) {
       alert('لا يمكنك شراء منتجك الخاص');
       return;
@@ -252,13 +339,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         .from('cart_items')
         .select('id')
         .eq('user_id', user.id)
-        .eq('product_id', productId)
+        .eq('product_id', resolvedProductId)
         .maybeSingle();
 
       if (!existingItem) {
         const { error } = await supabase.from('cart_items').insert({
           user_id: user.id,
-          product_id: productId,
+          product_id: resolvedProductId,
           quantity: 1,
         });
 
@@ -275,11 +362,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   };
 
   const incrementViewCount = async () => {
-    if (!productId) return;
+    if (!resolvedProductId) return;
 
     try {
       const { error } = await supabase.rpc('increment_product_view', {
-        p_product_id: productId,
+        p_product_id: resolvedProductId,
       });
 
       if (error) {
@@ -298,14 +385,14 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   };
 
   const checkFavoriteStatus = async () => {
-    if (!user || !productId) return;
+    if (!user || !resolvedProductId) return;
 
     try {
       const { data: favData, error: favError } = await supabase
         .from('favorites')
         .select('id')
         .eq('user_id', user.id)
-        .eq('product_id', productId)
+        .eq('product_id', resolvedProductId)
         .maybeSingle();
 
       if (!favError && favData) {
@@ -325,12 +412,17 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       return;
     }
 
+    if (!resolvedProductId) {
+      alert('تعذر تحديد المنتج');
+      return;
+    }
+
     setFavoriteLoading(true);
 
     try {
       const { data, error } = await supabase.rpc('toggle_favorite', {
         p_user_id: user.id,
-        p_product_id: productId,
+        p_product_id: resolvedProductId,
       });
 
       if (error) throw error;
@@ -350,6 +442,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       return;
     }
 
+    if (!resolvedProductId) {
+      alert('تعذر تحديد المنتج');
+      return;
+    }
+
     if (isOwner) {
       alert('لا يمكنك إضافة منتجك الخاص إلى السلة');
       return;
@@ -360,7 +457,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         .from('cart_items')
         .select('id, quantity')
         .eq('user_id', user.id)
-        .eq('product_id', productId)
+        .eq('product_id', resolvedProductId)
         .maybeSingle();
 
       if (existingItem) {
@@ -373,7 +470,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       } else {
         const { error } = await supabase.from('cart_items').insert({
           user_id: user.id,
-          product_id: productId,
+          product_id: resolvedProductId,
           quantity: 1,
         });
 
@@ -384,6 +481,30 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     } catch (error) {
       console.error('Error adding to cart:', error);
       alert('حدث خطأ أثناء إضافة المنتج للسلة');
+    }
+  };
+
+  const handleShareProduct = async () => {
+    if (!product) return;
+
+    const shareUrl = product.slug
+      ? `${window.location.origin}/p/${encodeURIComponent(product.slug)}`
+      : window.location.href;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: product.name,
+          text: product.description || `تصفح ${product.name} على منصة رقمي`,
+          url: shareUrl,
+        });
+        return;
+      }
+
+      await navigator.clipboard.writeText(shareUrl);
+      alert('تم نسخ رابط المنتج');
+    } catch (error) {
+      console.error('Error sharing product:', error);
     }
   };
 
@@ -473,26 +594,41 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           </div>
 
           <div className="bg-white rounded-xl p-8 shadow-sm">
-            <div className="mb-4">
-              {product.store ? (
-                <button
-                  onClick={() => onNavigate(`storefront-${product.store?.slug}`)}
-                  className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 mb-2"
-                >
-                  <StoreIcon className="w-4 h-4" />
-                  <span className="font-medium">{product.store.name}</span>
-                </button>
-              ) : (
-                <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-                  <User className="w-4 h-4" />
-                  <span className="font-medium">{product.seller?.name}</span>
-                </div>
-              )}
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                {product.store ? (
+                  <button
+                    onClick={() => onNavigate(`storefront-${product.store?.slug}`)}
+                    className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 mb-2"
+                  >
+                    <StoreIcon className="w-4 h-4" />
+                    <span className="font-medium">{product.store.name}</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                    <User className="w-4 h-4" />
+                    <span className="font-medium">{product.seller?.name}</span>
+                  </div>
+                )}
+                {product.slug && (
+                  <div className="text-xs text-gray-500" dir="ltr">
+                    /p/{product.slug}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={handleShareProduct}
+                className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-700"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>مشاركة</span>
+              </button>
             </div>
 
             <h1 className="text-3xl font-bold text-gray-900 mb-4">{product.name}</h1>
 
-            <div className="flex items-center gap-4 mb-6">
+            <div className="flex items-center gap-4 mb-6 flex-wrap">
               <div className="flex items-center gap-1">
                 <Star className="w-5 h-5 fill-yellow-400 text-yellow-400" />
                 <span className="text-lg font-semibold">4.8</span>
@@ -520,223 +656,154 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </div>
 
-            {canAccessAttachments && !isOwner && (
-              <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                <div className="flex items-center gap-2 text-green-700">
-                  <CheckCircle className="w-5 h-5" />
-                  <span className="font-medium">تم التحقق من الشراء ويمكنك الوصول إلى الملفات</span>
-                </div>
-              </div>
-            )}
+            <p className="text-gray-700 leading-8 mb-8 whitespace-pre-line">
+              {product.description || 'لا يوجد وصف لهذا المنتج حالياً.'}
+            </p>
 
-            <div className="flex flex-col gap-3 mb-6">
+            <div className="flex flex-col sm:flex-row gap-4 mb-8">
               <button
                 onClick={handleBuyNow}
-                disabled={purchasing || isOwner}
-                className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
+                disabled={purchasing || hasPurchased || isOwner}
+                className="flex-1 px-6 py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                {purchasing ? (
+                {hasPurchased ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>جاري المعالجة...</span>
+                    <CheckCircle className="w-5 h-5" />
+                    <span>تم شراء المنتج</span>
                   </>
                 ) : isOwner ? (
                   <>
-                    <Lock className="w-5 h-5" />
+                    <CheckCircle className="w-5 h-5" />
                     <span>هذا منتجك</span>
                   </>
+                ) : purchasing ? (
+                  <span>جاري المعالجة...</span>
                 ) : (
                   <>
-                    <CheckCircle className="w-5 h-5" />
+                    <ShoppingCart className="w-5 h-5" />
                     <span>اشترِ الآن</span>
                   </>
                 )}
               </button>
 
-              <button
-                onClick={handleAddToCart}
-                disabled={isOwner}
-                className="w-full flex items-center justify-center gap-2 px-6 py-4 border-2 border-blue-600 text-blue-600 rounded-lg font-semibold hover:bg-blue-50 transition-colors disabled:opacity-50"
-              >
-                <ShoppingCart className="w-5 h-5" />
-                <span>{isOwner ? 'لا يمكن إضافة منتجك للسلة' : 'أضف إلى السلة'}</span>
-              </button>
-            </div>
+              {!hasPurchased && !isOwner && (
+                <button
+                  onClick={handleAddToCart}
+                  className="px-6 py-4 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50 flex items-center justify-center gap-2"
+                >
+                  <ShoppingCart className="w-5 h-5" />
+                  <span>أضف إلى السلة</span>
+                </button>
+              )}
 
-            <div className="flex gap-3">
               <button
                 onClick={handleToggleFavorite}
                 disabled={favoriteLoading}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 border rounded-lg font-medium transition-colors ${
+                className={`px-6 py-4 border rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors ${
                   isFavorite
-                    ? 'border-red-500 bg-red-50 text-red-600 hover:bg-red-100'
-                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                    ? 'border-red-200 bg-red-50 text-red-600 hover:bg-red-100'
+                    : 'border-gray-200 hover:bg-gray-50 text-gray-700'
                 }`}
               >
-                <Heart className={`w-5 h-5 ${isFavorite ? 'fill-red-500' : ''}`} />
+                <Heart className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
                 <span>{isFavorite ? 'في المفضلة' : 'أضف للمفضلة'}</span>
-              </button>
-
-              <button className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
-                <Share2 className="w-5 h-5" />
-                <span>مشاركة</span>
               </button>
             </div>
 
-            <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <div className="flex items-center gap-2 text-green-700">
-                <CheckCircle className="w-5 h-5" />
-                <span className="font-medium">
-                  {product.delivery_method === 'instant'
-                    ? 'تسليم فوري بعد الدفع'
-                    : 'يتم الإرسال بالبريد الإلكتروني'}
-                </span>
+            <div className="border-t pt-6 space-y-3 text-sm text-gray-600">
+              <div className="flex items-center justify-between">
+                <span>النوع</span>
+                <span className="font-medium text-gray-900">منتج رقمي</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>التوصيل</span>
+                <span className="font-medium text-gray-900">فوري بعد الدفع</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>الترخيص</span>
+                <span className="font-medium text-gray-900">حسب وصف المنتج</span>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 bg-white rounded-xl p-8 shadow-sm">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">وصف المنتج</h2>
-            <div className="text-gray-700 leading-relaxed whitespace-pre-wrap">
-              {product.description || 'لا يوجد وصف متاح لهذا المنتج.'}
-            </div>
-
-            {product.is_subscription && (
-              <div className="mt-6 p-6 bg-blue-50 border border-blue-200 rounded-lg">
-                <h3 className="text-lg font-bold text-blue-900 mb-2">منتج اشتراك</h3>
-                <p className="text-blue-800">
-                  هذا المنتج يتطلب اشتراك{' '}
-                  {product.subscription_period === 'monthly'
-                    ? 'شهري'
-                    : product.subscription_period === 'yearly'
-                    ? 'سنوي'
-                    : 'أسبوعي'}
-                  . سيتم تجديد الاشتراك تلقائياً ما لم تقم بإلغائه.
-                </p>
-              </div>
+        <div className="bg-white rounded-xl p-8 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            {canAccessAttachments ? (
+              <CheckCircle className="w-6 h-6 text-green-600" />
+            ) : (
+              <Lock className="w-6 h-6 text-gray-400" />
             )}
+            <h2 className="text-2xl font-bold text-gray-900">محتوى المنتج</h2>
+          </div>
 
-            {canAccessAttachments && attachments.length > 0 && (
-              <div className="mt-8 bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">مرفقات المنتج</h3>
-                <div className="space-y-3">
-                  {attachments.map((attachment) => (
-                    <div
-                      key={attachment.id}
-                      className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200"
-                    >
-                      <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        {attachment.attachment_type === 'text' ? (
-                          <FileText className="w-5 h-5 text-blue-600" />
-                        ) : (
-                          <Download className="w-5 h-5 text-blue-600" />
-                        )}
+          {canAccessAttachments ? (
+            attachments.length > 0 ? (
+              <div className="space-y-4">
+                {attachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="border border-gray-200 rounded-xl p-5 flex items-center justify-between gap-4"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-6 h-6 text-blue-600" />
                       </div>
-
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{attachment.title}</p>
-                        <p className="text-xs text-gray-500">
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-gray-900 truncate">{attachment.title}</h3>
+                        <p className="text-sm text-gray-500">
                           {attachment.attachment_type === 'text'
                             ? 'محتوى نصي'
+                            : attachment.attachment_type === 'image'
+                            ? 'صورة'
                             : 'ملف قابل للتحميل'}
-                          {attachment.file_size &&
-                            ` • ${(attachment.file_size / 1024 / 1024).toFixed(2)} MB`}
                         </p>
                       </div>
-
-                      {attachment.attachment_type === 'text' ? (
-                        <button
-                          onClick={() => alert(attachment.text_content || '')}
-                          className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
-                        >
-                          عرض
-                        </button>
-                      ) : (
-                        <a
-                          href={attachment.file_url}
-                          download
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
-                        >
-                          تحميل
-                        </a>
-                      )}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
-            {!canAccessAttachments && (
-              <div className="mt-8 bg-white rounded-xl p-6 shadow-sm">
-                <div className="flex items-center gap-3 text-gray-600">
-                  <Lock className="w-5 h-5" />
-                  <p className="text-sm">سيتم إتاحة المرفقات بعد إتمام عملية الشراء</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl p-6 shadow-sm">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">معلومات البائع</h3>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
-                    <User className="w-6 h-6 text-white" />
+                    {attachment.attachment_type === 'text' ? (
+                      <button
+                        onClick={() => alert(attachment.text_content || 'لا يوجد محتوى نصي')}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
+                      >
+                        عرض
+                      </button>
+                    ) : attachment.file_url ? (
+                      <a
+                        href={attachment.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
+                      >
+                        تحميل
+                      </a>
+                    ) : (
+                      <span className="text-sm text-gray-400">غير متاح</span>
+                    )}
                   </div>
-                  <div>
-                    <div className="font-semibold text-gray-900">{product.seller?.name}</div>
-                    <div className="text-sm text-gray-500">تاجر معتمد</div>
-                  </div>
-                </div>
-
-                {product.store && (
-                  <button
-                    onClick={() => onNavigate(`storefront-${product.store?.slug}`)}
-                    className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-                  >
-                    زيارة المتجر
-                  </button>
-                )}
+                ))}
               </div>
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                لا توجد ملفات أو مرفقات متاحة لهذا المنتج حالياً.
+              </div>
+            )
+          ) : (
+            <div className="text-center py-12 border border-dashed border-gray-300 rounded-xl">
+              <Lock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">المحتوى محمي</h3>
+              <p className="text-gray-600 mb-6">
+                ستتمكن من الوصول إلى ملفات ومرفقات المنتج مباشرة بعد إتمام الشراء.
+              </p>
+              <button
+                onClick={handleBuyNow}
+                disabled={purchasing || isOwner}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+              >
+                اشترِ للوصول إلى المحتوى
+              </button>
             </div>
-
-            <div className="bg-white rounded-xl p-6 shadow-sm">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">تفاصيل إضافية</h3>
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">التصنيف:</span>
-                  <span className="font-medium text-gray-900">{product.category || 'عام'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">نوع المنتج:</span>
-                  <span className="font-medium text-gray-900">
-                    {product.is_subscription ? 'اشتراك' : 'منتج عادي'}
-                  </span>
-                </div>
-
-                {product.file_size && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">حجم الملف:</span>
-                    <span className="font-medium text-gray-900">
-                      {(product.file_size / (1024 * 1024)).toFixed(2)} MB
-                    </span>
-                  </div>
-                )}
-
-                <div className="flex justify-between">
-                  <span className="text-gray-600">تاريخ النشر:</span>
-                  <span className="font-medium text-gray-900">
-                    {new Date(product.created_at).toLocaleDateString('ar-SA')}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
