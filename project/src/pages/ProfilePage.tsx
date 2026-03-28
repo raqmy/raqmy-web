@@ -63,35 +63,6 @@ type ProfileOrder = {
   items: ProfileOrderItem[];
 };
 
-type FavoriteProduct = {
-  id: string;
-  name?: string | null;
-  title?: string | null;
-  price?: number | null;
-  currency?: string | null;
-  thumbnail_url?: string | null;
-  description?: string | null;
-  slug?: string | null;
-  store_id?: string | null;
-  user_id?: string | null;
-  favorite_id: string;
-  added_at: string;
-};
-
-type ViewedProduct = {
-  id: string;
-  name?: string | null;
-  title?: string | null;
-  price?: number | null;
-  currency?: string | null;
-  thumbnail_url?: string | null;
-  description?: string | null;
-  slug?: string | null;
-  store_id?: string | null;
-  user_id?: string | null;
-  viewed_at: string;
-};
-
 const getActiveStoreScopeSlug = () => {
   try {
     return sessionStorage.getItem('active_store_slug');
@@ -150,6 +121,35 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   }
 
   return null;
+};
+
+const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: string) => void }> = ({
+  scopeInfo,
+  onNavigate,
+}) => {
+  return (
+    <button
+      onClick={() => onNavigate(`storefront-${scopeInfo.slug}`)}
+      className="w-full mb-6 text-right bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl p-5 hover:shadow-lg transition-all"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center">
+            <StoreIcon className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-white/80">أنت داخل متجر</p>
+            <h2 className="text-2xl font-bold">{scopeInfo.name}</h2>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm font-medium bg-white/15 px-4 py-2 rounded-lg">
+          <ArrowLeft className="w-4 h-4" />
+          <span>العودة إلى المتجر</span>
+        </div>
+      </div>
+    </button>
+  );
 };
 
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
@@ -217,14 +217,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
           .select('product_id, products(id, store_id, user_id)')
           .eq('user_id', user.id),
       ]);
-
-      if (favoritesRes.error) {
-        console.error('Error fetching favorites stats:', favoritesRes.error);
-      }
-
-      if (viewedRes.error) {
-        console.error('Error fetching viewed stats:', viewedRes.error);
-      }
 
       const favoritesCount = (favoritesRes.data || []).filter((row: any) =>
         row?.products ? productMatchesScope(row.products, scopeInfo) : false
@@ -393,7 +385,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     try {
       await updateProfile({ name });
       setMessage('تم تحديث الملف الشخصي بنجاح');
-    } catch (error) {
+    } catch {
       setMessage('فشل تحديث الملف الشخصي');
     } finally {
       setLoading(false);
@@ -459,7 +451,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       setTimeout(() => {
         onNavigate('seller-dashboard');
       }, 1200);
-    } catch (error) {
+    } catch {
       setMessage('فشل ترقية الحساب');
     } finally {
       setLoading(false);
@@ -596,6 +588,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {scopeInfo && <StoreScopedBanner scopeInfo={scopeInfo} onNavigate={onNavigate} />}
+
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-8">
           <div className="relative h-32 bg-gradient-to-r from-blue-600 to-purple-600">
             <div className="absolute -bottom-16 right-8">
@@ -759,11 +753,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
             <div className="bg-white rounded-xl shadow-sm p-8">
               {activeTab === 'overview' && (
                 <div>
-                  <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+                  <div className="flex items-center justify-between mb-6">
                     <div>
                       <h2 className="text-2xl font-bold text-gray-900">نظرة عامة</h2>
                       {scopeInfo && (
-                        <p className="text-sm text-gray-500 mt-1">هذه الأرقام تخص متجر {scopeInfo.name} فقط</p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          هذه الأرقام تخص متجر {scopeInfo.name} فقط
+                        </p>
                       )}
                     </div>
                     <button
@@ -792,7 +788,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <Heart className="w-6 h-6 text-purple-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900 mb-1">{stats.favorites_count}</div>
+                      <div className="text-3xl font-bold text-gray-900 mb-1">
+                        {stats.favorites_count}
+                      </div>
                       <p className="text-sm text-gray-600">المنتجات المفضلة</p>
                     </div>
 
@@ -802,43 +800,24 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <Eye className="w-6 h-6 text-green-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900 mb-1">{stats.viewed_products_count}</div>
+                      <div className="text-3xl font-bold text-gray-900 mb-1">
+                        {stats.viewed_products_count}
+                      </div>
                       <p className="text-sm text-gray-600">المنتجات المشاهدة</p>
                     </div>
                   </div>
-
-                  {isMerchant && !scopeInfo && (
-                    <div className="mt-8">
-                      <h3 className="text-xl font-bold text-gray-900 mb-4">إحصائيات التاجر</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-6 text-white">
-                          <div className="flex items-center justify-between mb-4">
-                            <TrendingUp className="w-8 h-8" />
-                          </div>
-                          <div className="text-3xl font-bold mb-1">0 ريال</div>
-                          <p className="text-blue-100">إجمالي الأرباح</p>
-                        </div>
-
-                        <div className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl p-6 text-white">
-                          <div className="flex items-center justify-between mb-4">
-                            <DollarSign className="w-8 h-8" />
-                          </div>
-                          <div className="text-3xl font-bold mb-1">0</div>
-                          <p className="text-purple-100">إجمالي المبيعات</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
 
               {activeTab === 'orders' && (
                 <div>
-                  <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+                  <div className="flex items-center justify-between mb-6">
                     <div>
                       <h2 className="text-2xl font-bold text-gray-900">مشترياتي</h2>
                       {scopeInfo && (
-                        <p className="text-sm text-gray-500 mt-1">تظهر هنا فقط مشترياتك من متجر {scopeInfo.name}</p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          عرض مشترياتك من متجر {scopeInfo.name}
+                        </p>
                       )}
                     </div>
                     <button
@@ -864,7 +843,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                       <ShoppingBag className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                       <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد مشتريات</h3>
                       <p className="text-gray-600 mb-6">
-                        {scopeInfo ? `لا توجد مشتريات من متجر ${scopeInfo.name} بعد` : 'ابدأ بتصفح المنتجات وشراء ما يعجبك'}
+                        {scopeInfo
+                          ? `ابدأ بالشراء من متجر ${scopeInfo.name}`
+                          : 'ابدأ بتصفح المنتجات وشراء ما يعجبك'}
                       </p>
                       <button
                         onClick={() => onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')}
@@ -880,7 +861,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <div className="p-6">
                             <div className="flex items-start justify-between mb-5">
                               <div>
-                                <h3 className="text-lg font-bold text-gray-900 mb-1">الطلب #{order.order_number}</h3>
+                                <h3 className="text-lg font-bold text-gray-900 mb-1">
+                                  الطلب #{order.order_number}
+                                </h3>
                                 <p className="text-xs text-gray-500">
                                   {new Date(order.created_at).toLocaleDateString('ar-SA', {
                                     year: 'numeric',
@@ -894,9 +877,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
                               <div className="text-left">
                                 <div className="text-xl font-bold text-blue-600 mb-2">
-                                  {Number(order.total_amount).toFixed(2)} {order.currency === 'SAR' || !order.currency ? 'ريال' : order.currency}
+                                  {Number(order.total_amount).toFixed(2)}{' '}
+                                  {order.currency === 'SAR' || !order.currency ? 'ريال' : order.currency}
                                 </div>
-                                <div className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(order.status)}`}>
+                                <div
+                                  className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(
+                                    order.status
+                                  )}`}
+                                >
                                   {getStatusIcon(order.status)}
                                   <span>{getStatusText(order.status)}</span>
                                 </div>
@@ -905,48 +893,68 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
                             <div className="border-t border-gray-200 pt-4">
                               <h4 className="text-sm font-bold text-gray-700 mb-3">عناصر الطلب</h4>
-                              <div className="space-y-3">
-                                {order.items.map((item) => (
-                                  <div key={item.id} className="p-4 rounded-xl border border-gray-200 bg-white">
-                                    <div className="flex items-start justify-between gap-4 mb-3">
-                                      <div className="flex items-start gap-3">
-                                        <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
-                                          {item.thumbnail_url ? (
-                                            <img src={item.thumbnail_url} alt={item.product_name} className="w-full h-full object-cover" />
-                                          ) : (
-                                            <Package className="w-6 h-6 text-blue-600" />
-                                          )}
+
+                              {order.items && order.items.length > 0 ? (
+                                <div className="space-y-3">
+                                  {order.items.map((item) => (
+                                    <div
+                                      key={item.id}
+                                      className="p-4 rounded-xl border border-gray-200 bg-white"
+                                    >
+                                      <div className="flex items-start justify-between gap-4 mb-3">
+                                        <div className="flex items-start gap-3">
+                                          <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+                                            {item.thumbnail_url ? (
+                                              <img
+                                                src={item.thumbnail_url}
+                                                alt={item.product_name}
+                                                className="w-full h-full object-cover"
+                                              />
+                                            ) : (
+                                              <Package className="w-6 h-6 text-blue-600" />
+                                            )}
+                                          </div>
+                                          <div>
+                                            <h5 className="font-semibold text-gray-900">
+                                              {item.product_name || 'منتج'}
+                                            </h5>
+                                            <p className="text-sm text-gray-500">
+                                              الكمية: {item.quantity}
+                                            </p>
+                                          </div>
                                         </div>
-                                        <div>
-                                          <h5 className="font-semibold text-gray-900">{item.product_name || 'منتج'}</h5>
-                                          <p className="text-sm text-gray-500">الكمية: {item.quantity} × {Number(item.product_price).toFixed(2)} ريال</p>
+
+                                        <div className="text-left">
+                                          <p className="font-bold text-blue-600">
+                                            {Number(item.subtotal).toFixed(2)} ريال
+                                          </p>
                                         </div>
                                       </div>
-                                      <div className="text-left font-bold text-gray-900">{Number(item.subtotal).toFixed(2)} ريال</div>
-                                    </div>
 
-                                    <div className="flex flex-wrap gap-3">
-                                      {canAccessFiles(order.status) && (
+                                      <div className="flex flex-wrap gap-2">
                                         <button
                                           onClick={() => openScopedProduct(item)}
-                                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                          className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50"
                                         >
-                                          <Download className="w-4 h-4" />
-                                          <span>فتح الملفات</span>
+                                          عرض المنتج
                                         </button>
-                                      )}
 
-                                      <button
-                                        onClick={() => openScopedProduct(item)}
-                                        className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                                      >
-                                        <Package className="w-4 h-4" />
-                                        <span>عرض المنتج</span>
-                                      </button>
+                                        {canAccessFiles(order.status) && (
+                                          <button
+                                            onClick={() => openScopedProduct(item)}
+                                            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2"
+                                          >
+                                            <Download className="w-4 h-4" />
+                                            <span>الوصول للملفات</span>
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
-                                  </div>
-                                ))}
-                              </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-gray-500">لا توجد عناصر لهذا الطلب</p>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -956,150 +964,124 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 </div>
               )}
 
-              {activeTab === 'stores' && !scopeInfo && (
-                <div className="text-center py-10">
-                  <StoreIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">إدارة المتاجر</h3>
-                  <p className="text-gray-600 mb-6">تم نقل إدارة المتاجر إلى لوحة التاجر المتخصصة.</p>
-                  <button
-                    onClick={() => onNavigate('seller-dashboard')}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-                  >
-                    الذهاب إلى لوحة التاجر
-                  </button>
-                </div>
-              )}
-
-              {activeTab === 'products' && !scopeInfo && (
-                <div className="text-center py-10">
-                  <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">إدارة المنتجات</h3>
-                  <p className="text-gray-600 mb-6">تم نقل إدارة المنتجات إلى لوحة التاجر المتخصصة.</p>
-                  <button
-                    onClick={() => onNavigate('seller-dashboard')}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-                  >
-                    الذهاب إلى لوحة التاجر
-                  </button>
-                </div>
-              )}
-
-              {activeTab === 'analytics' && !scopeInfo && (
-                <div className="text-center py-10">
-                  <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">التحليلات</h3>
-                  <p className="text-gray-600 mb-6">تم نقل التحليلات إلى لوحة التاجر المتخصصة.</p>
-                  <button
-                    onClick={() => onNavigate('seller-dashboard')}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-                  >
-                    الذهاب إلى لوحة التاجر
-                  </button>
-                </div>
-              )}
-
               {activeTab === 'settings' && (
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 mb-6">الإعدادات</h2>
 
                   <div className="space-y-8">
                     <div>
-                      <h3 className="text-lg font-bold text-gray-900 mb-4">المعلومات الشخصية</h3>
+                      <h3 className="text-lg font-bold text-gray-900 mb-4">الملف الشخصي</h3>
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            الاسم
+                          </label>
                           <input
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
+
                         <button
                           onClick={handleUpdateProfile}
                           disabled={loading}
-                          className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                          className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
                         >
-                          <Save className="w-5 h-5" />
-                          <span>حفظ التغييرات</span>
+                          <Save className="w-4 h-4" />
+                          <span>{loading ? 'جاري الحفظ...' : 'حفظ التغييرات'}</span>
                         </button>
                       </div>
                     </div>
 
                     {isMerchant && !scopeInfo && (
-                      <div className="pt-8 border-t border-gray-200">
-                        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-                          <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
-                          {bankDetails && (
-                            <button
-                              onClick={() => setEditingBank((prev) => !prev)}
-                              className="text-blue-600 hover:text-blue-700 font-medium"
-                            >
-                              {editingBank ? 'إلغاء' : 'تعديل'}
-                            </button>
-                          )}
-                        </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-gray-900 mb-4">الحساب البنكي</h3>
 
                         {bankMessage && (
-                          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
+                          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-700">
                             {bankMessage}
                           </div>
                         )}
 
-                        <div className="space-y-4">
-                          <input
-                            type="text"
-                            value={bankAccountHolderName}
-                            onChange={(e) => setBankAccountHolderName(e.target.value)}
-                            placeholder="اسم صاحب الحساب"
-                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          />
-                          <input
-                            type="text"
-                            value={bankName}
-                            onChange={(e) => setBankName(e.target.value)}
-                            placeholder="اسم البنك"
-                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          />
-                          <input
-                            type="text"
-                            value={bankIban}
-                            onChange={(e) => setBankIban(e.target.value)}
-                            placeholder="SA..."
-                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          />
-                          <button
-                            onClick={handleUpdateBankDetails}
-                            disabled={bankLoading}
-                            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
-                          >
-                            {bankLoading ? 'جاري الحفظ...' : 'حفظ بيانات الحساب البنكي'}
-                          </button>
-                        </div>
+                        {!editingBank ? (
+                          <div className="border border-gray-200 rounded-xl p-5">
+                            <div className="space-y-2 text-sm text-gray-700">
+                              <p>اسم البنك: {bankDetails?.bank_name || '—'}</p>
+                              <p>اسم صاحب الحساب: {bankDetails?.account_holder_name || '—'}</p>
+                              <p>الآيبان: {bankDetails?.iban || '—'}</p>
+                            </div>
+                            <button
+                              onClick={() => setEditingBank(true)}
+                              className="mt-4 px-5 py-2 border border-gray-200 rounded-lg hover:bg-gray-50"
+                            >
+                              تعديل
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            <input
+                              type="text"
+                              value={bankName}
+                              onChange={(e) => setBankName(e.target.value)}
+                              placeholder="اسم البنك"
+                              className="w-full px-4 py-3 border border-gray-200 rounded-lg"
+                            />
+                            <input
+                              type="text"
+                              value={bankAccountHolderName}
+                              onChange={(e) => setBankAccountHolderName(e.target.value)}
+                              placeholder="اسم صاحب الحساب"
+                              className="w-full px-4 py-3 border border-gray-200 rounded-lg"
+                            />
+                            <input
+                              type="text"
+                              value={bankIban}
+                              onChange={(e) => setBankIban(e.target.value)}
+                              placeholder="SA..."
+                              className="w-full px-4 py-3 border border-gray-200 rounded-lg"
+                            />
+                            <div className="flex gap-3">
+                              <button
+                                onClick={handleUpdateBankDetails}
+                                disabled={bankLoading}
+                                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                {bankLoading ? 'جاري الحفظ...' : 'حفظ'}
+                              </button>
+                              <button
+                                onClick={() => setEditingBank(false)}
+                                className="px-6 py-3 border border-gray-200 rounded-lg hover:bg-gray-50"
+                              >
+                                إلغاء
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    <div className="pt-8 mt-8 border-t border-gray-200">
-                      <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg mb-4">
-                        <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-red-900 mb-1">منطقة الخطر</h3>
-                          <p className="text-sm text-red-700">
-                            حذف الحساب نهائي ولا يمكن التراجع عنه. سيتم حذف جميع بياناتك
-                            {isMerchant && ' ومتاجرك ومنتجاتك'}.
-                          </p>
-                        </div>
+                    {!scopeInfo && (
+                      <div className="border-t pt-8">
+                        <h3 className="text-lg font-bold text-red-600 mb-4">منطقة خطرة</h3>
+                        <button
+                          onClick={handleDeleteAccount}
+                          disabled={loading}
+                          className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>حذف الحساب</span>
+                        </button>
                       </div>
-                      <button
-                        onClick={handleDeleteAccount}
-                        disabled={loading}
-                        className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                        <span>حذف الحساب نهائياً</span>
-                      </button>
-                    </div>
+                    )}
                   </div>
+                </div>
+              )}
+
+              {activeTab !== 'overview' && activeTab !== 'orders' && activeTab !== 'settings' && (
+                <div className="text-center py-12 text-gray-500">
+                  هذا القسم غير مستخدم حالياً في هذه الصفحة.
                 </div>
               )}
             </div>
