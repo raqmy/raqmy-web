@@ -82,6 +82,35 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   return null;
 };
 
+const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: string) => void }> = ({
+  scopeInfo,
+  onNavigate,
+}) => {
+  return (
+    <button
+      onClick={() => onNavigate(`storefront-${scopeInfo.slug}`)}
+      className="w-full mb-6 text-right bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl p-5 hover:shadow-lg transition-all"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center">
+            <StoreIcon className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-white/80">أنت داخل متجر</p>
+            <h2 className="text-2xl font-bold">{scopeInfo.name}</h2>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm font-medium bg-white/15 px-4 py-2 rounded-lg">
+          <ArrowLeft className="w-4 h-4" />
+          <span>العودة إلى المتجر</span>
+        </div>
+      </div>
+    </button>
+  );
+};
+
 export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
   const { user } = useAuth();
   const [favorites, setFavorites] = useState<FavoriteProduct[]>([]);
@@ -282,6 +311,8 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {scopeInfo && <StoreScopedBanner scopeInfo={scopeInfo} onNavigate={onNavigate} />}
+
         <button
           onClick={() => onNavigate('profile')}
           className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6"
@@ -316,7 +347,11 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
           <div className="bg-white rounded-xl p-12 text-center shadow-sm">
             <Heart className="w-20 h-20 text-gray-300 mx-auto mb-4" />
             <h3 className="text-xl font-bold text-gray-900 mb-2">قائمة المفضلة فارغة</h3>
-            <p className="text-gray-600 mb-6">ابدأ بإضافة المنتجات التي تعجبك إلى المفضلة</p>
+            <p className="text-gray-600 mb-6">
+              {scopeInfo
+                ? `ابدأ بإضافة منتجات من متجر ${scopeInfo.name} إلى المفضلة`
+                : 'ابدأ بإضافة المنتجات التي تعجبك إلى المفضلة'}
+            </p>
             <button
               onClick={() => onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
@@ -329,23 +364,34 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
             {favorites.map((product: any) => {
               const title = getProductTitle(product);
               const displayTitle = title || 'بدون اسم';
-              const imgUrl = productImageMap[product.id] || product.thumbnail_url || product.image_url || '';
+              const imgUrl =
+                productImageMap[product.id] || product.thumbnail_url || product.image_url || '';
 
               return (
-                <div key={product.favorite_id} className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+                <div
+                  key={product.favorite_id}
+                  className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow"
+                >
                   <div onClick={() => openProduct(product)} className="cursor-pointer">
                     <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
                       {imgUrl ? (
                         <img src={imgUrl} alt={displayTitle} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="text-blue-600 text-4xl font-bold">{getInitialLetter(displayTitle)}</div>
+                        <div className="text-blue-600 text-4xl font-bold">
+                          {getInitialLetter(displayTitle)}
+                        </div>
                       )}
                     </div>
 
                     <div className="p-4">
-                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">{displayTitle}</h3>
-                      <p className="text-gray-600 text-sm mb-3 line-clamp-2">{product.description || 'منتج رقمي'}</p>
-                      <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">
+                        {displayTitle}
+                      </h3>
+                      <p className="text-gray-600 text-sm mb-3 line-clamp-2">
+                        {product.description || 'لا يوجد وصف متاح لهذا المنتج حالياً.'}
+                      </p>
+
+                      <div className="flex items-center justify-between mb-3">
                         <span className="text-xl font-bold text-blue-600">
                           {product.price} {getCurrencyLabel(product.currency)}
                         </span>
@@ -356,16 +402,17 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
                   <div className="p-4 pt-0 flex gap-2">
                     <button
                       onClick={() => handleAddToCart(product.id)}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
                     >
                       <ShoppingCart className="w-4 h-4" />
                       <span>أضف للسلة</span>
                     </button>
+
                     <button
                       onClick={() => handleRemoveFavorite(product.favorite_id)}
-                      className="w-11 h-11 flex items-center justify-center border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                      className="px-4 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
