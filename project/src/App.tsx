@@ -110,13 +110,52 @@ const parsePathToPage = (pathname: string) => {
   return staticRoutes[segments[0]] || 'home';
 };
 
+const getStoredStoreContext = () => {
+  try {
+    return {
+      slug: sessionStorage.getItem('active_store_slug'),
+      source: sessionStorage.getItem('store_mode_source'),
+    };
+  } catch {
+    return { slug: null as string | null, source: null as string | null };
+  }
+};
+
+const getActiveStoreSlugFromContext = (page: string): string | null => {
+  if (page.startsWith('storefront-')) {
+    return page.replace('storefront-', '') || null;
+  }
+
+  const queryStoreSlug = new URLSearchParams(window.location.search).get('store');
+  if (queryStoreSlug) return queryStoreSlug;
+
+  const { slug, source } = getStoredStoreContext();
+  if ((page === 'auth' || page.startsWith('product-slug-') || page.startsWith('product-')) && source === 'storefront' && slug) {
+    return slug;
+  }
+
+  return null;
+};
+
+const isStorefrontPage = (page: string) => page.startsWith('storefront-');
+const isStoreProductPage = (page: string) =>
+  (page.startsWith('product-slug-') || page.startsWith('product-')) && !!getActiveStoreSlugFromContext(page);
+const isStoreAuthPage = (page: string) => page === 'auth' && !!getActiveStoreSlugFromContext(page);
+const isStoreContextPage = (page: string) => isStorefrontPage(page) || isStoreProductPage(page) || isStoreAuthPage(page);
+
 const getPublicPathFromPage = (page: string) => {
+  const activeStoreSlug = getActiveStoreSlugFromContext(page);
+
   if (page.startsWith('storefront-')) {
     return `/s/${encodeURIComponent(page.replace('storefront-', ''))}`;
   }
 
   if (page.startsWith('product-slug-')) {
-    return `/p/${encodeURIComponent(page.replace('product-slug-', ''))}`;
+    const slug = encodeURIComponent(page.replace('product-slug-', ''));
+    if (activeStoreSlug) {
+      return `/p/${slug}?store=${encodeURIComponent(activeStoreSlug)}`;
+    }
+    return `/p/${slug}`;
   }
 
   if (page.startsWith('payment-success-')) {
@@ -148,22 +187,6 @@ const getPublicPathFromPage = (page: string) => {
   return publicRoutes[page] || null;
 };
 
-const isStorefrontPage = (page: string) => page.startsWith('storefront-');
-const isStoreProductPage = (page: string) => page.startsWith('product-slug-');
-const isStoreContextPage = (page: string) => isStorefrontPage(page) || isStoreProductPage(page);
-
-const getActiveStoreSlugFromContext = (page: string): string | null => {
-  if (page.startsWith('storefront-')) {
-    return page.replace('storefront-', '') || null;
-  }
-
-  const savedStoreSlug = sessionStorage.getItem('active_store_slug');
-  if (savedStoreSlug) return savedStoreSlug;
-
-  const queryStoreSlug = new URLSearchParams(window.location.search).get('store');
-  return queryStoreSlug || null;
-};
-
 function AppContent() {
   const { user, profile, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState(() => parsePathToPage(window.location.pathname));
@@ -185,27 +208,35 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    if (storeSlug && isStoreMode) {
-      sessionStorage.setItem('active_store_slug', storeSlug);
-      return;
-    }
+    try {
+      if (storeSlug && isStoreMode) {
+        sessionStorage.setItem('active_store_slug', storeSlug);
+        if (isStorefrontPage(currentPage) || isStoreProductPage(currentPage) || isStoreAuthPage(currentPage)) {
+          sessionStorage.setItem('store_mode_source', 'storefront');
+        }
+        return;
+      }
 
-    if (!isStoreMode) {
-      sessionStorage.removeItem('active_store_slug');
+      if (!isStoreMode) {
+        sessionStorage.removeItem('active_store_slug');
+        sessionStorage.removeItem('store_mode_source');
+      }
+    } catch (error) {
+      console.error('Error updating store context session:', error);
     }
-  }, [storeSlug, isStoreMode]);
+  }, [storeSlug, isStoreMode, currentPage]);
 
   useEffect(() => {
     if (isHandlingPaymentReturn) return;
 
     const targetPath = getPublicPathFromPage(currentPage);
-    const currentPath = window.location.pathname.replace(/\/+$/, '') || '/';
+    const currentPath = `${window.location.pathname.replace(/\/+$/, '') || '/'}${window.location.search || ''}`;
 
     if (!hasInitializedRouteSync.current) {
       hasInitializedRouteSync.current = true;
 
       if (targetPath) {
-        const normalizedTargetPath = targetPath.replace(/\/+$/, '') || '/';
+        const normalizedTargetPath = targetPath;
 
         if (currentPath !== normalizedTargetPath) {
           window.history.replaceState({}, document.title, normalizedTargetPath);
@@ -218,7 +249,7 @@ function AppContent() {
       return;
     }
 
-    const normalizedTargetPath = targetPath.replace(/\/+$/, '') || '/';
+    const normalizedTargetPath = targetPath;
 
     if (currentPath !== normalizedTargetPath) {
       window.history.pushState({}, document.title, normalizedTargetPath);
