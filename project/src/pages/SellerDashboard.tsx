@@ -1250,6 +1250,22 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     onNavigate(`product-detail-${productId}`);
   };
 
+  const openStorefront = (store: Store) => {
+    if (store.slug) {
+      try {
+        sessionStorage.setItem('active_store_slug', store.slug);
+        sessionStorage.setItem('store_mode_source', 'storefront');
+      } catch (error) {
+        console.error('Error setting store context:', error);
+      }
+
+      onNavigate(`storefront-${store.slug}`);
+      return;
+    }
+
+    onNavigate(`store-detail-${store.id}`);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -1606,7 +1622,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       <div className="flex-1">
                         <h3 className="text-xl font-bold text-gray-900">{store.name}</h3>
                         <p className="text-sm text-gray-500" dir="ltr">
-                          /{store.slug}
+                          {store.slug ? `/s/${store.slug}` : 'بدون رابط بعد'}
                         </p>
                       </div>
                     </div>
@@ -1625,10 +1641,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
                     <div className="flex gap-2">
                       <button
-                        onClick={() => onNavigate(`store-detail-${store.id}`)}
+                        onClick={() => openStorefront(store)}
                         className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
                       >
-                        عرض التفاصيل
+                        دخول المتجر
                       </button>
 
                       <button
