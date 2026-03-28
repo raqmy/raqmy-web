@@ -73,6 +73,35 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   return null;
 };
 
+const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: string) => void }> = ({
+  scopeInfo,
+  onNavigate,
+}) => {
+  return (
+    <button
+      onClick={() => onNavigate(`storefront-${scopeInfo.slug}`)}
+      className="w-full mb-6 text-right bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl p-5 hover:shadow-lg transition-all"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center">
+            <StoreIcon className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-white/80">أنت داخل متجر</p>
+            <h2 className="text-2xl font-bold">{scopeInfo.name}</h2>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm font-medium bg-white/15 px-4 py-2 rounded-lg">
+          <ArrowLeft className="w-4 h-4" />
+          <span>العودة إلى المتجر</span>
+        </div>
+      </div>
+    </button>
+  );
+};
+
 export const ViewedProductsPage: React.FC<ViewedProductsPageProps> = ({ onNavigate }) => {
   const { user } = useAuth();
   const [viewedProducts, setViewedProducts] = useState<ViewedProduct[]>([]);
@@ -215,6 +244,8 @@ export const ViewedProductsPage: React.FC<ViewedProductsPageProps> = ({ onNaviga
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {scopeInfo && <StoreScopedBanner scopeInfo={scopeInfo} onNavigate={onNavigate} />}
+
         <button
           onClick={() => onNavigate('profile')}
           className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6"
@@ -249,7 +280,9 @@ export const ViewedProductsPage: React.FC<ViewedProductsPageProps> = ({ onNaviga
           <div className="bg-white rounded-xl p-12 text-center shadow-sm">
             <Eye className="w-20 h-20 text-gray-300 mx-auto mb-4" />
             <h3 className="text-xl font-bold text-gray-900 mb-2">لم تشاهد أي منتجات بعد</h3>
-            <p className="text-gray-600 mb-6">ابدأ بتصفح المنتجات المتاحة</p>
+            <p className="text-gray-600 mb-6">
+              {scopeInfo ? `ابدأ بتصفح منتجات متجر ${scopeInfo.name}` : 'ابدأ بتصفح المنتجات المتاحة'}
+            </p>
             <button
               onClick={() => onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
@@ -260,28 +293,42 @@ export const ViewedProductsPage: React.FC<ViewedProductsPageProps> = ({ onNaviga
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {viewedProducts.map((product) => (
-              <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+              <div
+                key={product.id}
+                className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow"
+              >
                 <div onClick={() => openProduct(product)} className="cursor-pointer">
                   <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center relative">
                     {product.thumbnail_url ? (
-                      <img src={product.thumbnail_url} alt={product.name || product.title || 'منتج'} className="w-full h-full object-cover" />
+                      <img
+                        src={product.thumbnail_url}
+                        alt={product.name}
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
-                      <div className="text-blue-600 text-4xl font-bold">{(product.name || product.title || 'م').charAt(0)}</div>
+                      <div className="text-blue-600 text-4xl font-bold">
+                        {(product.name || product.title || '؟').charAt(0)}
+                      </div>
                     )}
                     <div className="absolute top-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
                       {getTimeAgo(product.viewed_at)}
                     </div>
                   </div>
+
                   <div className="p-4">
-                    <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">{product.name || product.title}</h3>
-                    <p className="text-gray-600 text-sm mb-3 line-clamp-2">{product.description}</p>
+                    <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">
+                      {product.name || product.title}
+                    </h3>
+                    <p className="text-gray-600 text-sm mb-3 line-clamp-2">
+                      {product.description}
+                    </p>
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-xl font-bold text-blue-600">
                         {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
                       </span>
                       <div className="flex items-center gap-1 text-xs text-gray-500">
                         <Eye className="w-3 h-3" />
-                        <span>{(product as any).views_count}</span>
+                        <span>{product.views_count}</span>
                       </div>
                     </div>
                   </div>
@@ -290,16 +337,17 @@ export const ViewedProductsPage: React.FC<ViewedProductsPageProps> = ({ onNaviga
                 <div className="p-4 pt-0 flex gap-2">
                   <button
                     onClick={() => handleAddToCart(product.id)}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
                   >
                     <ShoppingCart className="w-4 h-4" />
                     <span>أضف للسلة</span>
                   </button>
+
                   <button
                     onClick={() => openProduct(product)}
-                    className="w-11 h-11 flex items-center justify-center border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <Heart className="w-5 h-5 text-gray-500" />
+                    <Heart className="w-4 h-4 text-gray-600" />
                   </button>
                 </div>
               </div>
