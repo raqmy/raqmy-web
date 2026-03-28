@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Heart, Trash2, ShoppingCart, ArrowLeft } from 'lucide-react';
+import { Heart, Trash2, ShoppingCart, ArrowLeft, Store as StoreIcon } from 'lucide-react';
 import { supabase, Product } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -20,21 +20,87 @@ type ProductImageRow = {
   display_order: number;
 };
 
+type ScopeInfo = {
+  slug: string;
+  name: string;
+  source: 'stores' | 'merchants';
+  storeId: string | null;
+  merchantUserId: string | null;
+};
+
+const getActiveStoreScopeSlug = () => {
+  try {
+    return sessionStorage.getItem('active_store_slug');
+  } catch {
+    return null;
+  }
+};
+
+const productMatchesScope = (product: any, scope: ScopeInfo | null) => {
+  if (!scope) return true;
+  if (scope.source === 'stores') return product?.store_id === scope.storeId;
+  return (product?.user_id || product?.merchant_id) === scope.merchantUserId;
+};
+
+const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
+  const slug = getActiveStoreScopeSlug();
+  if (!slug) return null;
+
+  const { data: storeData, error: storeError } = await supabase
+    .from('stores')
+    .select('id, slug, name, user_id')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (!storeError && storeData) {
+    return {
+      slug,
+      name: storeData.name || 'المتجر',
+      source: 'stores',
+      storeId: storeData.id,
+      merchantUserId: storeData.user_id || null,
+    };
+  }
+
+  const { data: merchantData, error: merchantError } = await supabase
+    .from('merchants')
+    .select('id, slug, user_id, store_name, business_name, name')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (!merchantError && merchantData) {
+    return {
+      slug,
+      name:
+        merchantData.store_name || merchantData.business_name || merchantData.name || 'المتجر',
+      source: 'merchants',
+      storeId: null,
+      merchantUserId: merchantData.user_id || merchantData.id,
+    };
+  }
+
+  return null;
+};
+
 export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
   const { user } = useAuth();
   const [favorites, setFavorites] = useState<FavoriteProduct[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // صور المنتجات (primary) حسب product_id
+  const [scopeInfo, setScopeInfo] = useState<ScopeInfo | null>(null);
   const [productImageMap, setProductImageMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (user) {
-      loadFavorites();
-    }
+    const loadScopeAndFavorites = async () => {
+      if (!user) return;
+      const resolved = await resolveStoreScope();
+      setScopeInfo(resolved);
+      await loadFavorites(resolved);
+    };
+
+    loadScopeAndFavorites();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // بعد ما تجيب favorites، جيب صورها من product_images
   useEffect(() => {
     if (favorites.length > 0) {
       fetchFavoriteImages(favorites.map((p) => p.id));
@@ -44,11 +110,12 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [favorites]);
 
-  const loadFavorites = async () => {
+  const loadFavorites = async (resolvedScope?: ScopeInfo | null) => {
     if (!user) return;
 
     setLoading(true);
     try {
+      const scope = resolvedScope === undefined ? scopeInfo : resolvedScope;
       const { data, error } = await supabase
         .from('favorites')
         .select(
@@ -65,14 +132,15 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
       if (error) throw error;
 
       const favoriteProducts =
-        data?.map((fav: any) => ({
-          ...(fav.products || {}),
-          favorite_id: fav.id,
-          added_at: fav.created_at,
-        })) || [];
+        data
+          ?.map((fav: any) => ({
+            ...(fav.products || {}),
+            favorite_id: fav.id,
+            added_at: fav.created_at,
+          }))
+          .filter((p: any) => p && p.id && productMatchesScope(p, scope || null)) || [];
 
-      // فلترة احتياطية: لو products رجعت null لأي سبب
-      setFavorites(favoriteProducts.filter((p: any) => p && p.id));
+      setFavorites(favoriteProducts);
     } catch (error) {
       console.error('Error loading favorites:', error);
       setFavorites([]);
@@ -102,7 +170,6 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
       const rows = (data || []) as ProductImageRow[];
       const map: Record<string, string> = {};
 
-      // نأخذ أول صورة (primary أولاً ثم حسب display_order)
       for (const row of rows) {
         if (!map[row.product_id] && row.image_url) {
           map[row.product_id] = row.image_url;
@@ -158,10 +225,7 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
     }
   };
 
-  const getProductTitle = (product: any) => {
-    // يدعم name أو title
-    return (product?.name ?? product?.title ?? '').toString().trim();
-  };
+  const getProductTitle = (product: any) => (product?.name ?? product?.title ?? '').toString().trim();
 
   const getCurrencyLabel = (currency?: string) => {
     const c = (currency || 'SAR').toString();
@@ -172,6 +236,19 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
     const t = (text || '').trim();
     return t.length > 0 ? t.charAt(0) : '؟';
   };
+
+  const openProduct = (product: FavoriteProduct) => {
+    if (product.slug) {
+      onNavigate(`product-slug-${product.slug}`);
+      return;
+    }
+    onNavigate(`product-${product.id}`);
+  };
+
+  const titleText = useMemo(() => {
+    if (!scopeInfo) return 'المنتجات المفضلة';
+    return `المفضلة من متجر ${scopeInfo.name}`;
+  }, [scopeInfo]);
 
   if (!user) {
     return (
@@ -214,13 +291,23 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
         </button>
 
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
             <Heart className="w-8 h-8 text-red-500 fill-red-500" />
-            <h1 className="text-3xl font-bold text-gray-900">المنتجات المفضلة</h1>
+            <h1 className="text-3xl font-bold text-gray-900">{titleText}</h1>
+            {scopeInfo && (
+              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-sm">
+                <StoreIcon className="w-4 h-4" />
+                <span>{scopeInfo.name}</span>
+              </span>
+            )}
           </div>
           <p className="text-gray-600">
             {favorites.length === 0
-              ? 'لم تقم بإضافة أي منتج للمفضلة بعد'
+              ? scopeInfo
+                ? `لم تضف أي منتج من متجر ${scopeInfo.name} إلى المفضلة بعد`
+                : 'لم تقم بإضافة أي منتج للمفضلة بعد'
+              : scopeInfo
+              ? `لديك ${favorites.length} منتج في المفضلة من متجر ${scopeInfo.name}`
               : `لديك ${favorites.length} منتج في المفضلة`}
           </p>
         </div>
@@ -231,10 +318,10 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
             <h3 className="text-xl font-bold text-gray-900 mb-2">قائمة المفضلة فارغة</h3>
             <p className="text-gray-600 mb-6">ابدأ بإضافة المنتجات التي تعجبك إلى المفضلة</p>
             <button
-              onClick={() => onNavigate('marketplace')}
+              onClick={() => onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
             >
-              تصفح المنتجات
+              {scopeInfo ? 'العودة إلى المتجر' : 'تصفح المنتجات'}
             </button>
           </div>
         ) : (
@@ -242,40 +329,25 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
             {favorites.map((product: any) => {
               const title = getProductTitle(product);
               const displayTitle = title || 'بدون اسم';
-              const imgUrl =
-                productImageMap[product.id] || product.thumbnail_url || product.image_url || '';
+              const imgUrl = productImageMap[product.id] || product.thumbnail_url || product.image_url || '';
 
               return (
-                <div
-                  key={product.favorite_id}
-                  className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow"
-                >
-                  <div onClick={() => onNavigate(`product-${product.id}`)} className="cursor-pointer">
+                <div key={product.favorite_id} className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+                  <div onClick={() => openProduct(product)} className="cursor-pointer">
                     <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
                       {imgUrl ? (
                         <img src={imgUrl} alt={displayTitle} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="text-blue-600 text-4xl font-bold">
-                          {getInitialLetter(displayTitle)}
-                        </div>
+                        <div className="text-blue-600 text-4xl font-bold">{getInitialLetter(displayTitle)}</div>
                       )}
                     </div>
 
                     <div className="p-4">
-                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">
-                        {displayTitle}
-                      </h3>
-
-                      <p className="text-gray-600 text-sm mb-3 line-clamp-2">
-                        {(product.description || '').toString() || 'لا يوجد وصف'}
-                      </p>
-
-                      <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">{displayTitle}</h3>
+                      <p className="text-gray-600 text-sm mb-3 line-clamp-2">{product.description || 'منتج رقمي'}</p>
+                      <div className="flex items-center justify-between">
                         <span className="text-xl font-bold text-blue-600">
                           {product.price} {getCurrencyLabel(product.currency)}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {new Date(product.added_at).toLocaleDateString('ar-SA')}
                         </span>
                       </div>
                     </div>
@@ -284,17 +356,16 @@ export const FavoritesPage: React.FC<FavoritesPageProps> = ({ onNavigate }) => {
                   <div className="p-4 pt-0 flex gap-2">
                     <button
                       onClick={() => handleAddToCart(product.id)}
-                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                     >
                       <ShoppingCart className="w-4 h-4" />
                       <span>أضف للسلة</span>
                     </button>
                     <button
                       onClick={() => handleRemoveFavorite(product.favorite_id)}
-                      className="px-3 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-                      title="إزالة من المفضلة"
+                      className="w-11 h-11 flex items-center justify-center border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-5 h-5" />
                     </button>
                   </div>
                 </div>
