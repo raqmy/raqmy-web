@@ -113,7 +113,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
         <div className="border-t border-gray-800 mt-8 pt-8 text-center">
           <p className="text-sm text-gray-400">
-            © 2024 رقمي. جميع الحقوق محفوظة.
+            © 2026 رقمي. جميع الحقوق محفوظة.
           </p>
         </div>
       </div>
