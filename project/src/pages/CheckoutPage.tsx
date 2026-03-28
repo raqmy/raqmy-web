@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ShoppingCart, Package, AlertCircle, CreditCard } from 'lucide-react';
+import {
+  ShoppingCart,
+  Package,
+  AlertCircle,
+  CreditCard,
+  Store as StoreIcon,
+  ArrowLeft,
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Product } from '../lib/supabase';
 
@@ -7,12 +14,118 @@ interface CheckoutPageProps {
   onNavigate: (page: string) => void;
 }
 
+interface ScopeInfo {
+  slug: string;
+  name: string;
+  source: 'stores' | 'merchants';
+  storeId: string | null;
+  merchantUserId: string | null;
+}
+
+interface ProductWithMeta extends Product {
+  slug?: string | null;
+  title?: string | null;
+  thumbnail_url?: string | null;
+  store_id?: string | null;
+  user_id?: string | null;
+}
+
 interface CartItem {
   id: string;
   product_id: string;
   quantity: number;
-  product?: Product;
+  product?: ProductWithMeta | null;
+  store_name?: string | null;
+  store_slug?: string | null;
 }
+
+const getActiveStoreScopeSlug = () => {
+  try {
+    return sessionStorage.getItem('active_store_slug');
+  } catch {
+    return null;
+  }
+};
+
+const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
+  const slug = getActiveStoreScopeSlug();
+  if (!slug) return null;
+
+  const { data: storeData, error: storeError } = await supabase
+    .from('stores')
+    .select('id, slug, name, user_id')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (!storeError && storeData) {
+    return {
+      slug,
+      name: storeData.name || 'المتجر',
+      source: 'stores',
+      storeId: storeData.id,
+      merchantUserId: storeData.user_id || null,
+    };
+  }
+
+  const { data: merchantData, error: merchantError } = await supabase
+    .from('merchants')
+    .select('id, slug, user_id, store_name, business_name, name')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (!merchantError && merchantData) {
+    return {
+      slug,
+      name:
+        merchantData.store_name || merchantData.business_name || merchantData.name || 'المتجر',
+      source: 'merchants',
+      storeId: null,
+      merchantUserId: merchantData.user_id || merchantData.id,
+    };
+  }
+
+  return null;
+};
+
+const productMatchesScope = (product: ProductWithMeta | null | undefined, scope: ScopeInfo | null) => {
+  if (!scope) return true;
+  if (!product) return false;
+
+  if (scope.source === 'stores') {
+    return product.store_id === scope.storeId;
+  }
+
+  return (product.user_id as string | null) === scope.merchantUserId;
+};
+
+const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: string) => void }> = ({
+  scopeInfo,
+  onNavigate,
+}) => {
+  return (
+    <button
+      onClick={() => onNavigate(`storefront-${scopeInfo.slug}`)}
+      className="w-full mb-6 text-right bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl p-5 hover:shadow-lg transition-all"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center">
+            <StoreIcon className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-white/80">أنت داخل متجر</p>
+            <h2 className="text-2xl font-bold">{scopeInfo.name}</h2>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm font-medium bg-white/15 px-4 py-2 rounded-lg">
+          <ArrowLeft className="w-4 h-4" />
+          <span>العودة إلى المتجر</span>
+        </div>
+      </div>
+    </button>
+  );
+};
 
 export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
@@ -21,6 +134,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypal'>('card');
+  const [scopeInfo, setScopeInfo] = useState<ScopeInfo | null>(null);
 
   const [formData, setFormData] = useState({
     shippingAddress: '',
@@ -28,13 +142,33 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   });
 
   useEffect(() => {
-    if (profile) {
-      fetchCartItems();
-    }
+    const loadScopeAndCart = async () => {
+      if (!profile) {
+        setCartItems([]);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const resolvedScope = await resolveStoreScope();
+        setScopeInfo(resolvedScope);
+        await fetchCartItems(resolvedScope);
+      } catch (error) {
+        console.error('Error loading checkout scope:', error);
+        setScopeInfo(null);
+        await fetchCartItems(null);
+      }
+    };
+
+    loadScopeAndCart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
-  const fetchCartItems = async () => {
+  const fetchCartItems = async (resolvedScope?: ScopeInfo | null) => {
     try {
+      const scope = resolvedScope === undefined ? scopeInfo : resolvedScope;
+
       const { data: cartData, error: cartError } = await supabase
         .from('cart_items')
         .select('*')
@@ -43,7 +177,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       if (cartError) throw cartError;
 
       if (cartData && cartData.length > 0) {
-        const productIds = cartData.map((item) => item.product_id);
+        const productIds = cartData.map((item) => item.product_id).filter(Boolean);
 
         const { data: productsData, error: productsError } = await supabase
           .from('products')
@@ -52,10 +186,60 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
         if (productsError) throw productsError;
 
-        const enrichedItems = cartData.map((item) => ({
-          ...item,
-          product: productsData?.find((p) => p.id === item.product_id),
-        }));
+        const allProducts = (productsData || []) as ProductWithMeta[];
+
+        const storeIds = Array.from(
+          new Set(allProducts.map((p) => p.store_id).filter(Boolean))
+        ) as string[];
+
+        const userIds = Array.from(
+          new Set(allProducts.map((p) => p.user_id).filter(Boolean))
+        ) as string[];
+
+        const [storesRes, merchantsRes] = await Promise.all([
+          storeIds.length > 0
+            ? supabase.from('stores').select('id, slug, name').in('id', storeIds)
+            : Promise.resolve({ data: [], error: null } as any),
+          userIds.length > 0
+            ? supabase
+                .from('merchants')
+                .select('id, user_id, slug, store_name, business_name, name')
+                .in('user_id', userIds)
+            : Promise.resolve({ data: [], error: null } as any),
+        ]);
+
+        const storesMap = new Map<string, any>(
+          ((storesRes.data || []) as any[]).map((store) => [store.id, store])
+        );
+
+        const merchantsMap = new Map<string, any>(
+          ((merchantsRes.data || []) as any[]).map((merchant) => [merchant.user_id, merchant])
+        );
+
+        const enrichedItems: CartItem[] = cartData
+          .map((item) => {
+            const product = allProducts.find((p) => p.id === item.product_id) || null;
+            if (!product || !productMatchesScope(product, scope || null)) return null;
+
+            const storeRecord = product.store_id ? storesMap.get(product.store_id) : null;
+            const merchantRecord = product.user_id ? merchantsMap.get(product.user_id) : null;
+
+            const storeName =
+              storeRecord?.name ||
+              merchantRecord?.store_name ||
+              merchantRecord?.business_name ||
+              merchantRecord?.name ||
+              'متجر';
+            const storeSlug = storeRecord?.slug || merchantRecord?.slug || null;
+
+            return {
+              ...item,
+              product,
+              store_name: storeName,
+              store_slug: storeSlug,
+            } as CartItem;
+          })
+          .filter(Boolean) as CartItem[];
 
         setCartItems(enrichedItems);
       } else {
@@ -64,6 +248,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     } catch (error) {
       console.error('Error fetching cart:', error);
       setError('حدث خطأ أثناء تحميل السلة');
+      setCartItems([]);
     } finally {
       setLoading(false);
     }
@@ -71,17 +256,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
-      return total + (item.product?.price || 0) * item.quantity;
+      return total + (Number(item.product?.price || 0) * item.quantity);
     }, 0);
   };
 
   const uniqueSellerIds = useMemo(() => {
     return Array.from(
-      new Set(
-        cartItems
-          .map((item) => item.product?.user_id)
-          .filter((id): id is string => !!id)
-      )
+      new Set(cartItems.map((item) => item.product?.user_id).filter((id): id is string => !!id))
     );
   }, [cartItems]);
 
@@ -159,7 +340,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         customer_phone: profile?.phone || '',
         shipping_address: formData.shippingAddress || '',
         notes: formData.notes || '',
-        sale_source: 'marketplace',
+        sale_source: scopeInfo ? 'storefront' : 'marketplace',
       };
 
       const { data: order, error: orderError } = await supabase
@@ -174,7 +355,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       }
 
       const orderItems = cartItems.map((item) => {
-        const price = item.product!.price;
+        const price = Number(item.product!.price);
         const sellerId = item.product!.user_id!;
 
         return {
@@ -199,13 +380,27 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         throw orderItemsError;
       }
 
-      const { error: cartDeleteError } = await supabase
-        .from('cart_items')
-        .delete()
-        .eq('user_id', profile.id);
+      if (scopeInfo) {
+        const scopedProductIds = cartItems.map((item) => item.product_id);
 
-      if (cartDeleteError) {
-        console.error('Cart delete error:', cartDeleteError);
+        const { error: cartDeleteError } = await supabase
+          .from('cart_items')
+          .delete()
+          .eq('user_id', profile.id)
+          .in('product_id', scopedProductIds);
+
+        if (cartDeleteError) {
+          console.error('Scoped cart delete error:', cartDeleteError);
+        }
+      } else {
+        const { error: cartDeleteError } = await supabase
+          .from('cart_items')
+          .delete()
+          .eq('user_id', profile.id);
+
+        if (cartDeleteError) {
+          console.error('Cart delete error:', cartDeleteError);
+        }
       }
 
       onNavigate(`payment-${order.id}`);
@@ -232,15 +427,21 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     return (
       <div className="min-h-screen bg-gray-50 py-8">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+          {scopeInfo && <StoreScopedBanner scopeInfo={scopeInfo} onNavigate={onNavigate} />}
+
           <div className="bg-white rounded-xl p-12 text-center shadow-sm">
             <ShoppingCart className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-gray-900 mb-2">السلة فارغة</h3>
-            <p className="text-gray-600 mb-6">لا يمكن إتمام الطلب بدون منتجات</p>
+            <p className="text-gray-600 mb-6">
+              {scopeInfo
+                ? `لا توجد منتجات من متجر ${scopeInfo.name} لإتمام الطلب`
+                : 'لا يمكن إتمام الطلب بدون منتجات'}
+            </p>
             <button
-              onClick={() => onNavigate('marketplace')}
+              onClick={() => onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
             >
-              تصفح المنتجات
+              {scopeInfo ? 'العودة إلى المتجر' : 'تصفح المنتجات'}
             </button>
           </div>
         </div>
@@ -251,9 +452,15 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        {scopeInfo && <StoreScopedBanner scopeInfo={scopeInfo} onNavigate={onNavigate} />}
+
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">إتمام الطلب</h1>
-          <p className="text-gray-600">أكمل بيانات الدفع لإتمام عملية الشراء</p>
+          <p className="text-gray-600">
+            {scopeInfo
+              ? `أكمل بيانات الدفع لإتمام الشراء من متجر ${scopeInfo.name}`
+              : 'أكمل بيانات الدفع لإتمام عملية الشراء'}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -295,7 +502,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                 </div>
 
                 <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-                  {hasMultipleSellers
+                  {scopeInfo
+                    ? `أنت الآن تُتم طلبًا خاصًا بمتجر ${scopeInfo.name} فقط.`
+                    : hasMultipleSellers
                     ? 'السلة الحالية تحتوي منتجات من عدة تجار، وسيتم توزيع الأرباح تلقائيًا على كل تاجر حسب المنتجات الموجودة في الطلب.'
                     : 'يمكنك إتمام الطلب بشكل طبيعي، وسيتم ربط الأرباح بالتاجر الخاص بهذا المنتج.'}
                 </div>
@@ -337,11 +546,26 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
                     return (
                       <div key={item.id} className="flex gap-3">
-                        <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <Package className="w-8 h-8 text-blue-600" />
+                        <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+                          {item.product?.thumbnail_url ? (
+                            <img
+                              src={item.product.thumbnail_url}
+                              alt={productTitle}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <Package className="w-8 h-8 text-blue-600" />
+                          )}
                         </div>
 
                         <div className="flex-1">
+                          {!scopeInfo && (
+                            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
+                              <StoreIcon className="w-3 h-3" />
+                              <span>{item.store_name || 'متجر'}</span>
+                            </div>
+                          )}
+
                           <h4 className="font-semibold text-gray-900 text-sm line-clamp-1">
                             {productTitle}
                           </h4>
@@ -349,7 +573,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                             {item.quantity} × {item.product?.price} {item.product?.currency || 'SAR'}
                           </p>
                           <p className="text-sm font-bold text-blue-600 mt-1">
-                            {((item.product?.price || 0) * item.quantity).toFixed(2)}{' '}
+                            {((Number(item.product?.price || 0)) * item.quantity).toFixed(2)}{' '}
                             {item.product?.currency || 'SAR'}
                           </p>
                         </div>
