@@ -1,7 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Store, TrendingUp, Package, DollarSign, Eye, ShoppingCart, ArrowLeft, Edit } from 'lucide-react';
+import {
+  Store,
+  TrendingUp,
+  Package,
+  DollarSign,
+  Eye,
+  ShoppingCart,
+  ArrowLeft,
+  Edit,
+  ExternalLink,
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import { EditStoreModal } from '../components/store/EditStoreModal';
 
 interface StoreDetailPageProps {
@@ -10,7 +19,6 @@ interface StoreDetailPageProps {
 }
 
 export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNavigate }) => {
-  const { user } = useAuth();
   const [store, setStore] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [stats, setStats] = useState({
@@ -21,19 +29,26 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNav
   });
   const [loading, setLoading] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [isRedirectingToStorefront, setIsRedirectingToStorefront] = useState(false);
 
   useEffect(() => {
     fetchStoreDetails();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 
   const fetchStoreDetails = async () => {
     setLoading(true);
+
     try {
-      const { data: storeData } = await supabase
+      const { data: storeData, error: storeError } = await supabase
         .from('stores')
         .select('*')
         .eq('id', storeId)
         .maybeSingle();
+
+      if (storeError) {
+        console.error('Error fetching store details:', storeError);
+      }
 
       if (!storeData) {
         onNavigate('seller-dashboard');
@@ -42,27 +57,39 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNav
 
       setStore(storeData);
 
-      const { data: productsData } = await supabase
+      const { data: productsData, error: productsError } = await supabase
         .from('products')
         .select('*')
         .eq('store_id', storeId)
         .order('created_at', { ascending: false });
 
+      if (productsError) {
+        console.error('Error fetching store products:', productsError);
+      }
+
       if (productsData) {
         setProducts(productsData);
 
-        const totalSales = productsData.reduce((sum, p) => sum + (p.sales_count || 0), 0);
+        const totalSales = productsData.reduce((sum, p) => sum + Number(p.sales_count || 0), 0);
         const totalRevenue = productsData.reduce(
-          (sum, p) => sum + (p.sales_count || 0) * parseFloat(p.price || 0),
+          (sum, p) => sum + Number(p.sales_count || 0) * Number(p.price || 0),
           0
         );
-        const totalViews = productsData.reduce((sum, p) => sum + (p.views_count || 0), 0);
+        const totalViews = productsData.reduce((sum, p) => sum + Number(p.views_count || 0), 0);
 
         setStats({
           totalProducts: productsData.length,
           totalSales,
           totalRevenue,
           totalViews,
+        });
+      } else {
+        setProducts([]);
+        setStats({
+          totalProducts: 0,
+          totalSales: 0,
+          totalRevenue: 0,
+          totalViews: 0,
         });
       }
     } catch (error) {
@@ -72,12 +99,35 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNav
     }
   };
 
-  if (loading) {
+  const handleEnterStore = () => {
+    if (!store?.slug) return;
+
+    try {
+      sessionStorage.setItem('active_store_slug', store.slug);
+      sessionStorage.setItem('store_mode_source', 'storefront');
+    } catch (error) {
+      console.error('Error setting store context:', error);
+    }
+
+    onNavigate(`storefront-${store.slug}`);
+  };
+
+  useEffect(() => {
+    if (!loading && store?.slug) {
+      setIsRedirectingToStorefront(true);
+      handleEnterStore();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, store?.slug]);
+
+  if (loading || isRedirectingToStorefront) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">جاري تحميل تفاصيل المتجر...</p>
+          <p className="text-gray-600">
+            {isRedirectingToStorefront ? 'جاري الدخول إلى المتجر...' : 'جاري تحميل تفاصيل المتجر...'}
+          </p>
         </div>
       </div>
     );
@@ -112,13 +162,26 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNav
             <ArrowLeft className="w-5 h-5" />
             <span>العودة إلى لوحة التحكم</span>
           </button>
-          <button
-            onClick={() => setShowEditModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-          >
-            <Edit className="w-4 h-4" />
-            <span>تعديل المتجر</span>
-          </button>
+
+          <div className="flex items-center gap-3">
+            {store.slug && (
+              <button
+                onClick={handleEnterStore}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>دخول المتجر</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+            >
+              <Edit className="w-4 h-4" />
+              <span>تعديل المتجر</span>
+            </button>
+          </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm p-8 mb-8">
@@ -130,19 +193,25 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNav
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 mb-1">{store.name}</h1>
                 <p className="text-gray-600">{store.description || 'متجر رقمي'}</p>
-                <div className="flex items-center gap-4 mt-2">
+
+                <div className="flex flex-wrap items-center gap-4 mt-2">
                   <span className="px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded-full">
                     {store.category}
                   </span>
+
                   <span
                     className={`px-3 py-1 text-sm rounded-full ${
-                      store.is_active
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-red-100 text-red-700'
+                      store.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                     }`}
                   >
                     {store.is_active ? 'نشط' : 'غير نشط'}
                   </span>
+
+                  {store.slug && (
+                    <span className="text-sm text-gray-500" dir="ltr">
+                      /s/{store.slug}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -200,7 +269,7 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNav
                 onClick={() => setShowEditModal(true)}
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
               >
-                إضافة منتجات
+                تعديل المتجر
               </button>
             </div>
           ) : (
@@ -208,32 +277,30 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNav
               {products.map((product) => (
                 <div
                   key={product.id}
-                  onClick={() => onNavigate(`product-${product.id}`)}
-                  className="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors cursor-pointer"
+                  className="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors"
                 >
                   <div className="flex items-start justify-between mb-3">
                     <h3 className="font-semibold text-gray-900 line-clamp-2">{product.name}</h3>
                     <span
                       className={`px-2 py-1 text-xs rounded-full ${
-                        product.is_active
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-red-100 text-red-700'
+                        product.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                       }`}
                     >
                       {product.is_active ? 'نشط' : 'غير نشط'}
                     </span>
                   </div>
+
                   <p className="text-gray-600 text-sm mb-3 line-clamp-2">
                     {product.description || 'منتج رقمي'}
                   </p>
+
                   <div className="flex items-center justify-between">
                     <span className="text-xl font-bold text-blue-600">
                       {product.price} {product.currency}
                     </span>
-                    <div className="text-sm text-gray-500">
-                      {product.sales_count} مبيعات
-                    </div>
+                    <div className="text-sm text-gray-500">{product.sales_count} مبيعات</div>
                   </div>
+
                   <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                     <span className="flex items-center gap-1">
                       <Eye className="w-3 h-3" />
