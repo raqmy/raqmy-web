@@ -1,5 +1,5 @@
 import React from 'react';
-import { Store, User, LogOut, LayoutDashboard, ShoppingBag, Share2, ShoppingCart } from 'lucide-react';
+import { Store, User, LogOut, LayoutDashboard, ShoppingCart } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface NavbarProps {
