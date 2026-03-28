@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, AlertCircle, Info, Megaphone } from 'lucide-react';
+import { X, Megaphone } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -22,7 +22,6 @@ export const AnnouncementBanner: React.FC = () => {
 
   const loadAnnouncement = async () => {
     try {
-      // Get active announcements
       const now = new Date().toISOString();
       const { data: announcements, error } = await supabase
         .from('announcements')
@@ -40,15 +39,13 @@ export const AnnouncementBanner: React.FC = () => {
       }
 
       const activeAnnouncement = announcements[0];
-
-      // Check target audience
       const shouldShow = shouldShowForUser(activeAnnouncement.target_audience);
+
       if (!shouldShow) {
         setIsVisible(false);
         return;
       }
 
-      // Check if user has dismissed this announcement
       if (user) {
         const { data: dismissed } = await supabase
           .from('announcement_dismissed_by_users')
@@ -62,17 +59,16 @@ export const AnnouncementBanner: React.FC = () => {
           return;
         }
       } else {
-        // For non-authenticated users, check localStorage
         const dismissedAnnouncements = JSON.parse(
           localStorage.getItem('dismissedAnnouncements') || '[]'
         );
+
         if (dismissedAnnouncements.includes(activeAnnouncement.id)) {
           setIsVisible(false);
           return;
         }
       }
 
-      // Show announcement
       setAnnouncement(activeAnnouncement);
       setTimeout(() => setIsVisible(true), 100);
     } catch (err: any) {
@@ -103,7 +99,6 @@ export const AnnouncementBanner: React.FC = () => {
 
     try {
       if (user) {
-        // For authenticated users, save to database
         await supabase
           .from('announcement_dismissed_by_users')
           .insert({
@@ -111,7 +106,6 @@ export const AnnouncementBanner: React.FC = () => {
             user_id: user.id,
           });
       } else {
-        // For non-authenticated users, save to localStorage
         const dismissedAnnouncements = JSON.parse(
           localStorage.getItem('dismissedAnnouncements') || '[]'
         );
@@ -119,7 +113,6 @@ export const AnnouncementBanner: React.FC = () => {
         localStorage.setItem('dismissedAnnouncements', JSON.stringify(dismissedAnnouncements));
       }
 
-      // Fade out animation
       setTimeout(() => {
         setIsVisible(false);
         setAnnouncement(null);
