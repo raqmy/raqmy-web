@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ShoppingCart,
   Download,
@@ -43,6 +43,21 @@ interface ProductAttachment {
   file_size?: number;
 }
 
+const getStoreContextSlug = (): string | null => {
+  const queryStoreSlug = new URLSearchParams(window.location.search).get('store');
+  if (queryStoreSlug) return queryStoreSlug;
+
+  try {
+    const source = sessionStorage.getItem('store_mode_source');
+    const slug = sessionStorage.getItem('active_store_slug');
+    if (source === 'storefront' && slug) return slug;
+  } catch (error) {
+    console.error('Error reading store product context:', error);
+  }
+
+  return null;
+};
+
 export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   productId,
   productSlug,
@@ -60,6 +75,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [attachments, setAttachments] = useState<ProductAttachment[]>([]);
   const [hasPurchased, setHasPurchased] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
+
+  const storeContextSlug = useMemo(() => getStoreContextSlug(), [productId, productSlug]);
+  const isStoreContext = !!storeContextSlug;
 
   useEffect(() => {
     fetchProduct();
@@ -127,6 +145,19 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       onNavigate(`product-slug-${product.slug}`);
     }
   }, [productSlug, productId, product?.slug, onNavigate]);
+
+  useEffect(() => {
+    if (!product?.store?.slug) return;
+
+    if (isStoreContext) {
+      try {
+        sessionStorage.setItem('active_store_slug', product.store.slug);
+        sessionStorage.setItem('store_mode_source', 'storefront');
+      } catch (error) {
+        console.error('Error saving store product context:', error);
+      }
+    }
+  }, [product?.store?.slug, isStoreContext]);
 
   const updateMetaTag = (attribute: 'name' | 'property', key: string, content: string) => {
     let element = document.head.querySelector(`meta[${attribute}="${key}"]`) as HTMLMetaElement | null;
@@ -494,7 +525,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     if (!product) return;
 
     const slugOrId = product.slug || resolvedProductId || productId || productSlug;
-    const shareUrl = `${window.location.origin}/p/${encodeURIComponent(slugOrId || '')}`;
+    const shareUrl = isStoreContext && storeContextSlug
+      ? `${window.location.origin}/p/${encodeURIComponent(slugOrId || '')}?store=${encodeURIComponent(storeContextSlug)}`
+      : `${window.location.origin}/p/${encodeURIComponent(slugOrId || '')}`;
 
     try {
       if (navigator.share) {
@@ -511,6 +544,29 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     } catch (error) {
       console.error('Error sharing product:', error);
     }
+  };
+
+  const handleBack = () => {
+    if (isStoreContext && storeContextSlug) {
+      onNavigate(`storefront-${storeContextSlug}`);
+      return;
+    }
+
+    onNavigate('marketplace');
+  };
+
+  const handleOpenStore = () => {
+    const targetStoreSlug = product?.store?.slug || storeContextSlug;
+    if (!targetStoreSlug) return;
+
+    try {
+      sessionStorage.setItem('active_store_slug', targetStoreSlug);
+      sessionStorage.setItem('store_mode_source', 'storefront');
+    } catch (error) {
+      console.error('Error setting store context before opening storefront:', error);
+    }
+
+    onNavigate(`storefront-${targetStoreSlug}`);
   };
 
   if (loading) {
@@ -546,11 +602,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <button
-          onClick={() => onNavigate('marketplace')}
+          onClick={handleBack}
           className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6"
         >
           <ArrowLeft className="w-5 h-5" />
-          <span>العودة إلى السوق</span>
+          <span>{isStoreContext ? 'العودة إلى المتجر' : 'العودة إلى السوق'}</span>
         </button>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -603,7 +659,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <div>
                 {product.store?.slug ? (
                   <button
-                    onClick={() => onNavigate(`storefront-${product.store.slug}`)}
+                    onClick={handleOpenStore}
                     className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 mb-2"
                   >
                     <StoreIcon className="w-4 h-4" />
@@ -622,7 +678,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 )}
                 {product.slug && (
                   <div className="text-xs text-gray-500" dir="ltr">
-                    /p/{product.slug}
+                    {isStoreContext && storeContextSlug ? `/p/${product.slug}?store=${storeContextSlug}` : `/p/${product.slug}`}
                   </div>
                 )}
               </div>
