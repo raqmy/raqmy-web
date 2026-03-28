@@ -148,12 +148,32 @@ const getPublicPathFromPage = (page: string) => {
   return publicRoutes[page] || null;
 };
 
+const isStorefrontPage = (page: string) => page.startsWith('storefront-');
+const isStoreProductPage = (page: string) => page.startsWith('product-slug-');
+const isStoreContextPage = (page: string) => isStorefrontPage(page) || isStoreProductPage(page);
+
+const getActiveStoreSlugFromContext = (page: string): string | null => {
+  if (page.startsWith('storefront-')) {
+    return page.replace('storefront-', '') || null;
+  }
+
+  const savedStoreSlug = sessionStorage.getItem('active_store_slug');
+  if (savedStoreSlug) return savedStoreSlug;
+
+  const queryStoreSlug = new URLSearchParams(window.location.search).get('store');
+  return queryStoreSlug || null;
+};
+
 function AppContent() {
   const { user, profile, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState(() => parsePathToPage(window.location.pathname));
   const [hasBankDetails, setHasBankDetails] = useState<boolean | null>(null);
   const [isHandlingPaymentReturn, setIsHandlingPaymentReturn] = useState(false);
   const hasInitializedRouteSync = useRef(false);
+
+  const storeSlug = getActiveStoreSlugFromContext(currentPage);
+  const isStoreMode = isStoreContextPage(currentPage);
+  const shouldHidePlatformChrome = isStoreMode;
 
   useEffect(() => {
     const handlePopState = () => {
@@ -163,6 +183,17 @@ function AppContent() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  useEffect(() => {
+    if (storeSlug && isStoreMode) {
+      sessionStorage.setItem('active_store_slug', storeSlug);
+      return;
+    }
+
+    if (!isStoreMode) {
+      sessionStorage.removeItem('active_store_slug');
+    }
+  }, [storeSlug, isStoreMode]);
 
   useEffect(() => {
     if (isHandlingPaymentReturn) return;
@@ -463,12 +494,14 @@ function AppContent() {
           setCurrentPage('admin');
         } else if (profile.role === 'seller') {
           setCurrentPage('seller-dashboard');
+        } else if (storeSlug) {
+          setCurrentPage(`storefront-${storeSlug}`);
         } else {
           setCurrentPage('home');
         }
       }
     }
-  }, [user, profile, loading, currentPage, hasBankDetails, isHandlingPaymentReturn]);
+  }, [user, profile, loading, currentPage, hasBankDetails, isHandlingPaymentReturn, storeSlug]);
 
   if (loading || isHandlingPaymentReturn) {
     return (
@@ -500,8 +533,8 @@ function AppContent() {
     }
 
     if (currentPage.startsWith('storefront-')) {
-      const storeSlug = currentPage.replace('storefront-', '');
-      return <StorefrontPage storeSlug={storeSlug} onNavigate={setCurrentPage} />;
+      const storeSlugValue = currentPage.replace('storefront-', '');
+      return <StorefrontPage storeSlug={storeSlugValue} onNavigate={setCurrentPage} />;
     }
 
     if (currentPage.startsWith('marketer-analytics-')) {
@@ -528,7 +561,7 @@ function AppContent() {
       case 'home':
         return <HomePage onNavigate={setCurrentPage} />;
       case 'auth':
-        return <AuthPage />;
+        return <AuthPage storeMode={!!storeSlug} storeSlug={storeSlug || undefined} onNavigate={setCurrentPage} />;
       case 'verify-phone':
         return <VerifyPhonePage />;
       case 'merchant-bank-details':
@@ -624,10 +657,10 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col" dir="rtl">
-      <AnnouncementBanner />
-      <Navbar onNavigate={setCurrentPage} currentPage={currentPage} />
+      {!shouldHidePlatformChrome && <AnnouncementBanner />}
+      {!shouldHidePlatformChrome && <Navbar onNavigate={setCurrentPage} currentPage={currentPage} />}
       <main className="flex-1">{renderPage()}</main>
-      <Footer onNavigate={setCurrentPage} />
+      {!shouldHidePlatformChrome && <Footer onNavigate={setCurrentPage} />}
     </div>
   );
 }
