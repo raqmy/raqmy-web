@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   User,
-  Mail,
   Camera,
   Save,
   ShoppingBag,
@@ -15,13 +14,11 @@ import {
   DollarSign,
   Trash2,
   AlertCircle,
-  Banknote,
-  Edit,
   CheckCircle,
   Download,
   XCircle,
   Clock,
-  Star,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -29,6 +26,14 @@ import { supabase } from '../lib/supabase';
 interface ProfilePageProps {
   onNavigate: (page: string) => void;
 }
+
+type ScopeInfo = {
+  slug: string;
+  name: string;
+  source: 'stores' | 'merchants';
+  storeId: string | null;
+  merchantUserId: string | null;
+};
 
 type ProfileStats = {
   favorites_count: number;
@@ -42,6 +47,10 @@ type ProfileOrderItem = {
   product_name: string;
   product_price: number;
   subtotal: number;
+  product_slug?: string | null;
+  thumbnail_url?: string | null;
+  store_id?: string | null;
+  user_id?: string | null;
 };
 
 type ProfileOrder = {
@@ -54,6 +63,95 @@ type ProfileOrder = {
   items: ProfileOrderItem[];
 };
 
+type FavoriteProduct = {
+  id: string;
+  name?: string | null;
+  title?: string | null;
+  price?: number | null;
+  currency?: string | null;
+  thumbnail_url?: string | null;
+  description?: string | null;
+  slug?: string | null;
+  store_id?: string | null;
+  user_id?: string | null;
+  favorite_id: string;
+  added_at: string;
+};
+
+type ViewedProduct = {
+  id: string;
+  name?: string | null;
+  title?: string | null;
+  price?: number | null;
+  currency?: string | null;
+  thumbnail_url?: string | null;
+  description?: string | null;
+  slug?: string | null;
+  store_id?: string | null;
+  user_id?: string | null;
+  viewed_at: string;
+};
+
+const getActiveStoreScopeSlug = () => {
+  try {
+    return sessionStorage.getItem('active_store_slug');
+  } catch {
+    return null;
+  }
+};
+
+const normalizeProductName = (product: any) => product?.name || product?.title || 'منتج';
+
+const productMatchesScope = (product: any, scope: ScopeInfo | null) => {
+  if (!scope) return true;
+
+  if (scope.source === 'stores') {
+    return product?.store_id === scope.storeId;
+  }
+
+  return (product?.user_id || product?.merchant_id) === scope.merchantUserId;
+};
+
+const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
+  const slug = getActiveStoreScopeSlug();
+  if (!slug) return null;
+
+  const { data: storeData, error: storeError } = await supabase
+    .from('stores')
+    .select('id, slug, name, user_id')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (!storeError && storeData) {
+    return {
+      slug,
+      name: storeData.name || 'المتجر',
+      source: 'stores',
+      storeId: storeData.id,
+      merchantUserId: storeData.user_id || null,
+    };
+  }
+
+  const { data: merchantData, error: merchantError } = await supabase
+    .from('merchants')
+    .select('id, slug, user_id, store_name, business_name, name')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (!merchantError && merchantData) {
+    return {
+      slug,
+      name:
+        merchantData.store_name || merchantData.business_name || merchantData.name || 'المتجر',
+      source: 'merchants',
+      storeId: null,
+      merchantUserId: merchantData.user_id || merchantData.id,
+    };
+  }
+
+  return null;
+};
+
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const { user, profile, updateProfile } = useAuth();
   const [activeTab, setActiveTab] = useState<
@@ -62,6 +160,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [name, setName] = useState(profile?.name || '');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [scopeInfo, setScopeInfo] = useState<ScopeInfo | null>(null);
+  const [scopeLoading, setScopeLoading] = useState(true);
 
   const [stats, setStats] = useState<ProfileStats>({
     favorites_count: 0,
@@ -80,27 +180,63 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [orders, setOrders] = useState<ProfileOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
-  const [ordersLoaded, setOrdersLoaded] = useState(false);
+
+  useEffect(() => {
+    setName(profile?.name || '');
+  }, [profile?.name]);
+
+  useEffect(() => {
+    const loadScope = async () => {
+      setScopeLoading(true);
+      try {
+        const resolved = await resolveStoreScope();
+        setScopeInfo(resolved);
+      } catch (error) {
+        console.error('Error resolving store scope:', error);
+        setScopeInfo(null);
+      } finally {
+        setScopeLoading(false);
+      }
+    };
+
+    loadScope();
+  }, []);
 
   const fetchProfileStats = async () => {
     if (!user) return;
 
     setStatsLoading(true);
     try {
-      const { data, error } = await supabase.rpc('get_user_profile_stats', {
-        p_user_id: user.id,
-      });
+      const [favoritesRes, viewedRes] = await Promise.all([
+        supabase
+          .from('favorites')
+          .select('id, product_id, products(id, store_id, user_id)')
+          .eq('user_id', user.id),
+        supabase
+          .from('viewed_products')
+          .select('product_id, products(id, store_id, user_id)')
+          .eq('user_id', user.id),
+      ]);
 
-      if (error) {
-        console.error('Error fetching profile stats:', error);
-        return;
+      if (favoritesRes.error) {
+        console.error('Error fetching favorites stats:', favoritesRes.error);
       }
 
-      const row = Array.isArray(data) ? data?.[0] : data;
+      if (viewedRes.error) {
+        console.error('Error fetching viewed stats:', viewedRes.error);
+      }
+
+      const favoritesCount = (favoritesRes.data || []).filter((row: any) =>
+        row?.products ? productMatchesScope(row.products, scopeInfo) : false
+      ).length;
+
+      const viewedCount = (viewedRes.data || []).filter((row: any) =>
+        row?.products ? productMatchesScope(row.products, scopeInfo) : false
+      ).length;
 
       setStats({
-        favorites_count: Number(row?.favorites_count ?? 0),
-        viewed_products_count: Number(row?.viewed_products_count ?? 0),
+        favorites_count: favoritesCount,
+        viewed_products_count: viewedCount,
       });
     } catch (e) {
       console.error('Error fetching profile stats:', e);
@@ -154,7 +290,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       if (!ordersData || ordersData.length === 0) {
         setOrders([]);
-        setOrdersLoaded(true);
         return;
       }
 
@@ -162,7 +297,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const { data: rawItems, error: itemsError } = await supabase
         .from('order_items')
-        .select('id, order_id, product_id, quantity, price')
+        .select('id, order_id, product_id, quantity, price, subtotal')
         .in('order_id', orderIds);
 
       if (itemsError) {
@@ -177,7 +312,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       if (productIds.length > 0) {
         const { data: productsData, error: productsError } = await supabase
           .from('products')
-          .select('id, title, name, price, currency')
+          .select('id, title, name, price, currency, thumbnail_url, slug, store_id, user_id')
           .in('id', productIds);
 
         if (productsError) {
@@ -191,6 +326,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       for (const item of safeItems as any[]) {
         const product = productsMap.get(item.product_id);
+        if (!product || !productMatchesScope(product, scopeInfo)) continue;
+
         const resolvedPrice = Number(item.price ?? product?.price ?? 0);
         const resolvedQuantity = Number(item.quantity ?? 1);
 
@@ -198,9 +335,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
           id: item.id,
           product_id: item.product_id,
           quantity: resolvedQuantity,
-          product_name: product?.title || product?.name || 'منتج',
+          product_name: normalizeProductName(product),
           product_price: resolvedPrice,
-          subtotal: resolvedPrice * resolvedQuantity,
+          subtotal: Number(item.subtotal ?? resolvedPrice * resolvedQuantity),
+          product_slug: product?.slug || null,
+          thumbnail_url: product?.thumbnail_url || null,
+          store_id: product?.store_id || null,
+          user_id: product?.user_id || null,
         };
 
         if (!itemsByOrderId.has(item.order_id)) {
@@ -210,43 +351,41 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         itemsByOrderId.get(item.order_id)!.push(normalizedItem);
       }
 
-      const normalizedOrders: ProfileOrder[] = ordersData.map((order: any) => ({
-        id: order.id,
-        order_number: order.order_number || order.id,
-        total_amount: Number(order.total_amount ?? 0),
-        status: order.status || 'pending',
-        created_at: order.created_at,
-        currency: order.currency || 'SAR',
-        items: itemsByOrderId.get(order.id) || [],
-      }));
+      const normalizedOrders: ProfileOrder[] = ordersData
+        .map((order: any) => {
+          const scopedItems = itemsByOrderId.get(order.id) || [];
+          if (scopedItems.length === 0) return null;
+
+          return {
+            id: order.id,
+            order_number: order.order_number || order.id,
+            total_amount: scopedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0),
+            status: order.status || 'pending',
+            created_at: order.created_at,
+            currency: order.currency || 'SAR',
+            items: scopedItems,
+          } as ProfileOrder;
+        })
+        .filter(Boolean) as ProfileOrder[];
 
       setOrders(normalizedOrders);
-      setOrdersLoaded(true);
     } catch (error) {
       console.error('Error fetching profile orders:', error);
       setOrders([]);
       setOrdersError('حدث خطأ أثناء تحميل المشتريات');
-      setOrdersLoaded(true);
     } finally {
       setOrdersLoading(false);
     }
   };
 
   useEffect(() => {
-    if (user?.id) {
+    if (!scopeLoading && user?.id) {
       fetchProfileStats();
       fetchBankDetails();
       fetchOrders();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, profile?.role]);
-
-  useEffect(() => {
-    if (activeTab === 'orders' && user?.id && !ordersLoaded && !ordersLoading) {
-      fetchOrders();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, user?.id]);
+  }, [user?.id, profile?.role, scopeLoading, scopeInfo?.slug]);
 
   const handleUpdateProfile = async () => {
     setLoading(true);
@@ -272,6 +411,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       if (!normalizedIBAN.startsWith('SA') || normalizedIBAN.length !== 24) {
         setBankMessage('رقم الآيبان غير صحيح. يجب أن يبدأ بـ SA ويتكون من 24 حرفاً');
+        setBankLoading(false);
         return;
       }
 
@@ -291,6 +431,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       if (error) {
         console.error('Error updating bank details:', error);
         setBankMessage('فشل تحديث بيانات الحساب البنكي');
+        setBankLoading(false);
         return;
       }
 
@@ -317,7 +458,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       setMessage('تم ترقية حسابك إلى تاجر بنجاح! يمكنك الآن إنشاء متجرك الأول.');
       setTimeout(() => {
         onNavigate('seller-dashboard');
-      }, 2000);
+      }, 1200);
     } catch (error) {
       setMessage('فشل ترقية الحساب');
     } finally {
@@ -357,9 +498,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
-  const canAccessFiles = (status: string) => {
-    return ['paid', 'completed', 'delivered'].includes(status);
-  };
+  const canAccessFiles = (status: string) => ['paid', 'completed', 'delivered'].includes(status);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -423,6 +562,19 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
+  const openScopedProduct = (item: ProfileOrderItem) => {
+    if (item.product_slug) {
+      onNavigate(`product-slug-${item.product_slug}`);
+      return;
+    }
+    onNavigate(`product-${item.product_id}`);
+  };
+
+  const scopeBadgeText = useMemo(() => {
+    if (!scopeInfo) return 'عرض عام من كل المتاجر';
+    return `عرض داخل متجر: ${scopeInfo.name}`;
+  }, [scopeInfo]);
+
   if (!user || !profile) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -459,7 +611,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
           </div>
 
           <div className="pt-20 pb-6 px-8">
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 mb-1">{profile.name}</h1>
                 <p className="text-gray-600">
@@ -477,6 +629,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     {profile.role === 'admin' ? 'مدير' : isMerchant ? 'تاجر' : 'عميل'}
                   </span>
                 </p>
+                <div className="mt-3 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-sm">
+                  <StoreIcon className="w-4 h-4" />
+                  <span>{scopeBadgeText}</span>
+                </div>
               </div>
 
               {profile.role === 'customer' && (
@@ -541,7 +697,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 <span>تمت مشاهدتها</span>
               </button>
 
-              {isMerchant && (
+              {isMerchant && !scopeInfo && (
                 <>
                   <div className="border-t border-gray-200 my-2"></div>
 
@@ -603,8 +759,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
             <div className="bg-white rounded-xl shadow-sm p-8">
               {activeTab === 'overview' && (
                 <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-2xl font-bold text-gray-900">نظرة عامة</h2>
+                  <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+                    <div>
+                      <h2 className="text-2xl font-bold text-gray-900">نظرة عامة</h2>
+                      {scopeInfo && (
+                        <p className="text-sm text-gray-500 mt-1">هذه الأرقام تخص متجر {scopeInfo.name} فقط</p>
+                      )}
+                    </div>
                     <button
                       onClick={fetchProfileStats}
                       disabled={statsLoading}
@@ -631,9 +792,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <Heart className="w-6 h-6 text-purple-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900 mb-1">
-                        {stats.favorites_count}
-                      </div>
+                      <div className="text-3xl font-bold text-gray-900 mb-1">{stats.favorites_count}</div>
                       <p className="text-sm text-gray-600">المنتجات المفضلة</p>
                     </div>
 
@@ -643,14 +802,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <Eye className="w-6 h-6 text-green-600" />
                         </div>
                       </div>
-                      <div className="text-3xl font-bold text-gray-900 mb-1">
-                        {stats.viewed_products_count}
-                      </div>
+                      <div className="text-3xl font-bold text-gray-900 mb-1">{stats.viewed_products_count}</div>
                       <p className="text-sm text-gray-600">المنتجات المشاهدة</p>
                     </div>
                   </div>
 
-                  {isMerchant && (
+                  {isMerchant && !scopeInfo && (
                     <div className="mt-8">
                       <h3 className="text-xl font-bold text-gray-900 mb-4">إحصائيات التاجر</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -677,8 +834,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
               {activeTab === 'orders' && (
                 <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-2xl font-bold text-gray-900">مشترياتي</h2>
+                  <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+                    <div>
+                      <h2 className="text-2xl font-bold text-gray-900">مشترياتي</h2>
+                      {scopeInfo && (
+                        <p className="text-sm text-gray-500 mt-1">تظهر هنا فقط مشترياتك من متجر {scopeInfo.name}</p>
+                      )}
+                    </div>
                     <button
                       onClick={fetchOrders}
                       disabled={ordersLoading}
@@ -701,12 +863,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     <div className="text-center py-12">
                       <ShoppingBag className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                       <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد مشتريات</h3>
-                      <p className="text-gray-600 mb-6">ابدأ بتصفح المنتجات وشراء ما يعجبك</p>
+                      <p className="text-gray-600 mb-6">
+                        {scopeInfo ? `لا توجد مشتريات من متجر ${scopeInfo.name} بعد` : 'ابدأ بتصفح المنتجات وشراء ما يعجبك'}
+                      </p>
                       <button
-                        onClick={() => onNavigate('marketplace')}
+                        onClick={() => onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')}
                         className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
                       >
-                        تصفح المنتجات
+                        {scopeInfo ? 'العودة إلى المتجر' : 'تصفح المنتجات'}
                       </button>
                     </div>
                   ) : (
@@ -716,9 +880,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           <div className="p-6">
                             <div className="flex items-start justify-between mb-5">
                               <div>
-                                <h3 className="text-lg font-bold text-gray-900 mb-1">
-                                  الطلب #{order.order_number}
-                                </h3>
+                                <h3 className="text-lg font-bold text-gray-900 mb-1">الطلب #{order.order_number}</h3>
                                 <p className="text-xs text-gray-500">
                                   {new Date(order.created_at).toLocaleDateString('ar-SA', {
                                     year: 'numeric',
@@ -732,14 +894,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
                               <div className="text-left">
                                 <div className="text-xl font-bold text-blue-600 mb-2">
-                                  {Number(order.total_amount).toFixed(2)}{' '}
-                                  {order.currency === 'SAR' || !order.currency ? 'ريال' : order.currency}
+                                  {Number(order.total_amount).toFixed(2)} {order.currency === 'SAR' || !order.currency ? 'ريال' : order.currency}
                                 </div>
-                                <div
-                                  className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(
-                                    order.status
-                                  )}`}
-                                >
+                                <div className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(order.status)}`}>
                                   {getStatusIcon(order.status)}
                                   <span>{getStatusText(order.status)}</span>
                                 </div>
@@ -748,66 +905,48 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
                             <div className="border-t border-gray-200 pt-4">
                               <h4 className="text-sm font-bold text-gray-700 mb-3">عناصر الطلب</h4>
-
-                              {order.items && order.items.length > 0 ? (
-                                <div className="space-y-3">
-                                  {order.items.map((item) => (
-                                    <div
-                                      key={item.id}
-                                      className="p-4 rounded-xl border border-gray-200 bg-white"
-                                    >
-                                      <div className="flex items-start justify-between gap-4 mb-3">
-                                        <div className="flex items-start gap-3">
-                                          <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <div className="space-y-3">
+                                {order.items.map((item) => (
+                                  <div key={item.id} className="p-4 rounded-xl border border-gray-200 bg-white">
+                                    <div className="flex items-start justify-between gap-4 mb-3">
+                                      <div className="flex items-start gap-3">
+                                        <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+                                          {item.thumbnail_url ? (
+                                            <img src={item.thumbnail_url} alt={item.product_name} className="w-full h-full object-cover" />
+                                          ) : (
                                             <Package className="w-6 h-6 text-blue-600" />
-                                          </div>
-                                          <div>
-                                            <h5 className="font-semibold text-gray-900">
-                                              {item.product_name || 'منتج'}
-                                            </h5>
-                                            <p className="text-sm text-gray-500">
-                                              الكمية: {item.quantity} × {Number(item.product_price).toFixed(2)} ريال
-                                            </p>
-                                          </div>
+                                          )}
                                         </div>
-
-                                        <div className="text-left font-bold text-gray-900">
-                                          {Number(item.subtotal).toFixed(2)} ريال
+                                        <div>
+                                          <h5 className="font-semibold text-gray-900">{item.product_name || 'منتج'}</h5>
+                                          <p className="text-sm text-gray-500">الكمية: {item.quantity} × {Number(item.product_price).toFixed(2)} ريال</p>
                                         </div>
                                       </div>
-
-                                      <div className="flex flex-wrap gap-3">
-                                        {canAccessFiles(order.status) && (
-                                          <button
-                                            onClick={() => onNavigate(`product-${item.product_id}`)}
-                                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                                          >
-                                            <Download className="w-4 h-4" />
-                                            <span>فتح الملفات</span>
-                                          </button>
-                                        )}
-
-                                        <button
-                                          onClick={() => onNavigate(`product-${item.product_id}`)}
-                                          className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
-                                        >
-                                          <Eye className="w-4 h-4" />
-                                          <span>عرض المنتج</span>
-                                        </button>
-
-                                        {canAccessFiles(order.status) && (
-                                          <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">
-                                            <Star className="w-4 h-4" />
-                                            <span>تقييم</span>
-                                          </button>
-                                        )}
-                                      </div>
+                                      <div className="text-left font-bold text-gray-900">{Number(item.subtotal).toFixed(2)} ريال</div>
                                     </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div className="text-sm text-gray-500">لا توجد عناصر مرتبطة بهذا الطلب</div>
-                              )}
+
+                                    <div className="flex flex-wrap gap-3">
+                                      {canAccessFiles(order.status) && (
+                                        <button
+                                          onClick={() => openScopedProduct(item)}
+                                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                        >
+                                          <Download className="w-4 h-4" />
+                                          <span>فتح الملفات</span>
+                                        </button>
+                                      )}
+
+                                      <button
+                                        onClick={() => openScopedProduct(item)}
+                                        className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                                      >
+                                        <Package className="w-4 h-4" />
+                                        <span>عرض المنتج</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -817,244 +956,125 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 </div>
               )}
 
-              {activeTab === 'stores' && isMerchant && (
-                <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-2xl font-bold text-gray-900">متاجري</h2>
-                    <button
-                      onClick={() => onNavigate('seller-dashboard')}
-                      className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-                    >
-                      إنشاء متجر جديد
-                    </button>
-                  </div>
-                  <div className="text-center py-12">
-                    <StoreIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد متاجر</h3>
-                    <p className="text-gray-600">أنشئ متجرك الأول لبدء البيع</p>
-                  </div>
+              {activeTab === 'stores' && !scopeInfo && (
+                <div className="text-center py-10">
+                  <StoreIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">إدارة المتاجر</h3>
+                  <p className="text-gray-600 mb-6">تم نقل إدارة المتاجر إلى لوحة التاجر المتخصصة.</p>
+                  <button
+                    onClick={() => onNavigate('seller-dashboard')}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                  >
+                    الذهاب إلى لوحة التاجر
+                  </button>
                 </div>
               )}
 
-              {activeTab === 'products' && isMerchant && (
-                <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-2xl font-bold text-gray-900">منتجاتي</h2>
-                    <button
-                      onClick={() => onNavigate('seller-dashboard')}
-                      className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-                    >
-                      إضافة منتج جديد
-                    </button>
-                  </div>
-                  <div className="text-center py-12">
-                    <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد منتجات</h3>
-                    <p className="text-gray-600">ابدأ بإضافة منتجاتك الرقمية</p>
-                  </div>
+              {activeTab === 'products' && !scopeInfo && (
+                <div className="text-center py-10">
+                  <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">إدارة المنتجات</h3>
+                  <p className="text-gray-600 mb-6">تم نقل إدارة المنتجات إلى لوحة التاجر المتخصصة.</p>
+                  <button
+                    onClick={() => onNavigate('seller-dashboard')}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                  >
+                    الذهاب إلى لوحة التاجر
+                  </button>
                 </div>
               )}
 
-              {activeTab === 'analytics' && isMerchant && (
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">لوحة التحليلات</h2>
-                  <div className="text-center py-12">
-                    <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد بيانات للتحليل</h3>
-                    <p className="text-gray-600">ستظهر إحصائياتك هنا بعد بدء المبيعات</p>
-                  </div>
+              {activeTab === 'analytics' && !scopeInfo && (
+                <div className="text-center py-10">
+                  <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">التحليلات</h3>
+                  <p className="text-gray-600 mb-6">تم نقل التحليلات إلى لوحة التاجر المتخصصة.</p>
+                  <button
+                    onClick={() => onNavigate('seller-dashboard')}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                  >
+                    الذهاب إلى لوحة التاجر
+                  </button>
                 </div>
               )}
 
               {activeTab === 'settings' && (
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">إعدادات الحساب</h2>
-                  <div className="space-y-6">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-6">الإعدادات</h2>
+
+                  <div className="space-y-8">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
-                      <div className="relative">
-                        <User className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                          type="text"
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                          className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        />
+                      <h3 className="text-lg font-bold text-gray-900 mb-4">المعلومات الشخصية</h3>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
+                          <input
+                            type="text"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                        <button
+                          onClick={handleUpdateProfile}
+                          disabled={loading}
+                          className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          <Save className="w-5 h-5" />
+                          <span>حفظ التغييرات</span>
+                        </button>
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
-                      <div className="relative">
-                        <Mail className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                          type="email"
-                          value={user.email}
-                          disabled
-                          className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-lg bg-gray-50"
-                          dir="ltr"
-                        />
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">لا يمكن تعديل البريد الإلكتروني</p>
-                    </div>
-
-                    <button
-                      onClick={handleUpdateProfile}
-                      disabled={loading}
-                      className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      <Save className="w-5 h-5" />
-                      <span>{loading ? 'جاري الحفظ...' : 'حفظ التغييرات'}</span>
-                    </button>
-
-                    {isMerchant && (
-                      <div className="pt-8 mt-8 border-t border-gray-200">
-                        <div className="mb-6">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                              <Banknote className="w-6 h-6 text-blue-600" />
-                              <h3 className="text-xl font-bold text-gray-900">بيانات استلام الأرباح</h3>
-                            </div>
-                            {!editingBank && bankDetails && (
-                              <button
-                                onClick={() => setEditingBank(true)}
-                                className="flex items-center gap-2 px-4 py-2 text-blue-600 border border-blue-600 rounded-lg hover:bg-blue-50"
-                              >
-                                <Edit className="w-4 h-4" />
-                                <span>تعديل</span>
-                              </button>
-                            )}
-                          </div>
-
-                          {bankMessage && (
-                            <div
-                              className={`mb-4 p-3 rounded-lg ${
-                                bankMessage.includes('بنجاح')
-                                  ? 'bg-green-50 text-green-700 border border-green-200'
-                                  : 'bg-red-50 text-red-700 border border-red-200'
-                              }`}
+                    {isMerchant && !scopeInfo && (
+                      <div className="pt-8 border-t border-gray-200">
+                        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+                          <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
+                          {bankDetails && (
+                            <button
+                              onClick={() => setEditingBank((prev) => !prev)}
+                              className="text-blue-600 hover:text-blue-700 font-medium"
                             >
-                              <div className="flex items-center gap-2">
-                                {bankMessage.includes('بنجاح') ? (
-                                  <CheckCircle className="w-4 h-4" />
-                                ) : (
-                                  <AlertCircle className="w-4 h-4" />
-                                )}
-                                <span className="text-sm">{bankMessage}</span>
-                              </div>
-                            </div>
+                              {editingBank ? 'إلغاء' : 'تعديل'}
+                            </button>
                           )}
+                        </div>
 
-                          {!bankDetails && !editingBank ? (
-                            <div className="p-6 bg-blue-50 border border-blue-200 rounded-lg text-center">
-                              <Banknote className="w-12 h-12 text-blue-600 mx-auto mb-3" />
-                              <p className="text-gray-700 mb-4">لم يتم إضافة بيانات حساب بنكي بعد</p>
-                              <button
-                                onClick={() => setEditingBank(true)}
-                                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-                              >
-                                إضافة بيانات الحساب البنكي
-                              </button>
-                            </div>
-                          ) : !editingBank ? (
-                            <div className="space-y-4">
-                              <div className="p-4 bg-gray-50 rounded-lg">
-                                <label className="text-sm font-medium text-gray-600 block mb-1">اسم صاحب الحساب</label>
-                                <p className="text-gray-900 font-medium">{bankDetails?.account_holder_name}</p>
-                              </div>
+                        {bankMessage && (
+                          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
+                            {bankMessage}
+                          </div>
+                        )}
 
-                              <div className="p-4 bg-gray-50 rounded-lg">
-                                <label className="text-sm font-medium text-gray-600 block mb-1">رقم الآيبان</label>
-                                <p className="text-gray-900 font-mono" dir="ltr">
-                                  {bankDetails?.iban?.substring(0, 4)} **** **** **** **** {bankDetails?.iban?.substring(20)}
-                                </p>
-                              </div>
-
-                              {bankDetails?.bank_name && (
-                                <div className="p-4 bg-gray-50 rounded-lg">
-                                  <label className="text-sm font-medium text-gray-600 block mb-1">اسم البنك</label>
-                                  <p className="text-gray-900">{bankDetails.bank_name}</p>
-                                </div>
-                              )}
-
-                              <div className="p-4 bg-gray-50 rounded-lg">
-                                <label className="text-sm font-medium text-gray-600 block mb-1">الدولة</label>
-                                <p className="text-gray-900">المملكة العربية السعودية</p>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  اسم صاحب الحساب <span className="text-red-500">*</span>
-                                </label>
-                                <input
-                                  type="text"
-                                  value={bankAccountHolderName}
-                                  onChange={(e) => setBankAccountHolderName(e.target.value)}
-                                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                  placeholder="الاسم كما هو مسجل في البنك"
-                                  disabled={bankLoading}
-                                />
-                              </div>
-
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  رقم الآيبان (IBAN) <span className="text-red-500">*</span>
-                                </label>
-                                <input
-                                  type="text"
-                                  value={bankIban}
-                                  onChange={(e) => setBankIban(e.target.value)}
-                                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
-                                  placeholder="SA00 0000 0000 0000 0000 0000"
-                                  disabled={bankLoading}
-                                  dir="ltr"
-                                />
-                                <p className="mt-1 text-xs text-gray-500">
-                                  رقم الآيبان السعودي (24 حرفاً: SA + 22 رقماً)
-                                </p>
-                              </div>
-
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">اسم البنك</label>
-                                <input
-                                  type="text"
-                                  value={bankName}
-                                  onChange={(e) => setBankName(e.target.value)}
-                                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                  placeholder="البنك الأهلي السعودي"
-                                  disabled={bankLoading}
-                                />
-                              </div>
-
-                              <div className="flex gap-3">
-                                <button
-                                  onClick={handleUpdateBankDetails}
-                                  disabled={bankLoading}
-                                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
-                                >
-                                  <Save className="w-5 h-5" />
-                                  <span>{bankLoading ? 'جاري الحفظ...' : 'حفظ البيانات'}</span>
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setEditingBank(false);
-                                    setBankMessage('');
-                                    if (bankDetails) {
-                                      setBankAccountHolderName(bankDetails.account_holder_name || '');
-                                      setBankIban(bankDetails.iban || '');
-                                      setBankName(bankDetails.bank_name || '');
-                                    }
-                                  }}
-                                  disabled={bankLoading}
-                                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50"
-                                >
-                                  إلغاء
-                                </button>
-                              </div>
-                            </div>
-                          )}
+                        <div className="space-y-4">
+                          <input
+                            type="text"
+                            value={bankAccountHolderName}
+                            onChange={(e) => setBankAccountHolderName(e.target.value)}
+                            placeholder="اسم صاحب الحساب"
+                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                          <input
+                            type="text"
+                            value={bankName}
+                            onChange={(e) => setBankName(e.target.value)}
+                            placeholder="اسم البنك"
+                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                          <input
+                            type="text"
+                            value={bankIban}
+                            onChange={(e) => setBankIban(e.target.value)}
+                            placeholder="SA..."
+                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                          <button
+                            onClick={handleUpdateBankDetails}
+                            disabled={bankLoading}
+                            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {bankLoading ? 'جاري الحفظ...' : 'حفظ بيانات الحساب البنكي'}
+                          </button>
                         </div>
                       </div>
                     )}
