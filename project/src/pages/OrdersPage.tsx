@@ -7,6 +7,7 @@ import {
   AlertCircle,
   Download,
   Store as StoreIcon,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -120,6 +121,35 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   }
 
   return null;
+};
+
+const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: string) => void }> = ({
+  scopeInfo,
+  onNavigate,
+}) => {
+  return (
+    <button
+      onClick={() => onNavigate(`storefront-${scopeInfo.slug}`)}
+      className="w-full mb-6 text-right bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl p-5 hover:shadow-lg transition-all"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center">
+            <StoreIcon className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-white/80">أنت داخل متجر</p>
+            <h2 className="text-2xl font-bold">{scopeInfo.name}</h2>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm font-medium bg-white/15 px-4 py-2 rounded-lg">
+          <ArrowLeft className="w-4 h-4" />
+          <span>العودة إلى المتجر</span>
+        </div>
+      </div>
+    </button>
+  );
 };
 
 export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
@@ -355,8 +385,10 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {scopeInfo && <StoreScopedBanner scopeInfo={scopeInfo} onNavigate={onNavigate} />}
+
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
             <h1 className="text-3xl font-bold text-gray-900">مشترياتي</h1>
             {scopeInfo && (
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-sm">
@@ -372,19 +404,48 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
 
         <div className="bg-white rounded-xl shadow-sm mb-6">
           <div className="flex items-center gap-2 p-2 overflow-x-auto">
-            <button onClick={() => setFilter('all')} className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${filter === 'all' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button
+              onClick={() => setFilter('all')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                filter === 'all' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
               الكل ({orders.length})
             </button>
-            <button onClick={() => setFilter('paid')} className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${filter === 'paid' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+
+            <button
+              onClick={() => setFilter('paid')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                filter === 'paid' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
               تم الدفع ({orders.filter((o) => normalizeStatusForFilter(o.status) === 'paid').length})
             </button>
-            <button onClick={() => setFilter('completed')} className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${filter === 'completed' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+
+            <button
+              onClick={() => setFilter('completed')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                filter === 'completed' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
               مكتملة ({orders.filter((o) => normalizeStatusForFilter(o.status) === 'completed').length})
             </button>
-            <button onClick={() => setFilter('pending')} className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${filter === 'pending' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+
+            <button
+              onClick={() => setFilter('pending')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                filter === 'pending' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
               جاري المعالجة ({orders.filter((o) => normalizeStatusForFilter(o.status) === 'pending').length})
             </button>
-            <button onClick={() => setFilter('failed')} className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${filter === 'failed' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+
+            <button
+              onClick={() => setFilter('failed')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                filter === 'failed' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
               فشلت ({orders.filter((o) => normalizeStatusForFilter(o.status) === 'failed').length})
             </button>
           </div>
@@ -395,7 +456,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
             <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد طلبات</h3>
             <p className="text-gray-600 mb-6">
-              {scopeInfo ? `لم تقم بشراء أي منتجات من متجر ${scopeInfo.name} بعد` : 'لم تقم بشراء أي منتجات بعد'}
+              {scopeInfo ? `لا توجد طلبات من متجر ${scopeInfo.name}` : 'لم تقم بشراء أي منتجات بعد'}
             </p>
             <button
               onClick={() => onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')}
@@ -411,7 +472,9 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
                 <div className="p-6">
                   <div className="flex items-start justify-between mb-5">
                     <div>
-                      <h3 className="text-lg font-bold text-gray-900 mb-1">الطلب #{order.order_number}</h3>
+                      <h3 className="text-lg font-bold text-gray-900 mb-1">
+                        الطلب #{order.order_number}
+                      </h3>
                       <p className="text-xs text-gray-500">
                         {new Date(order.created_at).toLocaleDateString('ar-SA', {
                           year: 'numeric',
@@ -425,66 +488,79 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
 
                     <div className="text-left">
                       <div className="text-xl font-bold text-blue-600 mb-2">
-                        {Number(order.total_amount).toFixed(2)} {order.currency === 'SAR' || !order.currency ? 'ريال' : order.currency}
+                        {Number(order.total_amount).toFixed(2)}{' '}
+                        {order.currency === 'SAR' || !order.currency ? 'ريال' : order.currency}
                       </div>
-                      <div className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(order.status)}`}>
+                      <div
+                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(
+                          order.status
+                        )}`}
+                      >
                         {getStatusIcon(order.status)}
                         <span>{getStatusText(order.status)}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="border-t border-gray-100 pt-4">
+                  <div className="border-t border-gray-200 pt-4">
                     <h4 className="text-sm font-bold text-gray-700 mb-3">عناصر الطلب</h4>
 
                     {order.items && order.items.length > 0 ? (
                       <div className="space-y-3">
                         {order.items.map((item) => (
-                          <div key={item.id} className="p-4 rounded-xl border border-gray-100 bg-gray-50">
+                          <div
+                            key={item.id}
+                            className="p-4 rounded-xl border border-gray-200 bg-white"
+                          >
                             <div className="flex items-start justify-between gap-4 mb-3">
                               <div className="flex items-start gap-3">
                                 <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
                                   {item.thumbnail_url ? (
-                                    <img src={item.thumbnail_url} alt={item.product_name} className="w-full h-full object-cover" />
+                                    <img
+                                      src={item.thumbnail_url}
+                                      alt={item.product_name}
+                                      className="w-full h-full object-cover"
+                                    />
                                   ) : (
                                     <Package className="w-6 h-6 text-blue-600" />
                                   )}
                                 </div>
                                 <div>
-                                  <h5 className="font-semibold text-gray-900">{item.product_name || 'منتج'}</h5>
-                                  <p className="text-sm text-gray-500">
-                                    الكمية: {item.quantity} × {Number(item.product_price).toFixed(2)} ريال
-                                  </p>
+                                  <h5 className="font-semibold text-gray-900">{item.product_name}</h5>
+                                  <p className="text-sm text-gray-500">الكمية: {item.quantity}</p>
                                 </div>
                               </div>
 
-                              <div className="text-left font-bold text-gray-900">{Number(item.subtotal).toFixed(2)} ريال</div>
+                              <div className="text-left">
+                                <p className="font-bold text-blue-600">
+                                  {Number(item.subtotal).toFixed(2)} ريال
+                                </p>
+                              </div>
                             </div>
 
-                            <div className="flex flex-wrap gap-3">
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                onClick={() => handleOpenProductFiles(item)}
+                                className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50"
+                              >
+                                عرض المنتج
+                              </button>
+
                               {canAccessFiles(order.status) && (
                                 <button
                                   onClick={() => handleOpenProductFiles(item)}
-                                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2"
                                 >
                                   <Download className="w-4 h-4" />
-                                  <span>فتح الملفات</span>
+                                  <span>الوصول للملفات</span>
                                 </button>
                               )}
-
-                              <button
-                                onClick={() => handleOpenProductFiles(item)}
-                                className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                              >
-                                <Package className="w-4 h-4" />
-                                <span>عرض المنتج</span>
-                              </button>
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-gray-500">لا توجد عناصر مرتبطة بهذا الطلب</p>
+                      <p className="text-sm text-gray-500">لا توجد عناصر لهذا الطلب</p>
                     )}
                   </div>
                 </div>
