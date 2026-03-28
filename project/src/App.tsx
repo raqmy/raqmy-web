@@ -51,7 +51,25 @@ const parsePathToPage = (pathname: string) => {
   if (segments.length === 0) return 'home';
 
   if (segments[0] === 's' && segments[1]) {
-    return `storefront-${decodeURIComponent(segments[1])}`;
+    const storeSlug = decodeURIComponent(segments[1]);
+
+    if (segments[2] === 'profile') {
+      return `store-profile-${storeSlug}`;
+    }
+
+    if (segments[2] === 'orders') {
+      return `store-orders-${storeSlug}`;
+    }
+
+    if (segments[2] === 'favorites') {
+      return `store-favorites-${storeSlug}`;
+    }
+
+    if (segments[2] === 'viewed-products') {
+      return `store-viewed-products-${storeSlug}`;
+    }
+
+    return `storefront-${storeSlug}`;
   }
 
   if (segments[0] === 'p' && segments[1]) {
@@ -121,16 +139,44 @@ const getStoredStoreContext = () => {
   }
 };
 
-const getActiveStoreSlugFromContext = (page: string): string | null => {
-  if (page.startsWith('storefront-')) {
-    return page.replace('storefront-', '') || null;
+const getStoreSlugFromScopedPage = (page: string): string | null => {
+  const prefixes = [
+    'storefront-',
+    'store-profile-',
+    'store-orders-',
+    'store-favorites-',
+    'store-viewed-products-',
+  ];
+
+  for (const prefix of prefixes) {
+    if (page.startsWith(prefix)) {
+      return page.replace(prefix, '') || null;
+    }
   }
+
+  return null;
+};
+
+const getActiveStoreSlugFromContext = (page: string): string | null => {
+  const directStoreSlug = getStoreSlugFromScopedPage(page);
+  if (directStoreSlug) return directStoreSlug;
 
   const queryStoreSlug = new URLSearchParams(window.location.search).get('store');
   if (queryStoreSlug) return queryStoreSlug;
 
   const { slug, source } = getStoredStoreContext();
-  if ((page === 'auth' || page.startsWith('product-slug-') || page.startsWith('product-')) && source === 'storefront' && slug) {
+
+  if (
+    (page === 'auth' ||
+      page.startsWith('product-slug-') ||
+      page.startsWith('product-') ||
+      page === 'profile' ||
+      page === 'orders' ||
+      page === 'favorites' ||
+      page === 'viewed-products') &&
+    source === 'storefront' &&
+    slug
+  ) {
     return slug;
   }
 
@@ -138,16 +184,46 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
 };
 
 const isStorefrontPage = (page: string) => page.startsWith('storefront-');
+
 const isStoreProductPage = (page: string) =>
-  (page.startsWith('product-slug-') || page.startsWith('product-')) && !!getActiveStoreSlugFromContext(page);
+  (page.startsWith('product-slug-') || page.startsWith('product-')) &&
+  !!getActiveStoreSlugFromContext(page);
+
 const isStoreAuthPage = (page: string) => page === 'auth' && !!getActiveStoreSlugFromContext(page);
-const isStoreContextPage = (page: string) => isStorefrontPage(page) || isStoreProductPage(page) || isStoreAuthPage(page);
+
+const isStoreCustomerScopedPage = (page: string) =>
+  page.startsWith('store-profile-') ||
+  page.startsWith('store-orders-') ||
+  page.startsWith('store-favorites-') ||
+  page.startsWith('store-viewed-products-');
+
+const isStoreContextPage = (page: string) =>
+  isStorefrontPage(page) ||
+  isStoreProductPage(page) ||
+  isStoreAuthPage(page) ||
+  isStoreCustomerScopedPage(page);
 
 const getPublicPathFromPage = (page: string) => {
   const activeStoreSlug = getActiveStoreSlugFromContext(page);
 
   if (page.startsWith('storefront-')) {
     return `/s/${encodeURIComponent(page.replace('storefront-', ''))}`;
+  }
+
+  if (page.startsWith('store-profile-')) {
+    return `/s/${encodeURIComponent(page.replace('store-profile-', ''))}/profile`;
+  }
+
+  if (page.startsWith('store-orders-')) {
+    return `/s/${encodeURIComponent(page.replace('store-orders-', ''))}/orders`;
+  }
+
+  if (page.startsWith('store-favorites-')) {
+    return `/s/${encodeURIComponent(page.replace('store-favorites-', ''))}/favorites`;
+  }
+
+  if (page.startsWith('store-viewed-products-')) {
+    return `/s/${encodeURIComponent(page.replace('store-viewed-products-', ''))}/viewed-products`;
   }
 
   if (page.startsWith('product-slug-')) {
@@ -198,6 +274,42 @@ function AppContent() {
   const isStoreMode = isStoreContextPage(currentPage);
   const shouldHidePlatformChrome = isStoreMode;
 
+  const navigateWithContext = (page: string) => {
+    const activeStoreSlug = getActiveStoreSlugFromContext(currentPage);
+
+    if (!activeStoreSlug) {
+      setCurrentPage(page);
+      return;
+    }
+
+    if (page === 'profile') {
+      setCurrentPage(`store-profile-${activeStoreSlug}`);
+      return;
+    }
+
+    if (page === 'orders') {
+      setCurrentPage(`store-orders-${activeStoreSlug}`);
+      return;
+    }
+
+    if (page === 'favorites') {
+      setCurrentPage(`store-favorites-${activeStoreSlug}`);
+      return;
+    }
+
+    if (page === 'viewed-products') {
+      setCurrentPage(`store-viewed-products-${activeStoreSlug}`);
+      return;
+    }
+
+    if (page === 'marketplace' || page === 'home') {
+      setCurrentPage(`storefront-${activeStoreSlug}`);
+      return;
+    }
+
+    setCurrentPage(page);
+  };
+
   useEffect(() => {
     const handlePopState = () => {
       setCurrentPage(parsePathToPage(window.location.pathname));
@@ -211,9 +323,16 @@ function AppContent() {
     try {
       if (storeSlug && isStoreMode) {
         sessionStorage.setItem('active_store_slug', storeSlug);
-        if (isStorefrontPage(currentPage) || isStoreProductPage(currentPage) || isStoreAuthPage(currentPage)) {
+
+        if (
+          isStorefrontPage(currentPage) ||
+          isStoreProductPage(currentPage) ||
+          isStoreAuthPage(currentPage) ||
+          isStoreCustomerScopedPage(currentPage)
+        ) {
           sessionStorage.setItem('store_mode_source', 'storefront');
         }
+
         return;
       }
 
@@ -236,10 +355,8 @@ function AppContent() {
       hasInitializedRouteSync.current = true;
 
       if (targetPath) {
-        const normalizedTargetPath = targetPath;
-
-        if (currentPath !== normalizedTargetPath) {
-          window.history.replaceState({}, document.title, normalizedTargetPath);
+        if (currentPath !== targetPath) {
+          window.history.replaceState({}, document.title, targetPath);
         }
       }
       return;
@@ -249,10 +366,8 @@ function AppContent() {
       return;
     }
 
-    const normalizedTargetPath = targetPath;
-
-    if (currentPath !== normalizedTargetPath) {
-      window.history.pushState({}, document.title, normalizedTargetPath);
+    if (currentPath !== targetPath) {
+      window.history.pushState({}, document.title, targetPath);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [currentPage, isHandlingPaymentReturn]);
@@ -338,7 +453,7 @@ function AppContent() {
         if (finalOrderId) {
           setCurrentPage(`payment-success-${finalOrderId}`);
         } else {
-          setCurrentPage('orders');
+          setCurrentPage(storeSlug ? `store-orders-${storeSlug}` : 'orders');
         }
       };
 
@@ -499,7 +614,7 @@ function AppContent() {
     };
 
     handlePaymobReturn();
-  }, [loading]);
+  }, [loading, storeSlug]);
 
   useEffect(() => {
     if (isHandlingPaymentReturn) return;
@@ -526,7 +641,7 @@ function AppContent() {
         } else if (profile.role === 'seller') {
           setCurrentPage('seller-dashboard');
         } else if (storeSlug) {
-          setCurrentPage(`storefront-${storeSlug}`);
+          setCurrentPage(`store-profile-${storeSlug}`);
         } else {
           setCurrentPage('home');
         }
@@ -550,125 +665,147 @@ function AppContent() {
   const renderPage = () => {
     if (currentPage.startsWith('product-slug-')) {
       const productSlug = currentPage.replace('product-slug-', '');
-      return <ProductDetailPage productSlug={productSlug} onNavigate={setCurrentPage} />;
+      return <ProductDetailPage productSlug={productSlug} onNavigate={navigateWithContext} />;
     }
 
     if (currentPage.startsWith('product-')) {
       const productId = currentPage.replace('product-', '');
-      return <ProductDetailPage productId={productId} onNavigate={setCurrentPage} />;
+      return <ProductDetailPage productId={productId} onNavigate={navigateWithContext} />;
     }
 
     if (currentPage.startsWith('store-detail-')) {
       const storeId = currentPage.replace('store-detail-', '');
-      return <StoreDetailPage storeId={storeId} onNavigate={setCurrentPage} />;
+      return <StoreDetailPage storeId={storeId} onNavigate={navigateWithContext} />;
     }
 
     if (currentPage.startsWith('storefront-')) {
       const storeSlugValue = currentPage.replace('storefront-', '');
-      return <StorefrontPage storeSlug={storeSlugValue} onNavigate={setCurrentPage} />;
+      return <StorefrontPage storeSlug={storeSlugValue} onNavigate={navigateWithContext} />;
+    }
+
+    if (currentPage.startsWith('store-profile-')) {
+      return <ProfilePage onNavigate={navigateWithContext} />;
+    }
+
+    if (currentPage.startsWith('store-orders-')) {
+      return <OrdersPage onNavigate={navigateWithContext} />;
+    }
+
+    if (currentPage.startsWith('store-favorites-')) {
+      return <FavoritesPage onNavigate={navigateWithContext} />;
+    }
+
+    if (currentPage.startsWith('store-viewed-products-')) {
+      return <ViewedProductsPage onNavigate={navigateWithContext} />;
     }
 
     if (currentPage.startsWith('marketer-analytics-')) {
       const marketerId = currentPage.replace('marketer-analytics-', '');
-      return <MarketerAnalyticsPage marketerId={marketerId} onNavigate={setCurrentPage} />;
+      return <MarketerAnalyticsPage marketerId={marketerId} onNavigate={navigateWithContext} />;
     }
 
     if (currentPage.startsWith('payment-success-')) {
       const orderId = currentPage.replace('payment-success-', '');
-      return <PaymentSuccessPage orderId={orderId} onNavigate={setCurrentPage} />;
+      return <PaymentSuccessPage orderId={orderId} onNavigate={navigateWithContext} />;
     }
 
     if (currentPage.startsWith('payment-failed-')) {
       const orderId = currentPage.replace('payment-failed-', '');
-      return <PaymentFailedPage orderId={orderId} onNavigate={setCurrentPage} />;
+      return <PaymentFailedPage orderId={orderId} onNavigate={navigateWithContext} />;
     }
 
     if (currentPage.startsWith('payment-')) {
       const orderId = currentPage.replace('payment-', '');
-      return <PaymentPage orderId={orderId} onNavigate={setCurrentPage} />;
+      return <PaymentPage orderId={orderId} onNavigate={navigateWithContext} />;
     }
 
     switch (currentPage) {
       case 'home':
-        return <HomePage onNavigate={setCurrentPage} />;
+        return <HomePage onNavigate={navigateWithContext} />;
       case 'auth':
-        return <AuthPage storeMode={!!storeSlug} storeSlug={storeSlug || undefined} onNavigate={setCurrentPage} />;
+        return (
+          <AuthPage
+            storeMode={!!storeSlug}
+            storeSlug={storeSlug || undefined}
+            onNavigate={navigateWithContext}
+          />
+        );
       case 'verify-phone':
         return <VerifyPhonePage />;
       case 'merchant-bank-details':
-        return <MerchantBankDetailsPage onNavigate={setCurrentPage} />;
+        return <MerchantBankDetailsPage onNavigate={navigateWithContext} />;
       case 'pricing':
-        return <PricingPage onNavigate={setCurrentPage} />;
+        return <PricingPage onNavigate={navigateWithContext} />;
       case 'marketplace':
-        return <MarketplacePage onNavigate={setCurrentPage} />;
+        return <MarketplacePage onNavigate={navigateWithContext} />;
       case 'seller-dashboard':
         return profile?.role === 'seller' || profile?.role === 'admin' ? (
-          <SellerDashboard onNavigate={setCurrentPage} />
+          <SellerDashboard onNavigate={navigateWithContext} />
         ) : (
-          <HomePage onNavigate={setCurrentPage} />
+          <HomePage onNavigate={navigateWithContext} />
         );
       case 'user-dashboard':
-        return <ProfilePage onNavigate={setCurrentPage} />;
+        return <ProfilePage onNavigate={navigateWithContext} />;
       case 'admin':
         return profile?.role === 'admin' ? (
-          <AdminDashboard onNavigate={setCurrentPage} />
+          <AdminDashboard onNavigate={navigateWithContext} />
         ) : (
-          <HomePage onNavigate={setCurrentPage} />
+          <HomePage onNavigate={navigateWithContext} />
         );
       case 'affiliate-dashboard':
         return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
-          <AffiliateDashboard onNavigate={setCurrentPage} />
+          <AffiliateDashboard onNavigate={navigateWithContext} />
         ) : (
-          <HomePage onNavigate={setCurrentPage} />
+          <HomePage onNavigate={navigateWithContext} />
         );
       case 'coupons-management':
         return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
-          <CouponsManagementPage onNavigate={setCurrentPage} />
+          <CouponsManagementPage onNavigate={navigateWithContext} />
         ) : (
-          <HomePage onNavigate={setCurrentPage} />
+          <HomePage onNavigate={navigateWithContext} />
         );
       case 'affiliate-management':
         return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
-          <AffiliateManagementPage onNavigate={setCurrentPage} />
+          <AffiliateManagementPage onNavigate={navigateWithContext} />
         ) : (
-          <HomePage onNavigate={setCurrentPage} />
+          <HomePage onNavigate={navigateWithContext} />
         );
       case 'cart':
-        return <CartPage onNavigate={setCurrentPage} />;
+        return <CartPage onNavigate={navigateWithContext} />;
       case 'checkout':
-        return <CheckoutPage onNavigate={setCurrentPage} />;
+        return <CheckoutPage onNavigate={navigateWithContext} />;
       case 'payment-failed':
-        return <PaymentFailedPage onNavigate={setCurrentPage} />;
+        return <PaymentFailedPage onNavigate={navigateWithContext} />;
       case 'orders':
-        return <OrdersPage onNavigate={setCurrentPage} />;
+        return <OrdersPage onNavigate={navigateWithContext} />;
       case 'orders-management':
-        return <OrdersManagementPage onNavigate={setCurrentPage} />;
+        return <OrdersManagementPage onNavigate={navigateWithContext} />;
       case 'payment-settings':
-        return <PaymentSettingsPage onNavigate={setCurrentPage} />;
+        return <PaymentSettingsPage onNavigate={navigateWithContext} />;
       case 'bank-account':
-        return <BankAccountPage onNavigate={setCurrentPage} />;
+        return <BankAccountPage onNavigate={navigateWithContext} />;
       case 'withdrawal-requests':
-        return <WithdrawalRequestsPage onNavigate={setCurrentPage} />;
+        return <WithdrawalRequestsPage onNavigate={navigateWithContext} />;
       case 'admin-withdrawals':
-        return <AdminWithdrawalsPage onNavigate={setCurrentPage} />;
+        return <AdminWithdrawalsPage onNavigate={navigateWithContext} />;
       case 'transactions':
-        return <TransactionsPage onNavigate={setCurrentPage} />;
+        return <TransactionsPage onNavigate={navigateWithContext} />;
       case 'admin-management':
-        return <AdminManagementPage onNavigate={setCurrentPage} />;
+        return <AdminManagementPage onNavigate={navigateWithContext} />;
       case 'admin-verification-apis':
-        return <AdminVerificationApisPage onNavigate={setCurrentPage} />;
+        return <AdminVerificationApisPage onNavigate={navigateWithContext} />;
       case 'merchant-withdraw':
-        return <MerchantWithdrawPage onNavigate={setCurrentPage} />;
+        return <MerchantWithdrawPage onNavigate={navigateWithContext} />;
       case 'admin-announcements':
-        return <AdminAnnouncementsPage onNavigate={setCurrentPage} />;
+        return <AdminAnnouncementsPage onNavigate={navigateWithContext} />;
       case 'favorites':
-        return <FavoritesPage onNavigate={setCurrentPage} />;
+        return <FavoritesPage onNavigate={navigateWithContext} />;
       case 'viewed-products':
-        return <ViewedProductsPage onNavigate={setCurrentPage} />;
+        return <ViewedProductsPage onNavigate={navigateWithContext} />;
       case 'support':
         return <SupportPage />;
       case 'profile':
-        return <ProfilePage onNavigate={setCurrentPage} />;
+        return <ProfilePage onNavigate={navigateWithContext} />;
       case 'privacy-policy':
         return <PrivacyPolicyPage />;
       case 'refund-policy':
@@ -682,16 +819,18 @@ function AppContent() {
       case 'terms':
         return <MerchantAgreementPage />;
       default:
-        return <HomePage onNavigate={setCurrentPage} />;
+        return <HomePage onNavigate={navigateWithContext} />;
     }
   };
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col" dir="rtl">
       {!shouldHidePlatformChrome && <AnnouncementBanner />}
-      {!shouldHidePlatformChrome && <Navbar onNavigate={setCurrentPage} currentPage={currentPage} />}
+      {!shouldHidePlatformChrome && (
+        <Navbar onNavigate={navigateWithContext} currentPage={currentPage} />
+      )}
       <main className="flex-1">{renderPage()}</main>
-      {!shouldHidePlatformChrome && <Footer onNavigate={setCurrentPage} />}
+      {!shouldHidePlatformChrome && <Footer onNavigate={navigateWithContext} />}
     </div>
   );
 }
