@@ -159,6 +159,18 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     }
   }, [product?.store?.slug, isStoreContext]);
 
+  const persistStoreContext = () => {
+    const targetStoreSlug = product?.store?.slug || storeContextSlug;
+    if (!targetStoreSlug) return;
+
+    try {
+      sessionStorage.setItem('active_store_slug', targetStoreSlug);
+      sessionStorage.setItem('store_mode_source', 'storefront');
+    } catch (error) {
+      console.error('Error persisting store context:', error);
+    }
+  };
+
   const updateMetaTag = (attribute: 'name' | 'property', key: string, content: string) => {
     let element = document.head.querySelector(`meta[${attribute}="${key}"]`) as HTMLMetaElement | null;
 
@@ -355,6 +367,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   const handleBuyNow = async () => {
     if (!user) {
+      persistStoreContext();
       onNavigate('auth');
       return;
     }
@@ -372,6 +385,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setPurchasing(true);
 
     try {
+      persistStoreContext();
+
       const { data: existingItem } = await supabase
         .from('cart_items')
         .select('id')
@@ -445,6 +460,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   const handleToggleFavorite = async () => {
     if (!user) {
+      persistStoreContext();
       onNavigate('auth');
       return;
     }
@@ -475,6 +491,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   const handleAddToCart = async () => {
     if (!user) {
+      persistStoreContext();
       onNavigate('auth');
       return;
     }
@@ -490,6 +507,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     }
 
     try {
+      persistStoreContext();
+
       const { data: existingItem } = await supabase
         .from('cart_items')
         .select('id, quantity')
