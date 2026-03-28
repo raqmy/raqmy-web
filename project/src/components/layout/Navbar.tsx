@@ -7,16 +7,77 @@ interface NavbarProps {
   currentPage: string;
 }
 
+const getScopedStoreSlug = (page: string): string | null => {
+  const prefixes = [
+    'storefront-',
+    'store-profile-',
+    'store-orders-',
+    'store-favorites-',
+    'store-viewed-products-',
+  ];
+
+  for (const prefix of prefixes) {
+    if (page.startsWith(prefix)) {
+      return page.replace(prefix, '') || null;
+    }
+  }
+
+  return null;
+};
+
 export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
   const { user, profile, signOut } = useAuth();
 
+  const scopedStoreSlug = getScopedStoreSlug(currentPage);
+
+  const clearStoreContext = () => {
+    try {
+      sessionStorage.removeItem('active_store_slug');
+      sessionStorage.removeItem('store_mode_source');
+    } catch (error) {
+      console.error('Error clearing store context:', error);
+    }
+  };
+
   const handleSignOut = async () => {
     try {
+      clearStoreContext();
       await signOut();
       onNavigate('home');
     } catch (error) {
       console.error('Error signing out:', error);
     }
+  };
+
+  const handleHomeNavigate = () => {
+    if (scopedStoreSlug) {
+      onNavigate(`storefront-${scopedStoreSlug}`);
+      return;
+    }
+
+    onNavigate('home');
+  };
+
+  const handleProfileNavigate = () => {
+    if (scopedStoreSlug) {
+      onNavigate(`store-profile-${scopedStoreSlug}`);
+      return;
+    }
+
+    onNavigate('profile');
+  };
+
+  const handleAuthNavigate = () => {
+    if (scopedStoreSlug) {
+      try {
+        sessionStorage.setItem('active_store_slug', scopedStoreSlug);
+        sessionStorage.setItem('store_mode_source', 'storefront');
+      } catch (error) {
+        console.error('Error saving store context before auth:', error);
+      }
+    }
+
+    onNavigate('auth');
   };
 
   return (
@@ -25,7 +86,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center gap-8">
             <button
-              onClick={() => onNavigate('home')}
+              onClick={handleHomeNavigate}
               className="flex items-center gap-2 text-2xl font-bold"
             >
               <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
@@ -38,7 +99,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
 
             <div className="hidden md:flex items-center gap-6">
               <button
-                onClick={() => onNavigate('home')}
+                onClick={handleHomeNavigate}
                 className={`text-sm font-medium transition-colors ${
                   currentPage === 'home'
                     ? 'text-blue-600'
@@ -47,6 +108,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
               >
                 الرئيسية
               </button>
+
               <button
                 onClick={() => onNavigate('marketplace')}
                 className={`text-sm font-medium transition-colors ${
@@ -57,6 +119,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
               >
                 المتجر العام
               </button>
+
               <button
                 onClick={() => onNavigate('pricing')}
                 className={`text-sm font-medium transition-colors ${
@@ -80,14 +143,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
                   <ShoppingCart className="w-4 h-4" />
                   <span>السلة</span>
                 </button>
+
                 {(profile.role === 'admin' || profile.role === 'seller') && (
                   <button
                     onClick={() =>
-                      onNavigate(
-                        profile.role === 'admin'
-                          ? 'admin'
-                          : 'seller-dashboard'
-                      )
+                      onNavigate(profile.role === 'admin' ? 'admin' : 'seller-dashboard')
                     }
                     className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
                   >
@@ -97,7 +157,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
                 )}
 
                 <button
-                  onClick={() => onNavigate('profile')}
+                  onClick={handleProfileNavigate}
                   className="flex items-center gap-3 px-4 py-2 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
@@ -126,13 +186,14 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
             ) : (
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => onNavigate('auth')}
+                  onClick={handleAuthNavigate}
                   className="px-6 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                 >
                   تسجيل الدخول
                 </button>
+
                 <button
-                  onClick={() => onNavigate('auth')}
+                  onClick={handleAuthNavigate}
                   className="px-6 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                 >
                   ابدأ الآن
