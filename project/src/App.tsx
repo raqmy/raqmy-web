@@ -301,6 +301,24 @@ const getPublicPathFromPage = (page: string) => {
   return publicRoutes[page] || null;
 };
 
+const hasPotentialPaymobParams = () => {
+  const searchParams = new URLSearchParams(window.location.search);
+
+  return (
+    searchParams.has('id') ||
+    searchParams.has('success') ||
+    searchParams.has('pending') ||
+    searchParams.has('txn_response_code') ||
+    searchParams.has('amount_cents') ||
+    searchParams.has('is_voided') ||
+    searchParams.has('is_refunded') ||
+    searchParams.has('is_capture') ||
+    searchParams.has('order') ||
+    searchParams.has('order_id') ||
+    searchParams.has('merchant_order_id')
+  );
+};
+
 function AppContent() {
   const { user, profile, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState(() => parsePathToPage(window.location.pathname));
@@ -385,65 +403,6 @@ function AppContent() {
   }, [storeSlug, isStoreMode, currentPage]);
 
   useEffect(() => {
-    if (isHandlingPaymentReturn) return;
-
-    const targetPath = getPublicPathFromPage(currentPage);
-    const currentPath = `${window.location.pathname.replace(/\/+$/, '') || '/'}${window.location.search || ''}`;
-
-    if (!hasInitializedRouteSync.current) {
-      hasInitializedRouteSync.current = true;
-
-      if (targetPath) {
-        if (currentPath !== targetPath) {
-          window.history.replaceState({}, document.title, targetPath);
-        }
-      }
-      return;
-    }
-
-    if (!targetPath) {
-      return;
-    }
-
-    if (currentPath !== targetPath) {
-      window.history.pushState({}, document.title, targetPath);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  }, [currentPage, isHandlingPaymentReturn]);
-
-  useEffect(() => {
-    const checkBankDetails = async () => {
-      if (!user || !profile || profile.role !== 'seller') {
-        setHasBankDetails(true);
-        return;
-      }
-
-      try {
-        const { data, error } = await supabase
-          .from('merchant_payout_accounts')
-          .select('id')
-          .eq('merchant_id', profile.id)
-          .maybeSingle();
-
-        if (error) {
-          console.error('Error checking bank details:', error);
-          setHasBankDetails(null);
-          return;
-        }
-
-        setHasBankDetails(!!data);
-      } catch (err) {
-        console.error('Error in checkBankDetails:', err);
-        setHasBankDetails(null);
-      }
-    };
-
-    if (user && profile) {
-      checkBankDetails();
-    }
-  }, [user, profile]);
-
-  useEffect(() => {
     const handlePaymobReturn = async () => {
       if (loading) return;
 
@@ -457,21 +416,9 @@ function AppContent() {
         searchParams.get('order_id') ||
         searchParams.get('merchant_order_id');
       const paymobSuccess = String(searchParams.get('success') || '').toLowerCase() === 'true';
+      const hasPaymobParams = hasPotentialPaymobParams();
 
-      const hasPaymobParams =
-        searchParams.has('id') ||
-        searchParams.has('success') ||
-        searchParams.has('pending') ||
-        searchParams.has('txn_response_code') ||
-        searchParams.has('amount_cents') ||
-        searchParams.has('is_voided') ||
-        searchParams.has('is_refunded') ||
-        searchParams.has('is_capture') ||
-        searchParams.has('order') ||
-        searchParams.has('order_id') ||
-        searchParams.has('merchant_order_id');
-
-      if (expectedReturn !== 'true' || !hasPaymobParams) {
+      if (expectedReturn !== 'true' || !pendingOrderId) {
         return;
       }
 
@@ -539,74 +486,97 @@ function AppContent() {
         return null;
       };
 
-      setIsHandlingPaymentReturn(true);
-
-      try {
-        const paymobReturnParams = Object.fromEntries(searchParams.entries());
-
-        const verifyOnce = async () => {
-          const { data, error } = await supabase.functions.invoke('verify-paymob-transaction', {
-            body: {
-              order_id: pendingOrderId,
-              transaction_id: paymobTransactionId,
-              paymob_order_id: paymobOrderId,
-              paymob_return_params: paymobReturnParams,
-            },
-          });
-
-          return { data, error };
-        };
-
-        const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-        let finalData: any = null;
-        let finalError: any = null;
-
+      const pollDirectOrderStatus = async () => {
         for (let attempt = 1; attempt <= 8; attempt++) {
-          const { data, error } = await verifyOnce();
+          const directOrder = await findOrderDirectly();
 
-          finalData = data;
-          finalError = error;
-
-          console.log('verify-paymob-transaction attempt:', attempt, {
-            paymobTransactionId,
-            paymobOrderId,
-            pendingOrderId,
-            data,
-            error,
-          });
-
-          if (!error && data?.success) {
-            const resolvedOrderId = data?.order?.id || pendingOrderId;
-            const resolvedStatus = data?.status || data?.order?.status;
-
-            if (data?.verified === true || data?.paid === true || resolvedStatus === 'paid') {
-              goToSuccess(resolvedOrderId);
-              cleanupPaymentReturn();
-              return;
-            }
-
-            if (
-              data?.failed === true ||
-              resolvedStatus === 'failed' ||
-              resolvedStatus === 'cancelled'
-            ) {
-              goToFailed(resolvedOrderId);
-              cleanupPaymentReturn();
-              return;
-            }
+          if (
+            directOrder?.status === 'paid' ||
+            directOrder?.status === 'completed' ||
+            directOrder?.status === 'failed' ||
+            directOrder?.status === 'cancelled'
+          ) {
+            return directOrder;
           }
 
           if (attempt < 8) {
-            await sleep(paymobSuccess ? 2000 : 1200);
+            await new Promise((resolve) => setTimeout(resolve, 2000));
           }
         }
 
-        console.error('Payment verification final result:', { finalData, finalError });
+        return await findOrderDirectly();
+      };
 
-        const directOrder = await findOrderDirectly();
+      setIsHandlingPaymentReturn(true);
 
-        if (directOrder?.status === 'paid') {
+      try {
+        if (hasPaymobParams) {
+          const paymobReturnParams = Object.fromEntries(searchParams.entries());
+
+          const verifyOnce = async () => {
+            const { data, error } = await supabase.functions.invoke('verify-paymob-transaction', {
+              body: {
+                order_id: pendingOrderId,
+                transaction_id: paymobTransactionId,
+                paymob_order_id: paymobOrderId,
+                paymob_return_params: paymobReturnParams,
+              },
+            });
+
+            return { data, error };
+          };
+
+          const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+          let finalData: any = null;
+          let finalError: any = null;
+
+          for (let attempt = 1; attempt <= 8; attempt++) {
+            const { data, error } = await verifyOnce();
+
+            finalData = data;
+            finalError = error;
+
+            console.log('verify-paymob-transaction attempt:', attempt, {
+              paymobTransactionId,
+              paymobOrderId,
+              pendingOrderId,
+              data,
+              error,
+            });
+
+            if (!error && data?.success) {
+              const resolvedOrderId = data?.order?.id || pendingOrderId;
+              const resolvedStatus = data?.status || data?.order?.status;
+
+              if (data?.verified === true || data?.paid === true || resolvedStatus === 'paid') {
+                goToSuccess(resolvedOrderId);
+                cleanupPaymentReturn();
+                return;
+              }
+
+              if (
+                data?.failed === true ||
+                resolvedStatus === 'failed' ||
+                resolvedStatus === 'cancelled'
+              ) {
+                goToFailed(resolvedOrderId);
+                cleanupPaymentReturn();
+                return;
+              }
+            }
+
+            if (attempt < 8) {
+              await sleep(paymobSuccess ? 2000 : 1200);
+            }
+          }
+
+          console.error('Payment verification final result:', { finalData, finalError });
+        }
+
+        const directOrder = await pollDirectOrderStatus();
+
+        if (directOrder?.status === 'paid' || directOrder?.status === 'completed') {
           goToSuccess(directOrder.id);
           cleanupPaymentReturn();
           return;
@@ -624,15 +594,23 @@ function AppContent() {
           return;
         }
 
-        goToFailed(directOrder?.id || pendingOrderId);
+        if (hasPaymobParams) {
+          goToFailed(directOrder?.id || pendingOrderId);
+          cleanupPaymentReturn();
+          return;
+        }
+
+        setCurrentPage(`payment-${pendingOrderId}`);
       } catch (err) {
         console.error('Error handling Paymob return:', err);
 
         try {
-          const directOrder = await findOrderDirectly();
+          const directOrder = await pollDirectOrderStatus();
 
-          if (directOrder?.status === 'paid') {
+          if (directOrder?.status === 'paid' || directOrder?.status === 'completed') {
             goToSuccess(directOrder.id);
+          } else if (directOrder?.status === 'failed' || directOrder?.status === 'cancelled') {
+            goToFailed(directOrder.id);
           } else if (paymobSuccess) {
             goToSuccess(directOrder?.id || pendingOrderId);
           } else {
@@ -654,6 +632,46 @@ function AppContent() {
 
     handlePaymobReturn();
   }, [loading, storeSlug]);
+
+  useEffect(() => {
+    if (isHandlingPaymentReturn) return;
+
+    const pendingExpected =
+      (() => {
+        try {
+          return localStorage.getItem('pending_payment_return_expected') === 'true';
+        } catch {
+          return false;
+        }
+      })();
+
+    if (pendingExpected && hasPotentialPaymobParams()) {
+      return;
+    }
+
+    const targetPath = getPublicPathFromPage(currentPage);
+    const currentPath = `${window.location.pathname.replace(/\/+$/, '') || '/'}${window.location.search || ''}`;
+
+    if (!hasInitializedRouteSync.current) {
+      hasInitializedRouteSync.current = true;
+
+      if (targetPath) {
+        if (currentPath !== targetPath) {
+          window.history.replaceState({}, document.title, targetPath);
+        }
+      }
+      return;
+    }
+
+    if (!targetPath) {
+      return;
+    }
+
+    if (currentPath !== targetPath) {
+      window.history.pushState({}, document.title, targetPath);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [currentPage, isHandlingPaymentReturn]);
 
   useEffect(() => {
     if (isHandlingPaymentReturn) return;
@@ -687,6 +705,38 @@ function AppContent() {
       }
     }
   }, [user, profile, loading, currentPage, hasBankDetails, isHandlingPaymentReturn, storeSlug]);
+
+  useEffect(() => {
+    const checkBankDetails = async () => {
+      if (!user || !profile || profile.role !== 'seller') {
+        setHasBankDetails(true);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('merchant_payout_accounts')
+          .select('id')
+          .eq('merchant_id', profile.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error checking bank details:', error);
+          setHasBankDetails(null);
+          return;
+        }
+
+        setHasBankDetails(!!data);
+      } catch (err) {
+        console.error('Error in checkBankDetails:', err);
+        setHasBankDetails(null);
+      }
+    };
+
+    if (user && profile) {
+      checkBankDetails();
+    }
+  }, [user, profile]);
 
   if (loading || isHandlingPaymentReturn) {
     return (
@@ -792,19 +842,25 @@ function AppContent() {
           <HomePage onNavigate={navigateWithContext} />
         );
       case 'affiliate-dashboard':
-        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+        return profile?.role === 'seller' ||
+          profile?.role === 'admin' ||
+          profile?.role === 'superadmin' ? (
           <AffiliateDashboard onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
       case 'coupons-management':
-        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+        return profile?.role === 'seller' ||
+          profile?.role === 'admin' ||
+          profile?.role === 'superadmin' ? (
           <CouponsManagementPage onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
       case 'affiliate-management':
-        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+        return profile?.role === 'seller' ||
+          profile?.role === 'admin' ||
+          profile?.role === 'superadmin' ? (
           <AffiliateManagementPage onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
