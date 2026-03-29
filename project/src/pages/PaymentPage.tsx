@@ -136,6 +136,29 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
     return null;
   };
 
+  const persistPendingStoreContext = () => {
+    try {
+      const queryStoreSlug = new URLSearchParams(window.location.search).get('store');
+      const activeStoreSlug = sessionStorage.getItem('active_store_slug');
+      const storeModeSource = sessionStorage.getItem('store_mode_source');
+
+      const finalStoreSlug = queryStoreSlug || activeStoreSlug;
+
+      if (finalStoreSlug) {
+        localStorage.setItem('pending_payment_store_slug', finalStoreSlug);
+        localStorage.setItem(
+          'pending_payment_store_source',
+          storeModeSource || 'storefront'
+        );
+      } else {
+        localStorage.removeItem('pending_payment_store_slug');
+        localStorage.removeItem('pending_payment_store_source');
+      }
+    } catch (error) {
+      console.error('Error persisting pending store context:', error);
+    }
+  };
+
   const handlePayment = async () => {
     if (!order) return;
 
@@ -197,6 +220,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
       localStorage.setItem('pending_payment_order_id', orderId);
       localStorage.setItem('pending_payment_started_at', new Date().toISOString());
       localStorage.setItem('pending_payment_return_expected', 'true');
+      persistPendingStoreContext();
 
       window.location.href = redirectUrl;
     } catch (err: any) {
