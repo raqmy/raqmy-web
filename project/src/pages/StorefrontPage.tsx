@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Store as StoreIcon, User, LogOut, ShoppingBag, Home, Package, Filter, Share2 } from 'lucide-react';
+import { Store as StoreIcon, User, LogOut, ShoppingCart, Home, Package, Filter, Share2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -262,15 +262,13 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
               {user && profile ? (
                 <>
-                  {profile.role === 'customer' && (
-                    <button
-                      onClick={() => onNavigate('orders')}
-                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
-                    >
-                      <ShoppingBag className="w-4 h-4" />
-                      <span>طلباتي</span>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => onNavigate('cart')}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    <span>السلة</span>
+                  </button>
                   <button
                     onClick={() => onNavigate('profile')}
                     className="flex items-center gap-3 px-4 py-2 hover:bg-gray-100 rounded-lg"
