@@ -133,9 +133,16 @@ const getStoredStoreContext = () => {
     return {
       slug: sessionStorage.getItem('active_store_slug'),
       source: sessionStorage.getItem('store_mode_source'),
+      pendingSlug: localStorage.getItem('pending_payment_store_slug'),
+      pendingSource: localStorage.getItem('pending_payment_store_source'),
     };
   } catch {
-    return { slug: null as string | null, source: null as string | null };
+    return {
+      slug: null as string | null,
+      source: null as string | null,
+      pendingSlug: null as string | null,
+      pendingSource: null as string | null,
+    };
   }
 };
 
@@ -171,7 +178,7 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
   const queryStoreSlug = new URLSearchParams(window.location.search).get('store');
   if (queryStoreSlug) return queryStoreSlug;
 
-  const { slug, source } = getStoredStoreContext();
+  const { slug, source, pendingSlug, pendingSource } = getStoredStoreContext();
 
   if (
     (page === 'auth' ||
@@ -186,6 +193,14 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
     slug
   ) {
     return slug;
+  }
+
+  if (
+    isStorePaymentPage(page) &&
+    pendingSource === 'storefront' &&
+    pendingSlug
+  ) {
+    return pendingSlug;
   }
 
   return null;
@@ -390,6 +405,8 @@ function AppContent() {
           sessionStorage.setItem('store_mode_source', 'storefront');
         }
 
+        localStorage.removeItem('pending_payment_store_slug');
+        localStorage.removeItem('pending_payment_store_source');
         return;
       }
 
@@ -842,25 +859,19 @@ function AppContent() {
           <HomePage onNavigate={navigateWithContext} />
         );
       case 'affiliate-dashboard':
-        return profile?.role === 'seller' ||
-          profile?.role === 'admin' ||
-          profile?.role === 'superadmin' ? (
+        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
           <AffiliateDashboard onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
       case 'coupons-management':
-        return profile?.role === 'seller' ||
-          profile?.role === 'admin' ||
-          profile?.role === 'superadmin' ? (
+        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
           <CouponsManagementPage onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
       case 'affiliate-management':
-        return profile?.role === 'seller' ||
-          profile?.role === 'admin' ||
-          profile?.role === 'superadmin' ? (
+        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
           <AffiliateManagementPage onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
