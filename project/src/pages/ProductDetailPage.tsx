@@ -389,12 +389,19 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
       const { data: existingItem } = await supabase
         .from('cart_items')
-        .select('id')
+        .select('id, quantity')
         .eq('user_id', user.id)
         .eq('product_id', resolvedProductId)
         .maybeSingle();
 
-      if (!existingItem) {
+      if (existingItem) {
+        const { error } = await supabase
+          .from('cart_items')
+          .update({ quantity: existingItem.quantity + 1 })
+          .eq('id', existingItem.id);
+
+        if (error) throw error;
+      } else {
         const { error } = await supabase.from('cart_items').insert({
           user_id: user.id,
           product_id: resolvedProductId,
@@ -741,28 +748,42 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </div>
 
-            <p className="text-gray-700 leading-8 mb-8 whitespace-pre-line">
+            <p className="text-gray-700 leading-8 mb-6 whitespace-pre-line">
               {product.description || 'لا يوجد وصف لهذا المنتج حالياً.'}
             </p>
+
+            {hasPurchased && !isOwner && (
+              <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-green-800 mb-1">تم شراء المنتج سابقًا</p>
+                    <p className="text-sm text-green-700">
+                      يمكنك الوصول إلى المحتوى الآن، وما زال بإمكانك شراء المنتج مرة أخرى إذا رغبت.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-col sm:flex-row gap-4 mb-8">
               <button
                 onClick={handleBuyNow}
-                disabled={purchasing || hasPurchased || isOwner}
+                disabled={purchasing || isOwner}
                 className="flex-1 px-6 py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                {hasPurchased ? (
-                  <>
-                    <CheckCircle className="w-5 h-5" />
-                    <span>تم شراء المنتج</span>
-                  </>
-                ) : isOwner ? (
+                {isOwner ? (
                   <>
                     <CheckCircle className="w-5 h-5" />
                     <span>هذا منتجك</span>
                   </>
                 ) : purchasing ? (
                   <span>جاري المعالجة...</span>
+                ) : hasPurchased ? (
+                  <>
+                    <ShoppingCart className="w-5 h-5" />
+                    <span>شراء مرة أخرى</span>
+                  </>
                 ) : (
                   <>
                     <ShoppingCart className="w-5 h-5" />
@@ -771,13 +792,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 )}
               </button>
 
-              {!hasPurchased && !isOwner && (
+              {!isOwner && (
                 <button
                   onClick={handleAddToCart}
                   className="px-6 py-4 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50 flex items-center justify-center gap-2"
                 >
                   <ShoppingCart className="w-5 h-5" />
-                  <span>أضف إلى السلة</span>
+                  <span>{hasPurchased ? 'أضف مرة أخرى إلى السلة' : 'أضف إلى السلة'}</span>
                 </button>
               )}
 
