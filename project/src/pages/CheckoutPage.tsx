@@ -256,7 +256,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
-      return total + (Number(item.product?.price || 0) * item.quantity);
+      return total + Number(item.product?.price || 0) * item.quantity;
     }, 0);
   };
 
@@ -310,7 +310,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setProcessing(true);
 
     try {
-      const { data: orderNumberData, error: orderNumberError } = await supabase.rpc('generate_order_number');
+      const { data: orderNumberData, error: orderNumberError } = await supabase.rpc(
+        'generate_order_number'
+      );
 
       if (orderNumberError) throw orderNumberError;
 
@@ -340,7 +342,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         customer_phone: profile?.phone || '',
         shipping_address: formData.shippingAddress || '',
         notes: formData.notes || '',
-        sale_source: scopeInfo ? 'storefront' : 'marketplace',
+        sale_source: scopeInfo ? 'direct' : 'marketplace',
       };
 
       const { data: order, error: orderError } = await supabase
@@ -366,10 +368,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           price,
           product_price: price,
           subtotal: Number((price * item.quantity).toFixed(2)),
-          product_name:
-            (item.product as any)?.title ??
-            (item.product as any)?.name ??
-            'منتج',
+          product_name: (item.product as any)?.title ?? (item.product as any)?.name ?? 'منتج',
         };
       });
 
@@ -540,9 +539,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                 <div className="space-y-4 mb-6">
                   {cartItems.map((item) => {
                     const productTitle =
-                      (item.product as any)?.title ??
-                      (item.product as any)?.name ??
-                      '';
+                      (item.product as any)?.title ?? (item.product as any)?.name ?? '';
 
                     return (
                       <div key={item.id} className="flex gap-3">
@@ -573,7 +570,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                             {item.quantity} × {item.product?.price} {item.product?.currency || 'SAR'}
                           </p>
                           <p className="text-sm font-bold text-blue-600 mt-1">
-                            {((Number(item.product?.price || 0)) * item.quantity).toFixed(2)}{' '}
+                            {(Number(item.product?.price || 0) * item.quantity).toFixed(2)}{' '}
                             {item.product?.currency || 'SAR'}
                           </p>
                         </div>
