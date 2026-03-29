@@ -157,6 +157,13 @@ const getStoreSlugFromScopedPage = (page: string): string | null => {
   return null;
 };
 
+const isStorePaymentPage = (page: string) =>
+  page === 'cart' ||
+  page === 'checkout' ||
+  page.startsWith('payment-') ||
+  page.startsWith('payment-success-') ||
+  page.startsWith('payment-failed-');
+
 const getActiveStoreSlugFromContext = (page: string): string | null => {
   const directStoreSlug = getStoreSlugFromScopedPage(page);
   if (directStoreSlug) return directStoreSlug;
@@ -173,7 +180,8 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
       page === 'profile' ||
       page === 'orders' ||
       page === 'favorites' ||
-      page === 'viewed-products') &&
+      page === 'viewed-products' ||
+      isStorePaymentPage(page)) &&
     source === 'storefront' &&
     slug
   ) {
@@ -197,11 +205,15 @@ const isStoreCustomerScopedPage = (page: string) =>
   page.startsWith('store-favorites-') ||
   page.startsWith('store-viewed-products-');
 
+const isStoreCartFlowPage = (page: string) =>
+  isStorePaymentPage(page) && !!getActiveStoreSlugFromContext(page);
+
 const isStoreContextPage = (page: string) =>
   isStorefrontPage(page) ||
   isStoreProductPage(page) ||
   isStoreAuthPage(page) ||
-  isStoreCustomerScopedPage(page);
+  isStoreCustomerScopedPage(page) ||
+  isStoreCartFlowPage(page);
 
 const getPublicPathFromPage = (page: string) => {
   const activeStoreSlug = getActiveStoreSlugFromContext(page);
@@ -234,16 +246,42 @@ const getPublicPathFromPage = (page: string) => {
     return `/p/${slug}`;
   }
 
+  if (page === 'cart') {
+    if (activeStoreSlug) {
+      return `/cart?store=${encodeURIComponent(activeStoreSlug)}`;
+    }
+    return '/cart';
+  }
+
+  if (page === 'checkout') {
+    if (activeStoreSlug) {
+      return `/checkout?store=${encodeURIComponent(activeStoreSlug)}`;
+    }
+    return '/checkout';
+  }
+
   if (page.startsWith('payment-success-')) {
-    return `/payment-success/${encodeURIComponent(page.replace('payment-success-', ''))}`;
+    const orderId = encodeURIComponent(page.replace('payment-success-', ''));
+    if (activeStoreSlug) {
+      return `/payment-success/${orderId}?store=${encodeURIComponent(activeStoreSlug)}`;
+    }
+    return `/payment-success/${orderId}`;
   }
 
   if (page.startsWith('payment-failed-')) {
-    return `/payment-failed/${encodeURIComponent(page.replace('payment-failed-', ''))}`;
+    const orderId = encodeURIComponent(page.replace('payment-failed-', ''));
+    if (activeStoreSlug) {
+      return `/payment-failed/${orderId}?store=${encodeURIComponent(activeStoreSlug)}`;
+    }
+    return `/payment-failed/${orderId}`;
   }
 
   if (page.startsWith('payment-')) {
-    return `/payment/${encodeURIComponent(page.replace('payment-', ''))}`;
+    const orderId = encodeURIComponent(page.replace('payment-', ''));
+    if (activeStoreSlug) {
+      return `/payment/${orderId}?store=${encodeURIComponent(activeStoreSlug)}`;
+    }
+    return `/payment/${orderId}`;
   }
 
   const publicRoutes: Record<string, string> = {
@@ -328,7 +366,8 @@ function AppContent() {
           isStorefrontPage(currentPage) ||
           isStoreProductPage(currentPage) ||
           isStoreAuthPage(currentPage) ||
-          isStoreCustomerScopedPage(currentPage)
+          isStoreCustomerScopedPage(currentPage) ||
+          isStoreCartFlowPage(currentPage)
         ) {
           sessionStorage.setItem('store_mode_source', 'storefront');
         }
