@@ -43,6 +43,7 @@ import { MerchantAgreementPage } from './pages/MerchantAgreementPage';
 import { VerifyPhonePage } from './pages/VerifyPhonePage';
 import { MerchantBankDetailsPage } from './pages/MerchantBankDetailsPage';
 import { supabase } from './lib/supabase';
+import { handleAffiliateTracking } from './lib/affiliate';
 
 const parsePathToPage = (pathname: string) => {
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
@@ -344,6 +345,10 @@ function AppContent() {
   const storeSlug = getActiveStoreSlugFromContext(currentPage);
   const isStoreMode = isStoreContextPage(currentPage);
   const shouldHidePlatformChrome = isStoreMode;
+
+  useEffect(() => {
+    handleAffiliateTracking();
+  }, []);
 
   const navigateWithContext = (page: string) => {
     const activeStoreSlug = getActiveStoreSlugFromContext(currentPage);
