@@ -39,9 +39,34 @@ interface CartItem {
   store_slug?: string | null;
 }
 
+interface AffiliateLocalData {
+  ref_code?: string | null;
+  attribution_id?: string | null;
+  visitor_token?: string | null;
+  created_at?: string | null;
+}
+
+interface ResolvedAffiliateAttribution {
+  attribution_id: string | null;
+  affiliate_link_id: string | null;
+  affiliate_marketer_id: string | null;
+  affiliate_rule_id: string | null;
+  affiliate_ref_code: string | null;
+}
+
 const getActiveStoreScopeSlug = () => {
   try {
     return sessionStorage.getItem('active_store_slug');
+  } catch {
+    return null;
+  }
+};
+
+const getAffiliateLocalData = (): AffiliateLocalData | null => {
+  try {
+    const raw = localStorage.getItem('affiliate_data');
+    if (!raw) return null;
+    return JSON.parse(raw);
   } catch {
     return null;
   }
@@ -310,6 +335,51 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setProcessing(true);
 
     try {
+      const affiliateLocalData = getAffiliateLocalData();
+      const visitorToken =
+        affiliateLocalData?.visitor_token ||
+        (() => {
+          try {
+            return localStorage.getItem('visitor_token');
+          } catch {
+            return null;
+          }
+        })();
+
+      const resolvedAttributionsByItem = await Promise.all(
+        cartItems.map(async (item) => {
+          const sellerId = item.product?.user_id || null;
+          const productId = item.product?.id || item.product_id || null;
+          const storeId = item.product?.store_id || null;
+
+          if (!sellerId || (!visitorToken && !profile.id)) {
+            return null;
+          }
+
+          const { data, error } = await supabase.rpc(
+            'resolve_affiliate_attribution_for_checkout',
+            {
+              p_customer_user_id: profile.id,
+              p_visitor_token: visitorToken,
+              p_seller_id: sellerId,
+              p_product_id: productId,
+              p_store_id: storeId,
+            }
+          );
+
+          if (error) {
+            console.error('Affiliate resolve error for checkout item:', error);
+            return null;
+          }
+
+          if (!data || !Array.isArray(data) || data.length === 0) {
+            return null;
+          }
+
+          return data[0] as ResolvedAffiliateAttribution;
+        })
+      );
+
       const { data: orderNumberData, error: orderNumberError } = await supabase.rpc(
         'generate_order_number'
       );
@@ -327,6 +397,26 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         throw new Error('تعذر إنشاء رقم الطلب');
       }
 
+      const validItemAttributions = resolvedAttributionsByItem.filter(
+        (item): item is ResolvedAffiliateAttribution =>
+          !!item && !!item.attribution_id && !!item.affiliate_link_id
+      );
+
+      const canUseOrderLevelAffiliate =
+        uniqueSellerIds.length === 1 &&
+        validItemAttributions.length > 0 &&
+        validItemAttributions.length === cartItems.length &&
+        validItemAttributions.every(
+          (item) =>
+            item.attribution_id === validItemAttributions[0].attribution_id &&
+            item.affiliate_link_id === validItemAttributions[0].affiliate_link_id &&
+            item.affiliate_marketer_id === validItemAttributions[0].affiliate_marketer_id &&
+            item.affiliate_rule_id === validItemAttributions[0].affiliate_rule_id &&
+            item.affiliate_ref_code === validItemAttributions[0].affiliate_ref_code
+        );
+
+      const orderAffiliate = canUseOrderLevelAffiliate ? validItemAttributions[0] : null;
+
       const orderPayload = {
         order_number: orderNumber,
         user_id: profile.id,
@@ -343,6 +433,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         shipping_address: formData.shippingAddress || '',
         notes: formData.notes || '',
         sale_source: scopeInfo ? 'direct' : 'marketplace',
+        affiliate_link_id: orderAffiliate?.affiliate_link_id || null,
+        affiliate_marketer_id: orderAffiliate?.affiliate_marketer_id || null,
+        affiliate_rule_id: orderAffiliate?.affiliate_rule_id || null,
+        affiliate_attribution_id: orderAffiliate?.attribution_id || null,
+        affiliate_ref_code: orderAffiliate?.affiliate_ref_code || affiliateLocalData?.ref_code || null,
+        affiliate_commission_amount: 0,
+        affiliate_commission_status: orderAffiliate ? 'pending' : 'none',
       };
 
       const { data: order, error: orderError } = await supabase
@@ -356,9 +453,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         throw orderError;
       }
 
-      const orderItems = cartItems.map((item) => {
+      const orderItems = cartItems.map((item, index) => {
         const price = Number(item.product!.price);
         const sellerId = item.product!.user_id!;
+        const itemAffiliate = resolvedAttributionsByItem[index];
 
         return {
           order_id: order.id,
@@ -369,6 +467,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           product_price: price,
           subtotal: Number((price * item.quantity).toFixed(2)),
           product_name: (item.product as any)?.title ?? (item.product as any)?.name ?? 'منتج',
+          affiliate_link_id: itemAffiliate?.affiliate_link_id || null,
+          affiliate_marketer_id: itemAffiliate?.affiliate_marketer_id || null,
+          affiliate_rule_id: itemAffiliate?.affiliate_rule_id || null,
+          affiliate_attribution_id: itemAffiliate?.attribution_id || null,
+          affiliate_ref_code: itemAffiliate?.affiliate_ref_code || affiliateLocalData?.ref_code || null,
+          affiliate_commission_amount: 0,
+          affiliate_commission_status: itemAffiliate ? 'pending' : 'none',
         };
       });
 
