@@ -885,6 +885,20 @@ const LinkFormModal: React.FC<LinkFormModalProps> = ({
         throw new Error('اختر المتجر');
       }
 
+      const { data: existingCodeRow, error: existingCodeError } = await supabase
+        .from('affiliate_links')
+        .select('id')
+        .eq('code', normalizedCode)
+        .maybeSingle();
+
+      if (existingCodeError) {
+        throw existingCodeError;
+      }
+
+      if (existingCodeRow && (!link || existingCodeRow.id !== link.id)) {
+        throw new Error('كود الرابط مستخدم بالفعل، اختر كودًا مختلفًا');
+      }
+
       const data: Record<string, any> = {
         user_id: user.id,
         seller_id: user.id,
@@ -930,7 +944,12 @@ const LinkFormModal: React.FC<LinkFormModalProps> = ({
       onSuccess();
     } catch (err: any) {
       console.error('Error saving link:', err);
-      setError(err.message || 'حدث خطأ أثناء حفظ الرابط');
+
+      if (err?.code === '23505') {
+        setError('كود الرابط مستخدم بالفعل، اختر كودًا مختلفًا');
+      } else {
+        setError(err.message || 'حدث خطأ أثناء حفظ الرابط');
+      }
     } finally {
       setLoading(false);
     }
@@ -973,6 +992,9 @@ const LinkFormModal: React.FC<LinkFormModalProps> = ({
               placeholder="AFF2024"
               required
             />
+            <p className="mt-2 text-xs text-gray-500">
+              يجب أن يكون كود الرابط فريدًا وغير مستخدم من قبل.
+            </p>
           </div>
 
           <div>
