@@ -1,11 +1,11 @@
-import { supabase } from "@/lib/supabase";
+import { supabase } from './supabase';
 
 function getOrCreateVisitorToken() {
-  let token = localStorage.getItem("visitor_token");
+  let token = localStorage.getItem('visitor_token');
 
   if (!token) {
     token = crypto.randomUUID();
-    localStorage.setItem("visitor_token", token);
+    localStorage.setItem('visitor_token', token);
   }
 
   return token;
@@ -14,16 +14,15 @@ function getOrCreateVisitorToken() {
 export async function handleAffiliateTracking() {
   try {
     const url = new URL(window.location.href);
-    const ref = url.searchParams.get("ref");
+    const ref = url.searchParams.get('ref');
 
     if (!ref) return;
 
     const visitorToken = getOrCreateVisitorToken();
-
     const landingPath = window.location.pathname;
 
     // 1) سجل click
-    await supabase.rpc("record_affiliate_click", {
+    await supabase.rpc('record_affiliate_click', {
       p_ref_code: ref,
       p_landing_path: landingPath,
       p_visitor_token: visitorToken,
@@ -32,7 +31,7 @@ export async function handleAffiliateTracking() {
 
     // 2) أنشئ attribution
     const { data: attributionId } = await supabase.rpc(
-      "upsert_affiliate_attribution",
+      'upsert_affiliate_attribution',
       {
         p_ref_code: ref,
         p_visitor_token: visitorToken,
@@ -41,7 +40,7 @@ export async function handleAffiliateTracking() {
 
     // 3) خزّن البيانات محليًا
     localStorage.setItem(
-      "affiliate_data",
+      'affiliate_data',
       JSON.stringify({
         ref_code: ref,
         attribution_id: attributionId,
@@ -50,8 +49,8 @@ export async function handleAffiliateTracking() {
       })
     );
 
-    console.log("Affiliate tracked:", ref);
+    console.log('Affiliate tracked:', ref);
   } catch (err) {
-    console.error("Affiliate tracking error:", err);
+    console.error('Affiliate tracking error:', err);
   }
 }
