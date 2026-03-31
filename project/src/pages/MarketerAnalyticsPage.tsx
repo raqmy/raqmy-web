@@ -4,9 +4,7 @@ import {
   TrendingUp,
   MousePointerClick,
   DollarSign,
-  Calendar,
   BarChart3,
-  Package,
   Link as LinkIcon,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -175,16 +173,16 @@ export const MarketerAnalyticsPage: React.FC<MarketerAnalyticsPageProps> = ({
               <p className="text-purple-100">تحليلات الأداء التفصيلية</p>
             </div>
           </div>
-          <div className="flex items-center gap-6 mt-6">
-            <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm">
-              {marketer.commission_rate}% نسبة العمولة
-            </span>
+          <div className="flex items-center gap-6 mt-6 flex-wrap">
             <span
               className={`px-4 py-2 rounded-full text-sm ${
                 marketer.is_active ? 'bg-green-500/30' : 'bg-red-500/30'
               }`}
             >
               {marketer.is_active ? 'نشط' : 'غير نشط'}
+            </span>
+            <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm">
+              {links.length} رابط تسويقي
             </span>
           </div>
         </div>
@@ -331,7 +329,7 @@ export const MarketerAnalyticsPage: React.FC<MarketerAnalyticsPageProps> = ({
                         {parseFloat(sale.commission_amount).toFixed(2)} ر.س
                       </td>
                       <td className="py-3 px-4 text-sm text-gray-600">
-                        {sale.commission_rate}%
+                        --
                       </td>
                       <td className="py-3 px-4">
                         <span
