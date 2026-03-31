@@ -147,8 +147,8 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       .select(`
         *,
         marketer:affiliate_marketers(id, name),
-        product:products(id, name, title, slug),
-        store:stores(id, name, title, slug)
+        product:products(*),
+        store:stores(*)
       `)
       .eq('seller_id', user.id)
       .order('created_at', { ascending: false });
@@ -843,12 +843,12 @@ const LinkFormModal: React.FC<LinkFormModalProps> = ({
         await Promise.all([
           supabase
             .from('products')
-            .select('id, name, title, slug')
+            .select('*')
             .eq('user_id', user.id)
             .order('created_at', { ascending: false }),
           supabase
             .from('stores')
-            .select('id, name, title, slug')
+            .select('*')
             .eq('user_id', user.id)
             .order('created_at', { ascending: false }),
         ]);
