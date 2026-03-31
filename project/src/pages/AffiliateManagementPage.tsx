@@ -10,6 +10,19 @@ import {
   DollarSign,
   BarChart3,
   Search,
+  Sparkles,
+  Settings2,
+  Package,
+  Store as StoreIcon,
+  CalendarRange,
+  Percent,
+  Copy,
+  Eye,
+  SlidersHorizontal,
+  Target,
+  CheckCircle2,
+  AlertCircle,
+  Layers3,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,6 +31,8 @@ import { CopyLinkButton } from '../components/shared/CopyLinkButton';
 interface AffiliateManagementPageProps {
   onNavigate: (page: string) => void;
 }
+
+type ViewMode = 'overview' | 'marketers' | 'links' | 'rules';
 
 type AffiliateMarketerRow = {
   id: string;
@@ -57,6 +72,37 @@ type AffiliateLinkRow = {
   store?: { id: string; name?: string | null; title?: string | null; slug?: string | null } | null;
 };
 
+type AffiliateRuleRow = {
+  id: string;
+  seller_id: string;
+  marketer_id: string;
+  scope_type?: 'product' | 'store' | 'all' | string | null;
+  store_id?: string | null;
+  product_id?: string | null;
+  commission_type?: 'percentage' | 'fixed' | string | null;
+  commission_value?: number | null;
+  is_active?: boolean | null;
+  priority?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  marketer?: { id: string; name?: string | null } | null;
+  product?: { id: string; name?: string | null; title?: string | null; slug?: string | null } | null;
+  store?: { id: string; name?: string | null; title?: string | null; slug?: string | null } | null;
+  tiers?: AffiliateRuleTierRow[];
+};
+
+type AffiliateRuleTierRow = {
+  id: string;
+  rule_id: string;
+  day_from?: number | null;
+  day_to?: number | null;
+  commission_type?: 'percentage' | 'fixed' | string | null;
+  commission_value?: number | null;
+  is_active?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 type ProductOption = {
   id: string;
   name?: string | null;
@@ -69,6 +115,16 @@ type StoreOption = {
   name?: string | null;
   title?: string | null;
   slug?: string | null;
+};
+
+type TierDraft = {
+  id?: string;
+  localId: string;
+  day_from: string;
+  day_to: string;
+  commission_type: 'percentage' | 'fixed';
+  commission_value: string;
+  is_active: boolean;
 };
 
 const getDisplayName = (item?: { name?: string | null; title?: string | null } | null) =>
@@ -87,36 +143,71 @@ const getApplyToLabel = (value?: string | null) => {
   }
 };
 
+const getScopeTypeLabel = (value?: string | null) => {
+  switch (value) {
+    case 'product':
+      return 'منتج';
+    case 'store':
+      return 'متجر';
+    case 'all':
+      return 'عام';
+    default:
+      return value || 'عام';
+  }
+};
+
+const formatMoney = (value?: number | null) => `${Number(value || 0).toFixed(2)} ر.س`;
+
+const formatCommission = (type?: string | null, value?: number | null) => {
+  if (!value && value !== 0) return 'غير محدد';
+  return type === 'fixed' ? `${Number(value).toFixed(2)} ر.س` : `${Number(value).toFixed(0)}%`;
+};
+
+const conversionRate = (clicks?: number | null, sales?: number | null) => {
+  const c = Number(clicks || 0);
+  const s = Number(sales || 0);
+  if (c <= 0) return '0.0%';
+  return `${((s / c) * 100).toFixed(1)}%`;
+};
+
+const createLocalTierId = () => Math.random().toString(36).slice(2, 10);
+
 export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = ({
   onNavigate,
 }) => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'marketers' | 'links'>('marketers');
+
+  const [viewMode, setViewMode] = useState<ViewMode>('overview');
+  const [loading, setLoading] = useState(true);
+
   const [marketers, setMarketers] = useState<AffiliateMarketerRow[]>([]);
   const [links, setLinks] = useState<AffiliateLinkRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rules, setRules] = useState<AffiliateRuleRow[]>([]);
+
   const [showMarketerModal, setShowMarketerModal] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
+  const [showRuleModal, setShowRuleModal] = useState(false);
+
   const [editingMarketer, setEditingMarketer] = useState<AffiliateMarketerRow | null>(null);
   const [editingLink, setEditingLink] = useState<AffiliateLinkRow | null>(null);
+  const [editingRule, setEditingRule] = useState<AffiliateRuleRow | null>(null);
+
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedMarketerId, setSelectedMarketerId] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
   useEffect(() => {
     if (user?.id) {
-      fetchData();
+      fetchAllData();
     }
-  }, [user?.id, activeTab]);
+  }, [user?.id]);
 
-  const fetchData = async () => {
+  const fetchAllData = async () => {
     if (!user?.id) return;
-
     setLoading(true);
+
     try {
-      if (activeTab === 'marketers') {
-        await fetchMarketers();
-      } else {
-        await fetchLinks();
-      }
+      await Promise.all([fetchMarketers(), fetchLinks(), fetchRules()]);
     } finally {
       setLoading(false);
     }
@@ -161,6 +252,58 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     setLinks((data || []) as AffiliateLinkRow[]);
   };
 
+  const fetchRules = async () => {
+    if (!user?.id) return;
+
+    const { data: rulesData, error: rulesError } = await supabase
+      .from('affiliate_rules')
+      .select(`
+        *,
+        marketer:affiliate_marketers(id, name),
+        product:products(*),
+        store:stores(*)
+      `)
+      .eq('seller_id', user.id)
+      .order('priority', { ascending: true })
+      .order('created_at', { ascending: false });
+
+    if (rulesError) {
+      console.error('Error fetching rules:', rulesError);
+      return;
+    }
+
+    const ruleIds = (rulesData || []).map((rule: any) => rule.id);
+
+    let tiersMap = new Map<string, AffiliateRuleTierRow[]>();
+
+    if (ruleIds.length > 0) {
+      const { data: tiersData, error: tiersError } = await supabase
+        .from('affiliate_rule_tiers')
+        .select('*')
+        .in('rule_id', ruleIds)
+        .order('day_from', { ascending: true });
+
+      if (tiersError) {
+        console.error('Error fetching rule tiers:', tiersError);
+      } else {
+        tiersMap = new Map<string, AffiliateRuleTierRow[]>();
+        (tiersData || []).forEach((tier: any) => {
+          const key = tier.rule_id;
+          const current = tiersMap.get(key) || [];
+          current.push(tier as AffiliateRuleTierRow);
+          tiersMap.set(key, current);
+        });
+      }
+    }
+
+    const normalizedRules = (rulesData || []).map((rule: any) => ({
+      ...rule,
+      tiers: tiersMap.get(rule.id) || [],
+    })) as AffiliateRuleRow[];
+
+    setRules(normalizedRules);
+  };
+
   const handleDeleteMarketer = async (marketerId: string) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا المسوق؟')) return;
 
@@ -172,7 +315,7 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
         .eq('seller_id', user?.id);
 
       if (error) throw error;
-      fetchMarketers();
+      fetchAllData();
     } catch (error) {
       console.error('Error deleting marketer:', error);
       alert('حدث خطأ أثناء حذف المسوق');
@@ -190,49 +333,157 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
         .eq('seller_id', user?.id);
 
       if (error) throw error;
-      fetchLinks();
+      fetchAllData();
     } catch (error) {
       console.error('Error deleting link:', error);
       alert('حدث خطأ أثناء حذف الرابط');
     }
   };
 
+  const handleDeleteRule = async (ruleId: string) => {
+    if (!window.confirm('هل أنت متأكد من حذف قاعدة العمولة؟ سيتم حذف الشرائح المرتبطة بها أيضًا.')) {
+      return;
+    }
+
+    try {
+      const { error: tiersError } = await supabase
+        .from('affiliate_rule_tiers')
+        .delete()
+        .eq('rule_id', ruleId);
+
+      if (tiersError) throw tiersError;
+
+      const { error: ruleError } = await supabase
+        .from('affiliate_rules')
+        .delete()
+        .eq('id', ruleId)
+        .eq('seller_id', user?.id);
+
+      if (ruleError) throw ruleError;
+
+      fetchAllData();
+    } catch (error) {
+      console.error('Error deleting rule:', error);
+      alert('حدث خطأ أثناء حذف قاعدة العمولة');
+    }
+  };
+
+  const marketerNameMap = useMemo(() => {
+    return new Map(marketers.map((marketer) => [marketer.id, marketer.name]));
+  }, [marketers]);
+
   const filteredMarketers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return marketers;
 
     return marketers.filter((m) => {
       const name = (m.name || '').toLowerCase();
       const email = (m.email || '').toLowerCase();
       const phone = (m.phone || '').toLowerCase();
-      return name.includes(q) || email.includes(q) || phone.includes(q);
+      const isActive = (m.is_active ?? m.status === 'active') === true;
+
+      const matchesQuery =
+        !q || name.includes(q) || email.includes(q) || phone.includes(q);
+
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'active' && isActive) ||
+        (statusFilter === 'inactive' && !isActive);
+
+      return matchesQuery && matchesStatus;
     });
-  }, [marketers, searchQuery]);
+  }, [marketers, searchQuery, statusFilter]);
 
   const filteredLinks = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return links;
 
     return links.filter((l) => {
       const code = (l.code || '').toLowerCase();
-      const marketerName = (l.marketer?.name || '').toLowerCase();
+      const marketerName = (l.marketer?.name || marketerNameMap.get(l.marketer_id || '') || '').toLowerCase();
       const productName = getDisplayName(l.product).toLowerCase();
       const storeName = getDisplayName(l.store).toLowerCase();
-      return (
+      const isActive = l.is_active === true;
+
+      const matchesQuery =
+        !q ||
         code.includes(q) ||
         marketerName.includes(q) ||
         productName.includes(q) ||
-        storeName.includes(q)
-      );
+        storeName.includes(q);
+
+      const matchesMarketer =
+        selectedMarketerId === 'all' || l.marketer_id === selectedMarketerId;
+
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'active' && isActive) ||
+        (statusFilter === 'inactive' && !isActive);
+
+      return matchesQuery && matchesMarketer && matchesStatus;
     });
-  }, [links, searchQuery]);
+  }, [links, searchQuery, selectedMarketerId, statusFilter, marketerNameMap]);
+
+  const filteredRules = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+
+    return rules.filter((rule) => {
+      const marketerName = (rule.marketer?.name || marketerNameMap.get(rule.marketer_id) || '').toLowerCase();
+      const scopeName =
+        rule.scope_type === 'product'
+          ? getDisplayName(rule.product).toLowerCase()
+          : rule.scope_type === 'store'
+          ? getDisplayName(rule.store).toLowerCase()
+          : 'all';
+      const isActive = rule.is_active === true;
+
+      const matchesQuery =
+        !q || marketerName.includes(q) || scopeName.includes(q) || getScopeTypeLabel(rule.scope_type).toLowerCase().includes(q);
+
+      const matchesMarketer =
+        selectedMarketerId === 'all' || rule.marketer_id === selectedMarketerId;
+
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'active' && isActive) ||
+        (statusFilter === 'inactive' && !isActive);
+
+      return matchesQuery && matchesMarketer && matchesStatus;
+    });
+  }, [rules, searchQuery, selectedMarketerId, statusFilter, marketerNameMap]);
+
+  const overviewStats = useMemo(() => {
+    const totalClicks = marketers.reduce((sum, item) => sum + Number(item.total_clicks || 0), 0);
+    const totalSales = marketers.reduce((sum, item) => sum + Number(item.total_sales || 0), 0);
+    const totalEarnings = marketers.reduce((sum, item) => sum + Number(item.total_earnings || 0), 0);
+    const activeMarketers = marketers.filter((item) => (item.is_active ?? item.status === 'active') === true).length;
+    const activeLinks = links.filter((item) => item.is_active === true).length;
+    const activeRules = rules.filter((item) => item.is_active === true).length;
+
+    return {
+      totalClicks,
+      totalSales,
+      totalEarnings,
+      activeMarketers,
+      totalMarketers: marketers.length,
+      totalLinks: links.length,
+      activeLinks,
+      totalRules: rules.length,
+      activeRules,
+      conversion: totalClicks > 0 ? `${((totalSales / totalClicks) * 100).toFixed(1)}%` : '0.0%',
+    };
+  }, [marketers, links, rules]);
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setSelectedMarketerId('all');
+    setStatusFilter('all');
+  };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">جاري التحميل...</p>
+          <p className="text-gray-600">جاري تحميل لوحة التسويق بالعمولة...</p>
         </div>
       </div>
     );
@@ -241,83 +492,197 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            إدارة التسويق بالعمولة
-          </h1>
-          <p className="text-gray-600">أدر المسوقين وروابط التسويق بالعمولة</p>
-        </div>
+        <div className="mb-8 rounded-3xl overflow-hidden bg-gradient-to-l from-violet-600 via-fuchsia-600 to-blue-600 text-white shadow-lg">
+          <div className="p-8 lg:p-10">
+            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-sm mb-4">
+                  <Sparkles className="w-4 h-4" />
+                  مركز إدارة الأفلييت
+                </div>
+                <h1 className="text-3xl lg:text-4xl font-bold mb-3">إدارة التسويق بالعمولة</h1>
+                <p className="text-white/90 max-w-2xl leading-7">
+                  لوحة موحدة للمسوقين والروابط وقواعد العمولة والشرائح الزمنية، بحيث تقدر تدير النظام كامل من مكان واحد بشكل واضح وعملي.
+                </p>
+              </div>
 
-        <div className="bg-white rounded-xl shadow-sm mb-6">
-          <div className="border-b border-gray-200">
-            <div className="flex gap-4 p-6">
-              <button
-                onClick={() => setActiveTab('marketers')}
-                className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-colors ${
-                  activeTab === 'marketers'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Users className="w-5 h-5" />
-                <span>المسوقين ({marketers.length})</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('links')}
-                className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-colors ${
-                  activeTab === 'links'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <LinkIcon className="w-5 h-5" />
-                <span>الروابط ({links.length})</span>
-              </button>
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 min-w-[320px]">
+                <SummaryMiniCard
+                  label="المسوقون النشطون"
+                  value={overviewStats.activeMarketers}
+                  icon={<Users className="w-5 h-5" />}
+                />
+                <SummaryMiniCard
+                  label="الروابط النشطة"
+                  value={overviewStats.activeLinks}
+                  icon={<LinkIcon className="w-5 h-5" />}
+                />
+                <SummaryMiniCard
+                  label="قواعد العمولة"
+                  value={overviewStats.activeRules}
+                  icon={<Settings2 className="w-5 h-5" />}
+                />
+                <SummaryMiniCard
+                  label="إجمالي النقرات"
+                  value={overviewStats.totalClicks}
+                  icon={<MousePointerClick className="w-5 h-5" />}
+                />
+                <SummaryMiniCard
+                  label="إجمالي المبيعات"
+                  value={overviewStats.totalSales}
+                  icon={<TrendingUp className="w-5 h-5" />}
+                />
+                <SummaryMiniCard
+                  label="إجمالي الأرباح"
+                  value={formatMoney(overviewStats.totalEarnings)}
+                  icon={<DollarSign className="w-5 h-5" />}
+                />
+              </div>
             </div>
           </div>
+        </div>
 
-          <div className="p-6">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="flex-1 relative">
-                <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  placeholder={
-                    activeTab === 'marketers' ? 'ابحث عن مسوق...' : 'ابحث عن رابط...'
-                  }
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6">
+          <div className="p-4 lg:p-6 border-b border-gray-100">
+            <div className="flex flex-col xl:flex-row xl:items-center gap-4">
+              <div className="flex flex-wrap gap-2">
+                <TopViewTab
+                  active={viewMode === 'overview'}
+                  onClick={() => setViewMode('overview')}
+                  icon={<Layers3 className="w-4 h-4" />}
+                  label="نظرة عامة"
+                />
+                <TopViewTab
+                  active={viewMode === 'marketers'}
+                  onClick={() => setViewMode('marketers')}
+                  icon={<Users className="w-4 h-4" />}
+                  label={`المسوقون (${marketers.length})`}
+                />
+                <TopViewTab
+                  active={viewMode === 'links'}
+                  onClick={() => setViewMode('links')}
+                  icon={<LinkIcon className="w-4 h-4" />}
+                  label={`الروابط (${links.length})`}
+                />
+                <TopViewTab
+                  active={viewMode === 'rules'}
+                  onClick={() => setViewMode('rules')}
+                  icon={<Settings2 className="w-4 h-4" />}
+                  label={`قواعد العمولة (${rules.length})`}
                 />
               </div>
 
-              <button
-                onClick={() =>
-                  activeTab === 'marketers'
-                    ? setShowMarketerModal(true)
-                    : setShowLinkModal(true)
-                }
-                className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 whitespace-nowrap"
-              >
-                <Plus className="w-5 h-5" />
-                <span>{activeTab === 'marketers' ? 'إضافة مسوق' : 'إضافة رابط'}</span>
-              </button>
-            </div>
+              <div className="flex-1"></div>
 
-            {activeTab === 'marketers' ? (
+              <div className="flex flex-wrap gap-2">
+                <QuickActionButton
+                  onClick={() => setShowMarketerModal(true)}
+                  icon={<Plus className="w-4 h-4" />}
+                  label="إضافة مسوق"
+                />
+                <QuickActionButton
+                  onClick={() => setShowLinkModal(true)}
+                  icon={<Plus className="w-4 h-4" />}
+                  label="إضافة رابط"
+                />
+                <QuickActionButton
+                  onClick={() => setShowRuleModal(true)}
+                  icon={<Plus className="w-4 h-4" />}
+                  label="إضافة قاعدة عمولة"
+                  primary
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 lg:p-6 border-b border-gray-100 bg-gray-50/70">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+              <div className="lg:col-span-5 relative">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="ابحث بالاسم أو الكود أو المنتج أو المتجر..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                />
+              </div>
+
+              <div className="lg:col-span-3">
+                <select
+                  value={selectedMarketerId}
+                  onChange={(e) => setSelectedMarketerId(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  <option value="all">كل المسوقين</option>
+                  {marketers.map((marketer) => (
+                    <option key={marketer.id} value={marketer.id}>
+                      {marketer.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="lg:col-span-2">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  <option value="all">كل الحالات</option>
+                  <option value="active">نشط فقط</option>
+                  <option value="inactive">غير نشط فقط</option>
+                </select>
+              </div>
+
+              <div className="lg:col-span-2">
+                <button
+                  onClick={resetFilters}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white hover:bg-gray-100 text-gray-700 font-medium flex items-center justify-center gap-2"
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                  إعادة الضبط
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 lg:p-6">
+            {viewMode === 'overview' && (
+              <OverviewSection
+                stats={overviewStats}
+                marketers={marketers}
+                links={links}
+                rules={rules}
+                onNavigate={onNavigate}
+                onEditMarketer={(marketer) => setEditingMarketer(marketer)}
+                onEditLink={(link) => setEditingLink(link)}
+                onEditRule={(rule) => setEditingRule(rule)}
+              />
+            )}
+
+            {viewMode === 'marketers' && (
               <MarketersTab
                 marketers={filteredMarketers}
                 onEdit={setEditingMarketer}
                 onDelete={handleDeleteMarketer}
-                onViewAnalytics={(marketerId) =>
-                  onNavigate(`marketer-analytics-${marketerId}`)
-                }
+                onViewAnalytics={(marketerId) => onNavigate(`marketer-analytics-${marketerId}`)}
               />
-            ) : (
+            )}
+
+            {viewMode === 'links' && (
               <LinksTab
                 links={filteredLinks}
                 onEdit={setEditingLink}
                 onDelete={handleDeleteLink}
+              />
+            )}
+
+            {viewMode === 'rules' && (
+              <RulesTab
+                rules={filteredRules}
+                onEdit={setEditingRule}
+                onDelete={handleDeleteRule}
               />
             )}
           </div>
@@ -334,7 +699,7 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
           onSuccess={() => {
             setShowMarketerModal(false);
             setEditingMarketer(null);
-            fetchMarketers();
+            fetchAllData();
           }}
         />
       )}
@@ -350,13 +715,346 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
           onSuccess={() => {
             setShowLinkModal(false);
             setEditingLink(null);
-            fetchLinks();
+            fetchAllData();
+          }}
+        />
+      )}
+
+      {(showRuleModal || editingRule) && (
+        <RuleFormModal
+          rule={editingRule}
+          marketers={marketers}
+          onClose={() => {
+            setShowRuleModal(false);
+            setEditingRule(null);
+          }}
+          onSuccess={() => {
+            setShowRuleModal(false);
+            setEditingRule(null);
+            fetchAllData();
           }}
         />
       )}
     </div>
   );
 };
+
+const SummaryMiniCard: React.FC<{
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+}> = ({ label, value, icon }) => (
+  <div className="rounded-2xl bg-white/10 backdrop-blur-sm border border-white/10 px-4 py-3">
+    <div className="flex items-center justify-between mb-2">
+      <span className="text-white/80 text-xs">{label}</span>
+      <div className="text-white/90">{icon}</div>
+    </div>
+    <div className="font-bold text-lg">{value}</div>
+  </div>
+);
+
+const TopViewTab: React.FC<{
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}> = ({ active, onClick, icon, label }) => (
+  <button
+    onClick={onClick}
+    className={`px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-colors ${
+      active
+        ? 'bg-blue-600 text-white shadow-sm'
+        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+    }`}
+  >
+    {icon}
+    <span>{label}</span>
+  </button>
+);
+
+const QuickActionButton: React.FC<{
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  primary?: boolean;
+}> = ({ onClick, icon, label, primary = false }) => (
+  <button
+    onClick={onClick}
+    className={`px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-colors ${
+      primary
+        ? 'bg-violet-600 text-white hover:bg-violet-700'
+        : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+    }`}
+  >
+    {icon}
+    <span>{label}</span>
+  </button>
+);
+
+const OverviewSection: React.FC<{
+  stats: {
+    totalClicks: number;
+    totalSales: number;
+    totalEarnings: number;
+    activeMarketers: number;
+    totalMarketers: number;
+    totalLinks: number;
+    activeLinks: number;
+    totalRules: number;
+    activeRules: number;
+    conversion: string;
+  };
+  marketers: AffiliateMarketerRow[];
+  links: AffiliateLinkRow[];
+  rules: AffiliateRuleRow[];
+  onNavigate: (page: string) => void;
+  onEditMarketer: (marketer: AffiliateMarketerRow) => void;
+  onEditLink: (link: AffiliateLinkRow) => void;
+  onEditRule: (rule: AffiliateRuleRow) => void;
+}> = ({ stats, marketers, links, rules, onNavigate, onEditMarketer, onEditLink, onEditRule }) => {
+  const topMarketers = [...marketers]
+    .sort((a, b) => Number(b.total_earnings || 0) - Number(a.total_earnings || 0))
+    .slice(0, 3);
+
+  const topLinks = [...links]
+    .sort((a, b) => Number(b.earnings || 0) - Number(a.earnings || 0))
+    .slice(0, 3);
+
+  const latestRules = [...rules].slice(0, 3);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <OverviewStatCard
+          title="إجمالي المسوقين"
+          value={stats.totalMarketers}
+          subValue={`${stats.activeMarketers} نشط`}
+          icon={<Users className="w-5 h-5" />}
+        />
+        <OverviewStatCard
+          title="إجمالي الروابط"
+          value={stats.totalLinks}
+          subValue={`${stats.activeLinks} نشط`}
+          icon={<LinkIcon className="w-5 h-5" />}
+        />
+        <OverviewStatCard
+          title="المبيعات من الأفلييت"
+          value={stats.totalSales}
+          subValue={`معدل التحويل ${stats.conversion}`}
+          icon={<TrendingUp className="w-5 h-5" />}
+        />
+        <OverviewStatCard
+          title="إجمالي الأرباح"
+          value={formatMoney(stats.totalEarnings)}
+          subValue={`${stats.totalRules} قاعدة عمولة`}
+          icon={<DollarSign className="w-5 h-5" />}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <PanelCard
+          title="أفضل المسوقين"
+          subtitle="أعلى أداء حسب الأرباح"
+          icon={<Users className="w-5 h-5" />}
+        >
+          {topMarketers.length === 0 ? (
+            <EmptyMiniState text="لا يوجد مسوقون بعد" />
+          ) : (
+            <div className="space-y-3">
+              {topMarketers.map((marketer) => (
+                <div key={marketer.id} className="rounded-2xl border border-gray-100 p-4 bg-gray-50/70">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-gray-900">{marketer.name}</div>
+                      <div className="text-sm text-gray-500 mt-1">
+                        {Number(marketer.total_sales || 0)} مبيعات • {Number(marketer.total_clicks || 0)} نقرات
+                      </div>
+                    </div>
+                    <div className="text-left">
+                      <div className="font-bold text-violet-700">{formatMoney(marketer.total_earnings)}</div>
+                      <button
+                        onClick={() => onNavigate(`marketer-analytics-${marketer.id}`)}
+                        className="text-sm text-blue-600 hover:text-blue-700 mt-1"
+                      >
+                        عرض التفاصيل
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </PanelCard>
+
+        <PanelCard
+          title="أفضل الروابط"
+          subtitle="أعلى الروابط أداءً"
+          icon={<LinkIcon className="w-5 h-5" />}
+        >
+          {topLinks.length === 0 ? (
+            <EmptyMiniState text="لا توجد روابط بعد" />
+          ) : (
+            <div className="space-y-3">
+              {topLinks.map((link) => (
+                <div key={link.id} className="rounded-2xl border border-gray-100 p-4 bg-gray-50/70">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-gray-900 font-mono">{link.code}</div>
+                      <div className="text-sm text-gray-500 mt-1">
+                        {getApplyToLabel(link.apply_to)} • {link.marketer?.name || 'بدون تخصيص'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onEditLink(link)}
+                      className="text-sm text-blue-600 hover:text-blue-700"
+                    >
+                      تعديل
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3 mt-4 text-center">
+                    <MiniMetric label="النقرات" value={link.clicks || 0} />
+                    <MiniMetric label="المبيعات" value={link.sales || 0} />
+                    <MiniMetric label="الأرباح" value={formatMoney(link.earnings)} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </PanelCard>
+
+        <PanelCard
+          title="أحدث قواعد العمولة"
+          subtitle="إدارة القواعد والشرائح الزمنية"
+          icon={<Settings2 className="w-5 h-5" />}
+        >
+          {latestRules.length === 0 ? (
+            <EmptyMiniState text="لا توجد قواعد عمولة بعد" />
+          ) : (
+            <div className="space-y-3">
+              {latestRules.map((rule) => (
+                <div key={rule.id} className="rounded-2xl border border-gray-100 p-4 bg-gray-50/70">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-gray-900">
+                        {rule.marketer?.name || 'مسوق غير معروف'}
+                      </div>
+                      <div className="text-sm text-gray-500 mt-1">
+                        {getScopeTypeLabel(rule.scope_type)} • {formatCommission(rule.commission_type, rule.commission_value)}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onEditRule(rule)}
+                      className="text-sm text-blue-600 hover:text-blue-700"
+                    >
+                      تعديل
+                    </button>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <TagChip text={`الأولوية ${rule.priority || 100}`} />
+                    <TagChip text={`${rule.tiers?.length || 0} شرائح`} />
+                    <TagChip text={rule.is_active ? 'نشطة' : 'غير نشطة'} success={rule.is_active === true} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </PanelCard>
+      </div>
+
+      <div className="rounded-3xl border border-blue-100 bg-gradient-to-l from-blue-50 to-violet-50 p-6">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+            <Target className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">كيف صار النظام الآن أوضح؟</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700 leading-7">
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 mt-1 text-green-600 shrink-0" />
+                <span>المسوقون والروابط والقواعد داخل مركز واحد بدل تشتيت الإدارة.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 mt-1 text-green-600 shrink-0" />
+                <span>قواعد العمولة تدعم قاعدة عامة أو على منتج أو متجر.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 mt-1 text-green-600 shrink-0" />
+                <span>إمكانية إضافة شرائح حسب الأيام مثل 0-7 و 8-30 بشكل واضح.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 mt-1 text-green-600 shrink-0" />
+                <span>النظرة العامة تعرض الأداء الفعلي بدل أرقام موزعة بشكل مربك.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const OverviewStatCard: React.FC<{
+  title: string;
+  value: string | number;
+  subValue: string;
+  icon: React.ReactNode;
+}> = ({ title, value, subValue, icon }) => (
+  <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+    <div className="flex items-center justify-between mb-4">
+      <div className="text-sm text-gray-500">{title}</div>
+      <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
+        {icon}
+      </div>
+    </div>
+    <div className="text-2xl font-bold text-gray-900 mb-1">{value}</div>
+    <div className="text-sm text-gray-500">{subValue}</div>
+  </div>
+);
+
+const PanelCard: React.FC<{
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ title, subtitle, icon, children }) => (
+  <div className="rounded-3xl border border-gray-100 bg-white p-5 shadow-sm">
+    <div className="flex items-start gap-3 mb-5">
+      <div className="w-10 h-10 rounded-2xl bg-gray-100 text-gray-700 flex items-center justify-center shrink-0">
+        {icon}
+      </div>
+      <div>
+        <h3 className="font-bold text-gray-900">{title}</h3>
+        <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
+      </div>
+    </div>
+    {children}
+  </div>
+);
+
+const EmptyMiniState: React.FC<{ text: string }> = ({ text }) => (
+  <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
+    {text}
+  </div>
+);
+
+const MiniMetric: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
+  <div className="rounded-xl bg-white border border-gray-100 px-3 py-3">
+    <div className="text-xs text-gray-500 mb-1">{label}</div>
+    <div className="font-bold text-gray-900">{value}</div>
+  </div>
+);
+
+const TagChip: React.FC<{ text: string; success?: boolean }> = ({ text, success = false }) => (
+  <span
+    className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+      success ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+    }`}
+  >
+    {text}
+  </span>
+);
 
 interface MarketersTabProps {
   marketers: AffiliateMarketerRow[];
@@ -373,112 +1071,96 @@ const MarketersTab: React.FC<MarketersTabProps> = ({
 }) => {
   if (marketers.length === 0) {
     return (
-      <div className="text-center py-12 bg-gray-50 rounded-lg">
+      <div className="text-center py-16 bg-gray-50 rounded-3xl border border-dashed border-gray-300">
         <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-xl font-bold text-gray-900 mb-2">لا يوجد مسوقين</h3>
-        <p className="text-gray-600">ابدأ بإضافة مسوقين للترويج لمنتجاتك</p>
+        <h3 className="text-xl font-bold text-gray-900 mb-2">لا يوجد مسوقون</h3>
+        <p className="text-gray-600">ابدأ بإضافة مسوقين ثم أنشئ لهم قواعد وروابط واضحة.</p>
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
       {marketers.map((marketer) => {
         const isActive = marketer.is_active ?? marketer.status === 'active';
 
         return (
           <div
             key={marketer.id}
-            className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
+            className="bg-white border border-gray-200 rounded-3xl p-6 hover:shadow-md transition-shadow"
           >
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-600 rounded-lg flex items-center justify-center">
-                  <Users className="w-6 h-6 text-white" />
+            <div className="flex items-start justify-between mb-5 gap-4">
+              <div className="flex items-center gap-4 min-w-0">
+                <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-pink-600 rounded-2xl flex items-center justify-center shrink-0">
+                  <Users className="w-7 h-7 text-white" />
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">{marketer.name}</h3>
-                  <div className="flex items-center gap-2 mt-1">
+
+                <div className="min-w-0">
+                  <h3 className="text-lg font-bold text-gray-900 truncate">{marketer.name}</h3>
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
                     <span
-                      className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                        isActive
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-red-100 text-red-700'
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                        isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                       }`}
                     >
                       {isActive ? 'نشط' : 'غير نشط'}
                     </span>
 
-                    {marketer.status && (
-                      <span className="text-sm text-gray-600">
-                        الحالة: {marketer.status === 'active' ? 'نشط' : marketer.status}
-                      </span>
-                    )}
+                    {marketer.email && <TagChip text={marketer.email} />}
+                    {marketer.phone && <TagChip text={marketer.phone} />}
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   onClick={() => onViewAnalytics(marketer.id)}
-                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                  className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-xl"
                   title="عرض التحليلات"
                 >
-                  <BarChart3 className="w-5 h-5" />
+                  <Eye className="w-5 h-5" />
                 </button>
                 <button
                   onClick={() => onEdit(marketer)}
-                  className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  className="p-2.5 text-gray-600 hover:bg-gray-100 rounded-xl"
                 >
                   <Edit className="w-5 h-5" />
                 </button>
                 <button
                   onClick={() => onDelete(marketer.id)}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                  className="p-2.5 text-red-600 hover:bg-red-50 rounded-xl"
                 >
                   <Trash2 className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-200">
-              <div>
-                <div className="flex items-center gap-1 text-gray-600 mb-1">
-                  <MousePointerClick className="w-4 h-4" />
-                  <span className="text-xs">النقرات</span>
-                </div>
-                <div className="text-xl font-bold text-gray-900">
-                  {marketer.total_clicks || 0}
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-1 text-gray-600 mb-1">
-                  <TrendingUp className="w-4 h-4" />
-                  <span className="text-xs">المبيعات</span>
-                </div>
-                <div className="text-xl font-bold text-gray-900">
-                  {marketer.total_sales || 0}
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-1 text-gray-600 mb-1">
-                  <DollarSign className="w-4 h-4" />
-                  <span className="text-xs">الأرباح</span>
-                </div>
-                <div className="text-xl font-bold text-gray-900">
-                  {Number(marketer.total_earnings || 0).toFixed(2)} ر.س
-                </div>
-              </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <MetricCard
+                icon={<MousePointerClick className="w-4 h-4" />}
+                label="النقرات"
+                value={marketer.total_clicks || 0}
+              />
+              <MetricCard
+                icon={<TrendingUp className="w-4 h-4" />}
+                label="المبيعات"
+                value={marketer.total_sales || 0}
+              />
+              <MetricCard
+                icon={<DollarSign className="w-4 h-4" />}
+                label="الأرباح"
+                value={formatMoney(marketer.total_earnings)}
+              />
+              <MetricCard
+                icon={<Percent className="w-4 h-4" />}
+                label="التحويل"
+                value={conversionRate(marketer.total_clicks, marketer.total_sales)}
+              />
             </div>
 
-            {(marketer.email || marketer.phone) && (
-              <div className="mt-4 pt-4 border-t border-gray-200 space-y-1">
-                {marketer.email && (
-                  <div className="text-sm text-gray-600">📧 {marketer.email}</div>
-                )}
-                {marketer.phone && (
-                  <div className="text-sm text-gray-600">📱 {marketer.phone}</div>
-                )}
+            {marketer.notes && (
+              <div className="mt-5 rounded-2xl bg-gray-50 border border-gray-100 p-4 text-sm text-gray-600 leading-7">
+                {marketer.notes}
               </div>
             )}
           </div>
@@ -487,6 +1169,20 @@ const MarketersTab: React.FC<MarketersTabProps> = ({
     </div>
   );
 };
+
+const MetricCard: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+}> = ({ icon, label, value }) => (
+  <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+    <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
+      {icon}
+      <span>{label}</span>
+    </div>
+    <div className="text-lg font-bold text-gray-900">{value}</div>
+  </div>
+);
 
 interface LinksTabProps {
   links: AffiliateLinkRow[];
@@ -497,120 +1193,278 @@ interface LinksTabProps {
 const LinksTab: React.FC<LinksTabProps> = ({ links, onEdit, onDelete }) => {
   if (links.length === 0) {
     return (
-      <div className="text-center py-12 bg-gray-50 rounded-lg">
+      <div className="text-center py-16 bg-gray-50 rounded-3xl border border-dashed border-gray-300">
         <LinkIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
         <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد روابط</h3>
-        <p className="text-gray-600">ابدأ بإنشاء روابط تسويق بالعمولة</p>
+        <p className="text-gray-600">أنشئ روابطك مع ربطها بالمسوق والمنتج أو المتجر بطريقة واضحة.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {links.map((link) => (
         <div
           key={link.id}
-          className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
+          className="bg-white border border-gray-200 rounded-3xl p-6 hover:shadow-md transition-shadow"
         >
-          <div className="flex items-start justify-between mb-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-lg flex items-center justify-center">
-                  <LinkIcon className="w-5 h-5 text-white" />
+          <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-start gap-4">
+                <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-2xl flex items-center justify-center shrink-0">
+                  <LinkIcon className="w-7 h-7 text-white" />
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 font-mono">{link.code}</h3>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <h3 className="text-xl font-bold text-gray-900 font-mono">{link.code}</h3>
                     <span
-                      className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                        link.is_active
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-red-100 text-red-700'
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                        link.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                       }`}
                     >
                       {link.is_active ? 'نشط' : 'غير نشط'}
                     </span>
+                    <TagChip text={getApplyToLabel(link.apply_to)} />
+                  </div>
 
-                    <span className="text-sm text-gray-600">
-                      {getApplyToLabel(link.apply_to)}
-                    </span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-600">
+                    <InfoRow
+                      icon={<Users className="w-4 h-4" />}
+                      label="المسوق"
+                      value={link.marketer?.name || 'بدون تخصيص'}
+                    />
+                    <InfoRow
+                      icon={<Package className="w-4 h-4" />}
+                      label="المنتج"
+                      value={
+                        link.apply_to === 'product'
+                          ? getDisplayName(link.product)
+                          : link.apply_to === 'all'
+                          ? 'جميع المنتجات'
+                          : '—'
+                      }
+                    />
+                    <InfoRow
+                      icon={<StoreIcon className="w-4 h-4" />}
+                      label="المتجر"
+                      value={
+                        link.apply_to === 'store'
+                          ? getDisplayName(link.store)
+                          : link.apply_to === 'all'
+                          ? 'جميع متاجر التاجر'
+                          : '—'
+                      }
+                    />
+                    <InfoRow
+                      icon={<CalendarRange className="w-4 h-4" />}
+                      label="الوصف"
+                      value={link.description || 'بدون وصف'}
+                    />
+                  </div>
+
+                  <div className="mt-4">
+                    <CopyLinkButton
+                      url={`${window.location.origin}?ref=${link.code}`}
+                      label="نسخ رابط التسويق"
+                      variant="minimal"
+                    />
                   </div>
                 </div>
               </div>
-
-              <div className="space-y-2 mb-3">
-                {link.product && (
-                  <div className="text-sm text-gray-600">
-                    📦 المنتج: {getDisplayName(link.product)}
-                  </div>
-                )}
-
-                {link.store && (
-                  <div className="text-sm text-gray-600">
-                    🏪 المتجر: {getDisplayName(link.store)}
-                  </div>
-                )}
-
-                {link.marketer && (
-                  <div className="text-sm text-gray-600">
-                    👤 المسوق: {link.marketer.name || 'بدون اسم'}
-                  </div>
-                )}
-
-                {link.apply_to === 'all' && (
-                  <div className="text-sm text-gray-600">🌐 جميع منتجات التاجر</div>
-                )}
-
-                {link.description && (
-                  <div className="text-sm text-gray-500">{link.description}</div>
-                )}
-              </div>
-
-              <CopyLinkButton
-                url={`${window.location.origin}?ref=${link.code}`}
-                label="نسخ رابط التسويق"
-                variant="minimal"
-              />
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => onEdit(link)}
-                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-              >
-                <Edit className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => onDelete(link.id)}
-                className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-              >
-                <Trash2 className="w-5 h-5" />
-              </button>
+            <div className="xl:w-[360px]">
+              <div className="grid grid-cols-2 gap-3">
+                <MetricCard
+                  icon={<MousePointerClick className="w-4 h-4" />}
+                  label="النقرات"
+                  value={link.clicks || 0}
+                />
+                <MetricCard
+                  icon={<TrendingUp className="w-4 h-4" />}
+                  label="المبيعات"
+                  value={link.sales || 0}
+                />
+                <MetricCard
+                  icon={<DollarSign className="w-4 h-4" />}
+                  label="الأرباح"
+                  value={formatMoney(link.earnings)}
+                />
+                <MetricCard
+                  icon={<Percent className="w-4 h-4" />}
+                  label="التحويل"
+                  value={conversionRate(link.clicks, link.sales)}
+                />
+              </div>
+
+              <div className="flex items-center gap-2 mt-4">
+                <button
+                  onClick={() => onEdit(link)}
+                  className="flex-1 px-4 py-3 rounded-2xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 flex items-center justify-center gap-2"
+                >
+                  <Edit className="w-4 h-4" />
+                  تعديل الرابط
+                </button>
+                <button
+                  onClick={() => onDelete(link.id)}
+                  className="px-4 py-3 rounded-2xl border border-red-200 text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
-          <div className="grid grid-cols-4 gap-4 pt-4 border-t border-gray-200">
-            <div>
-              <div className="text-xs text-gray-600 mb-1">النقرات</div>
-              <div className="text-xl font-bold text-gray-900">{link.clicks || 0}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-600 mb-1">المبيعات</div>
-              <div className="text-xl font-bold text-gray-900">{link.sales || 0}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-600 mb-1">الأرباح</div>
-              <div className="text-xl font-bold text-gray-900">
-                {Number(link.earnings || 0).toFixed(2)} ر.س
+const InfoRow: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}> = ({ icon, label, value }) => (
+  <div className="rounded-2xl bg-gray-50 border border-gray-100 px-4 py-3">
+    <div className="flex items-center gap-2 text-gray-500 mb-1">
+      {icon}
+      <span className="text-xs">{label}</span>
+    </div>
+    <div className="font-medium text-gray-800 truncate">{value}</div>
+  </div>
+);
+
+interface RulesTabProps {
+  rules: AffiliateRuleRow[];
+  onEdit: (rule: AffiliateRuleRow) => void;
+  onDelete: (ruleId: string) => void;
+}
+
+const RulesTab: React.FC<RulesTabProps> = ({ rules, onEdit, onDelete }) => {
+  if (rules.length === 0) {
+    return (
+      <div className="text-center py-16 bg-gray-50 rounded-3xl border border-dashed border-gray-300">
+        <Settings2 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+        <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد قواعد عمولة</h3>
+        <p className="text-gray-600">ابدأ بإنشاء قاعدة عامة أو على منتج أو متجر، ثم أضف الشرائح حسب الأيام.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {rules.map((rule) => (
+        <div key={rule.id} className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
+            <div className="flex-1">
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <span className="text-lg font-bold text-gray-900">
+                  {rule.marketer?.name || 'مسوق غير معروف'}
+                </span>
+                <TagChip text={getScopeTypeLabel(rule.scope_type)} />
+                <TagChip text={formatCommission(rule.commission_type, rule.commission_value)} success />
+                <TagChip text={`الأولوية ${rule.priority || 100}`} />
+                <TagChip text={rule.is_active ? 'نشطة' : 'غير نشطة'} success={rule.is_active === true} />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                <InfoRow
+                  icon={<Users className="w-4 h-4" />}
+                  label="المسوق"
+                  value={rule.marketer?.name || '—'}
+                />
+                <InfoRow
+                  icon={<Package className="w-4 h-4" />}
+                  label="المنتج"
+                  value={rule.scope_type === 'product' ? getDisplayName(rule.product) : '—'}
+                />
+                <InfoRow
+                  icon={<StoreIcon className="w-4 h-4" />}
+                  label="المتجر"
+                  value={rule.scope_type === 'store' ? getDisplayName(rule.store) : '—'}
+                />
+              </div>
+
+              <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <CalendarRange className="w-4 h-4 text-gray-500" />
+                  <span className="font-semibold text-gray-800">شرائح العمولة حسب الأيام</span>
+                </div>
+
+                {!rule.tiers || rule.tiers.length === 0 ? (
+                  <div className="text-sm text-gray-500">
+                    لا توجد شرائح. سيتم استخدام العمولة الأساسية لهذه القاعدة.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {rule.tiers.map((tier) => (
+                      <div
+                        key={tier.id}
+                        className="grid grid-cols-1 md:grid-cols-4 gap-2 rounded-xl bg-white border border-gray-100 px-4 py-3 text-sm"
+                      >
+                        <div>
+                          <span className="text-gray-500">من اليوم:</span>{' '}
+                          <span className="font-medium text-gray-900">{tier.day_from ?? 0}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">إلى اليوم:</span>{' '}
+                          <span className="font-medium text-gray-900">
+                            {tier.day_to ?? 'مفتوح'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">العمولة:</span>{' '}
+                          <span className="font-medium text-gray-900">
+                            {formatCommission(tier.commission_type, tier.commission_value)}
+                          </span>
+                        </div>
+                        <div>
+                          <span
+                            className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${
+                              tier.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                            }`}
+                          >
+                            {tier.is_active ? 'نشطة' : 'غير نشطة'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-gray-600 mb-1">معدل التحويل</div>
-              <div className="text-xl font-bold text-gray-900">
-                {(link.clicks || 0) > 0
-                  ? (((link.sales || 0) / (link.clicks || 0)) * 100).toFixed(1)
-                  : '0'}
-                %
+
+            <div className="xl:w-[220px]">
+              <div className="rounded-2xl bg-gray-50 border border-gray-100 p-4">
+                <div className="text-sm text-gray-500 mb-2">ملخص القاعدة</div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500">العمولة الأساسية</span>
+                    <span className="font-bold text-gray-900">
+                      {formatCommission(rule.commission_type, rule.commission_value)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500">عدد الشرائح</span>
+                    <span className="font-bold text-gray-900">{rule.tiers?.length || 0}</span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={() => onEdit(rule)}
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-white"
+                  >
+                    تعديل
+                  </button>
+                  <button
+                    onClick={() => onDelete(rule.id)}
+                    className="px-4 py-2.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -692,113 +1546,87 @@ const MarketerFormModal: React.FC<MarketerFormModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-gray-900">
-            {marketer ? 'تعديل المسوق' : 'إضافة مسوق جديد'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            ×
-          </button>
+    <ModalShell
+      title={marketer ? 'تعديل المسوق' : 'إضافة مسوق جديد'}
+      subtitle="أنشئ مسوقًا واحدًا ثم اربط له القواعد والروابط من نفس اللوحة."
+      onClose={onClose}
+      size="lg"
+    >
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {error && <ErrorBox text={error} />}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            اسم المسوق <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            required
+          />
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-              {error}
-            </div>
-          )}
-
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              اسم المسوق <span className="text-red-500">*</span>
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
             <input
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              dir="ltr"
             />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                البريد الإلكتروني
-              </label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                dir="ltr"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                رقم الهاتف
-              </label>
-              <input
-                type="tel"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                dir="ltr"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
-            نسبة العمولة لم تعد تُحفظ داخل المسوق نفسه، بل تُدار عبر قواعد العمولة وروابط الأفلييت.
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              ملاحظات
-            </label>
-            <textarea
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              rows={4}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-
-          <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
+            <label className="block text-sm font-medium text-gray-700 mb-2">رقم الهاتف</label>
             <input
-              type="checkbox"
-              id="is_active_marketer"
-              checked={formData.is_active}
-              onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-              className="w-5 h-5 text-blue-600 rounded"
+              type="tel"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              dir="ltr"
             />
-            <label htmlFor="is_active_marketer" className="text-sm text-gray-700 cursor-pointer">
-              المسوق نشط
-            </label>
           </div>
+        </div>
 
-          <div className="flex gap-4 pt-6 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50"
-            >
-              إلغاء
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? 'جاري الحفظ...' : marketer ? 'حفظ التغييرات' : 'إضافة المسوق'}
-            </button>
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800 leading-7">
+          المسوق هنا هو الشخص فقط، أما العمولة فتُدار من تبويب <strong>قواعد العمولة</strong> بحيث تقدر تضبط عمولة عامة أو حسب المنتج أو المتجر أو الأيام.
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات داخلية</label>
+          <textarea
+            value={formData.notes}
+            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+            rows={4}
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            placeholder="مثال: هذا المسوق متخصص بإعلانات تيك توك أو جمهور معين..."
+          />
+        </div>
+
+        <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={formData.is_active}
+            onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+            className="w-5 h-5 text-blue-600 rounded"
+          />
+          <div>
+            <div className="font-medium text-gray-900">المسوق نشط</div>
+            <div className="text-sm text-gray-500">يمكنه استقبال الروابط والعمولات إذا كان نشطًا.</div>
           </div>
-        </form>
-      </div>
-    </div>
+        </label>
+
+        <ModalActions
+          onClose={onClose}
+          submitText={loading ? 'جاري الحفظ...' : marketer ? 'حفظ التغييرات' : 'إضافة المسوق'}
+          loading={loading}
+        />
+      </form>
+    </ModalShell>
   );
 };
 
@@ -956,28 +1784,20 @@ const LinkFormModal: React.FC<LinkFormModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-gray-900">
-            {link ? 'تعديل رابط التسويق' : 'إنشاء رابط تسويق جديد'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            ×
-          </button>
+    <ModalShell
+      title={link ? 'تعديل رابط التسويق' : 'إنشاء رابط تسويق جديد'}
+      subtitle="أنشئ رابطًا واضحًا واربطه بالمسوق والنطاق المناسب، بينما العمولة نفسها تُدار من قواعد العمولة."
+      onClose={onClose}
+      size="lg"
+    >
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {error && <ErrorBox text={error} />}
+
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800 leading-7">
+          الرابط هنا مخصص للتتبع والتوزيع، أما نسبة العمولة الأساسية أو الشرائح الزمنية فتُدار من تبويب <strong>قواعد العمولة</strong>.
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-              {error}
-            </div>
-          )}
-
-          <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
-            نسبة العمولة لم تعد تُحفظ داخل الرابط نفسه، بل تأتي لاحقًا من قواعد العمولة الخاصة بالأفلييت.
-          </div>
-
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               كود الرابط <span className="text-red-500">*</span>
@@ -985,147 +1805,704 @@ const LinkFormModal: React.FC<LinkFormModalProps> = ({
             <input
               type="text"
               value={formData.code}
-              onChange={(e) =>
-                setFormData({ ...formData, code: e.target.value.toUpperCase() })
-              }
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
+              onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
               placeholder="AFF2024"
               required
             />
             <p className="mt-2 text-xs text-gray-500">
-              يجب أن يكون كود الرابط فريدًا وغير مستخدم من قبل.
+              يفضل أن يكون الكود واضحًا ومميزًا للمسوق أو الحملة.
             </p>
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">المسوق (اختياري)</label>
+            <select
+              value={formData.marketer_id}
+              onChange={(e) => setFormData({ ...formData, marketer_id: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">-- بدون تخصيص --</option>
+              {marketers.map((marketer) => (
+                <option key={marketer.id} value={marketer.id}>
+                  {marketer.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            نطاق التطبيق <span className="text-red-500">*</span>
+          </label>
+          <select
+            value={formData.apply_to}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                apply_to: e.target.value as 'product' | 'store' | 'all',
+                product_id: e.target.value === 'product' ? formData.product_id : '',
+                store_id: e.target.value === 'store' ? formData.store_id : '',
+              })
+            }
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            required
+          >
+            <option value="product">منتج محدد</option>
+            <option value="store">متجر محدد</option>
+            <option value="all">جميع منتجاتي</option>
+          </select>
+        </div>
+
+        {formData.apply_to === 'product' && (
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              نطاق التطبيق <span className="text-red-500">*</span>
+              اختر المنتج <span className="text-red-500">*</span>
             </label>
             <select
-              value={formData.apply_to}
+              value={formData.product_id}
+              onChange={(e) => setFormData({ ...formData, product_id: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            >
+              <option value="">-- اختر منتج --</option>
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {getDisplayName(product)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {formData.apply_to === 'store' && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              اختر المتجر <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={formData.store_id}
+              onChange={(e) => setFormData({ ...formData, store_id: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            >
+              <option value="">-- اختر متجر --</option>
+              {stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {getDisplayName(store)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">وصف الرابط</label>
+          <textarea
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            rows={3}
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            placeholder="مثال: رابط حملة انستغرام للمسوق فلان"
+          />
+        </div>
+
+        <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={formData.is_active}
+            onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+            className="w-5 h-5 text-blue-600 rounded"
+          />
+          <div>
+            <div className="font-medium text-gray-900">الرابط نشط</div>
+            <div className="text-sm text-gray-500">يمكن استخدامه وتتبع نتائجه إذا كان نشطًا.</div>
+          </div>
+        </label>
+
+        <ModalActions
+          onClose={onClose}
+          submitText={loading ? 'جاري الحفظ...' : link ? 'حفظ التغييرات' : 'إنشاء الرابط'}
+          loading={loading}
+        />
+      </form>
+    </ModalShell>
+  );
+};
+
+interface RuleFormModalProps {
+  rule?: AffiliateRuleRow | null;
+  marketers: AffiliateMarketerRow[];
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+const RuleFormModal: React.FC<RuleFormModalProps> = ({
+  rule,
+  marketers,
+  onClose,
+  onSuccess,
+}) => {
+  const { user } = useAuth();
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [stores, setStores] = useState<StoreOption[]>([]);
+
+  const initialTiers: TierDraft[] =
+    rule?.tiers?.map((tier) => ({
+      id: tier.id,
+      localId: tier.id || createLocalTierId(),
+      day_from: tier.day_from?.toString() ?? '0',
+      day_to: tier.day_to?.toString() ?? '',
+      commission_type: (tier.commission_type as 'percentage' | 'fixed') || 'percentage',
+      commission_value: tier.commission_value?.toString() ?? '',
+      is_active: tier.is_active ?? true,
+    })) || [];
+
+  const [formData, setFormData] = useState({
+    marketer_id: rule?.marketer_id || '',
+    scope_type: (rule?.scope_type as 'product' | 'store' | 'all') || 'all',
+    product_id: rule?.product_id || '',
+    store_id: rule?.store_id || '',
+    commission_type: (rule?.commission_type as 'percentage' | 'fixed') || 'percentage',
+    commission_value:
+      rule?.commission_value !== null && rule?.commission_value !== undefined
+        ? String(rule.commission_value)
+        : '',
+    priority: rule?.priority !== null && rule?.priority !== undefined ? String(rule.priority) : '100',
+    is_active: rule?.is_active ?? true,
+  });
+
+  const [tiers, setTiers] = useState<TierDraft[]>(initialTiers);
+
+  useEffect(() => {
+    fetchOptions();
+  }, [user?.id]);
+
+  const fetchOptions = async () => {
+    if (!user?.id) return;
+
+    try {
+      const [{ data: productsData, error: productsError }, { data: storesData, error: storesError }] =
+        await Promise.all([
+          supabase
+            .from('products')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('stores')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false }),
+        ]);
+
+      if (productsError) console.error(productsError);
+      if (storesError) console.error(storesError);
+
+      setProducts((productsData || []) as ProductOption[]);
+      setStores((storesData || []) as StoreOption[]);
+    } catch (error) {
+      console.error('Error fetching rule options:', error);
+    }
+  };
+
+  const addTier = () => {
+    setTiers((prev) => [
+      ...prev,
+      {
+        localId: createLocalTierId(),
+        day_from: '0',
+        day_to: '',
+        commission_type: 'percentage',
+        commission_value: '',
+        is_active: true,
+      },
+    ]);
+  };
+
+  const updateTier = (localId: string, patch: Partial<TierDraft>) => {
+    setTiers((prev) =>
+      prev.map((tier) => (tier.localId === localId ? { ...tier, ...patch } : tier))
+    );
+  };
+
+  const removeTier = (localId: string) => {
+    setTiers((prev) => prev.filter((tier) => tier.localId !== localId));
+  };
+
+  const validateTiers = () => {
+    for (const tier of tiers) {
+      if (tier.commission_value.trim() === '') {
+        throw new Error('كل شريحة يجب أن تحتوي على قيمة عمولة');
+      }
+
+      if (Number(tier.day_from) < 0) {
+        throw new Error('يوم البداية في الشرائح لا يمكن أن يكون أقل من 0');
+      }
+
+      if (tier.day_to.trim() !== '' && Number(tier.day_to) < Number(tier.day_from)) {
+        throw new Error('يوم النهاية يجب أن يكون أكبر من أو يساوي يوم البداية');
+      }
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.id) return;
+
+    setError('');
+    setLoading(true);
+
+    try {
+      if (!formData.marketer_id) {
+        throw new Error('اختر المسوق');
+      }
+
+      if (formData.scope_type === 'product' && !formData.product_id) {
+        throw new Error('اختر المنتج لهذه القاعدة');
+      }
+
+      if (formData.scope_type === 'store' && !formData.store_id) {
+        throw new Error('اختر المتجر لهذه القاعدة');
+      }
+
+      if (formData.commission_value.trim() === '') {
+        throw new Error('أدخل قيمة العمولة الأساسية');
+      }
+
+      validateTiers();
+
+      const payload = {
+        seller_id: user.id,
+        marketer_id: formData.marketer_id,
+        scope_type: formData.scope_type,
+        product_id: formData.scope_type === 'product' ? formData.product_id : null,
+        store_id: formData.scope_type === 'store' ? formData.store_id : null,
+        commission_type: formData.commission_type,
+        commission_value: Number(formData.commission_value),
+        priority: Number(formData.priority || 100),
+        is_active: formData.is_active,
+      };
+
+      let ruleId = rule?.id || '';
+
+      if (rule) {
+        const { error: updateError } = await supabase
+          .from('affiliate_rules')
+          .update(payload)
+          .eq('id', rule.id)
+          .eq('seller_id', user.id);
+
+        if (updateError) throw updateError;
+      } else {
+        const { data: insertedRule, error: insertError } = await supabase
+          .from('affiliate_rules')
+          .insert(payload)
+          .select('id')
+          .single();
+
+        if (insertError) throw insertError;
+        ruleId = insertedRule.id;
+      }
+
+      if (!ruleId && rule?.id) {
+        ruleId = rule.id;
+      }
+
+      const existingTierIds = new Set((rule?.tiers || []).map((tier) => tier.id));
+      const currentTierIds = new Set(tiers.filter((tier) => tier.id).map((tier) => tier.id as string));
+
+      const tierIdsToDelete = [...existingTierIds].filter((id) => !currentTierIds.has(id));
+
+      if (tierIdsToDelete.length > 0) {
+        const { error: deleteTiersError } = await supabase
+          .from('affiliate_rule_tiers')
+          .delete()
+          .in('id', tierIdsToDelete);
+
+        if (deleteTiersError) throw deleteTiersError;
+      }
+
+      for (const tier of tiers) {
+        const tierPayload = {
+          rule_id: ruleId,
+          day_from: Number(tier.day_from || 0),
+          day_to: tier.day_to.trim() === '' ? null : Number(tier.day_to),
+          commission_type: tier.commission_type,
+          commission_value: Number(tier.commission_value),
+          is_active: tier.is_active,
+        };
+
+        if (tier.id) {
+          const { error: updateTierError } = await supabase
+            .from('affiliate_rule_tiers')
+            .update(tierPayload)
+            .eq('id', tier.id);
+
+          if (updateTierError) throw updateTierError;
+        } else {
+          const { error: insertTierError } = await supabase
+            .from('affiliate_rule_tiers')
+            .insert(tierPayload);
+
+          if (insertTierError) throw insertTierError;
+        }
+      }
+
+      onSuccess();
+    } catch (err: any) {
+      console.error('Error saving affiliate rule:', err);
+      setError(err.message || 'حدث خطأ أثناء حفظ قاعدة العمولة');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <ModalShell
+      title={rule ? 'تعديل قاعدة العمولة' : 'إنشاء قاعدة عمولة جديدة'}
+      subtitle="اضبط العمولة الأساسية ثم أضف شرائح حسب الأيام إذا كنت تريد عمولة مختلفة بمرور الوقت."
+      onClose={onClose}
+      size="xl"
+    >
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {error && <ErrorBox text={error} />}
+
+        <div className="rounded-2xl border border-violet-100 bg-violet-50 p-4 text-sm text-violet-800 leading-7">
+          مثال احترافي: عمولة أساسية 10%، ثم شريحة من 0 إلى 7 أيام = 20%، ومن 8 إلى 30 = 12%، وبعدها يرجع للعمولة الأساسية.
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              المسوق <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={formData.marketer_id}
+              onChange={(e) => setFormData({ ...formData, marketer_id: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            >
+              <option value="">-- اختر المسوق --</option>
+              {marketers.map((marketer) => (
+                <option key={marketer.id} value={marketer.id}>
+                  {marketer.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              نوع القاعدة <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={formData.scope_type}
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  apply_to: e.target.value as 'product' | 'store' | 'all',
+                  scope_type: e.target.value as 'product' | 'store' | 'all',
                   product_id: e.target.value === 'product' ? formData.product_id : '',
                   store_id: e.target.value === 'store' ? formData.store_id : '',
                 })
               }
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               required
             >
-              <option value="product">منتج محدد</option>
-              <option value="store">متجر محدد</option>
-              <option value="all">جميع منتجاتي</option>
+              <option value="all">قاعدة عامة</option>
+              <option value="product">على منتج محدد</option>
+              <option value="store">على متجر محدد</option>
+            </select>
+          </div>
+        </div>
+
+        {formData.scope_type === 'product' && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              المنتج <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={formData.product_id}
+              onChange={(e) => setFormData({ ...formData, product_id: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            >
+              <option value="">-- اختر المنتج --</option>
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {getDisplayName(product)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {formData.scope_type === 'store' && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              المتجر <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={formData.store_id}
+              onChange={(e) => setFormData({ ...formData, store_id: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            >
+              <option value="">-- اختر المتجر --</option>
+              {stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {getDisplayName(store)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              نوع العمولة الأساسية
+            </label>
+            <select
+              value={formData.commission_type}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  commission_type: e.target.value as 'percentage' | 'fixed',
+                })
+              }
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="percentage">نسبة مئوية %</option>
+              <option value="fixed">مبلغ ثابت</option>
             </select>
           </div>
 
-          {formData.apply_to === 'product' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                اختر المنتج <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.product_id}
-                onChange={(e) => setFormData({ ...formData, product_id: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">-- اختر منتج --</option>
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {getDisplayName(product)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {formData.apply_to === 'store' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                اختر المتجر <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.store_id}
-                onChange={(e) => setFormData({ ...formData, store_id: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">-- اختر متجر --</option>
-                {stores.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {getDisplayName(store)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {marketers.length > 0 && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                المسوق (اختياري)
-              </label>
-              <select
-                value={formData.marketer_id}
-                onChange={(e) => setFormData({ ...formData, marketer_id: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">-- بدون تخصيص --</option>
-                {marketers.map((marketer) => (
-                  <option key={marketer.id} value={marketer.id}>
-                    {marketer.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              قيمة العمولة الأساسية
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={formData.commission_value}
+              onChange={(e) => setFormData({ ...formData, commission_value: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder={formData.commission_type === 'percentage' ? '10' : '25'}
+            />
+          </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              وصف الرابط
+              الأولوية
             </label>
-            <textarea
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              rows={3}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="مثال: رابط لحملة إعلانية على فيسبوك"
-            />
-          </div>
-
-          <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
             <input
-              type="checkbox"
-              id="is_active_link"
-              checked={formData.is_active}
-              onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-              className="w-5 h-5 text-blue-600 rounded"
+              type="number"
+              min="1"
+              step="1"
+              value={formData.priority}
+              onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="100"
             />
-            <label htmlFor="is_active_link" className="text-sm text-gray-700 cursor-pointer">
-              الرابط نشط
-            </label>
+            <p className="mt-2 text-xs text-gray-500">
+              الرقم الأقل يعني أولوية أعلى.
+            </p>
           </div>
+        </div>
 
-          <div className="flex gap-4 pt-6 border-t border-gray-200">
+        <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={formData.is_active}
+            onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+            className="w-5 h-5 text-blue-600 rounded"
+          />
+          <div>
+            <div className="font-medium text-gray-900">القاعدة نشطة</div>
+            <div className="text-sm text-gray-500">لن تُستخدم القاعدة إذا كانت غير نشطة.</div>
+          </div>
+        </label>
+
+        <div className="rounded-3xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between gap-4 mb-5">
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">شرائح العمولة حسب الأيام</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                اختيارية. إذا لم تضف شرائح فسيتم استخدام العمولة الأساسية.
+              </p>
+            </div>
+
             <button
               type="button"
-              onClick={onClose}
-              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50"
+              onClick={addTier}
+              className="px-4 py-2.5 rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700 flex items-center gap-2"
             >
-              إلغاء
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? 'جاري الحفظ...' : link ? 'حفظ التغييرات' : 'إنشاء الرابط'}
+              <Plus className="w-4 h-4" />
+              إضافة شريحة
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+
+          {tiers.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
+              لا توجد شرائح. سيتم اعتماد العمولة الأساسية فقط.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {tiers.map((tier, index) => (
+                <div key={tier.localId} className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="font-semibold text-gray-900">الشريحة #{index + 1}</div>
+                    <button
+                      type="button"
+                      onClick={() => removeTier(tier.localId)}
+                      className="text-red-600 hover:text-red-700"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-2">من اليوم</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={tier.day_from}
+                        onChange={(e) => updateTier(tier.localId, { day_from: e.target.value })}
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-2">إلى اليوم</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={tier.day_to}
+                        onChange={(e) => updateTier(tier.localId, { day_to: e.target.value })}
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+                        placeholder="مفتوح"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-2">نوع العمولة</label>
+                      <select
+                        value={tier.commission_type}
+                        onChange={(e) =>
+                          updateTier(tier.localId, {
+                            commission_type: e.target.value as 'percentage' | 'fixed',
+                          })
+                        }
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+                      >
+                        <option value="percentage">نسبة %</option>
+                        <option value="fixed">مبلغ ثابت</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-2">القيمة</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={tier.commission_value}
+                        onChange={(e) => updateTier(tier.localId, { commission_value: e.target.value })}
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+                      />
+                    </div>
+
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white w-full cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={tier.is_active}
+                          onChange={(e) => updateTier(tier.localId, { is_active: e.target.checked })}
+                          className="w-4 h-4 text-blue-600 rounded"
+                        />
+                        <span className="text-sm text-gray-700">نشطة</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <ModalActions
+          onClose={onClose}
+          submitText={loading ? 'جاري الحفظ...' : rule ? 'حفظ القاعدة' : 'إنشاء القاعدة'}
+          loading={loading}
+        />
+      </form>
+    </ModalShell>
   );
 };
+
+const ModalShell: React.FC<{
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  size?: 'lg' | 'xl';
+}> = ({ title, subtitle, onClose, children, size = 'lg' }) => (
+  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div
+      className={`bg-white rounded-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl ${
+        size === 'xl' ? 'max-w-5xl' : 'max-w-3xl'
+      }`}
+    >
+      <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-5 flex items-start justify-between z-10">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
+          {subtitle && <p className="text-sm text-gray-500 mt-2 max-w-2xl">{subtitle}</p>}
+        </div>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">
+          ×
+        </button>
+      </div>
+
+      <div className="p-6">{children}</div>
+    </div>
+  </div>
+);
+
+const ErrorBox: React.FC<{ text: string }> = ({ text }) => (
+  <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700 text-sm flex items-start gap-2">
+    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+    <span>{text}</span>
+  </div>
+);
+
+const ModalActions: React.FC<{
+  onClose: () => void;
+  submitText: string;
+  loading?: boolean;
+}> = ({ onClose, submitText, loading = false }) => (
+  <div className="flex gap-4 pt-2">
+    <button
+      type="button"
+      onClick={onClose}
+      className="flex-1 px-6 py-3.5 border border-gray-300 text-gray-700 rounded-2xl font-semibold hover:bg-gray-50"
+    >
+      إلغاء
+    </button>
+    <button
+      type="submit"
+      disabled={loading}
+      className="flex-1 px-6 py-3.5 bg-blue-600 text-white rounded-2xl font-semibold hover:bg-blue-700 disabled:opacity-50"
+    >
+      {submitText}
+    </button>
+  </div>
+);
