@@ -33,7 +33,6 @@ interface AffiliateManagementPageProps {
 }
 
 type ViewMode = 'overview' | 'marketers' | 'links' | 'rules';
-type CreateMode = 'marketer' | 'link' | 'rule' | 'full';
 
 type AffiliateMarketerRow = {
   id: string;
@@ -126,6 +125,35 @@ type TierDraft = {
   commission_type: 'percentage' | 'fixed';
   commission_value: string;
   is_active: boolean;
+};
+
+type UnifiedAffiliateForm = {
+  marketer_mode: 'new' | 'existing';
+  existing_marketer_id: string;
+
+  marketer_name: string;
+  marketer_email: string;
+  marketer_phone: string;
+  marketer_notes: string;
+  marketer_is_active: boolean;
+
+  link_code: string;
+  link_apply_to: 'product' | 'store' | 'all';
+  link_product_id: string;
+  link_store_id: string;
+  link_description: string;
+  link_is_active: boolean;
+
+  rule_scope_type: 'product' | 'store' | 'all';
+  rule_product_id: string;
+  rule_store_id: string;
+  rule_commission_type: 'percentage' | 'fixed';
+  rule_commission_value: string;
+  rule_priority: string;
+  rule_is_active: boolean;
+
+  expiry_mode: 'none' | 'date';
+  expiry_date: string;
 };
 
 const getDisplayName = (item?: { name?: string | null; title?: string | null } | null) =>
@@ -661,7 +689,6 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
                 links={links}
                 rules={rules}
                 onNavigate={onNavigate}
-                onEditMarketer={(marketer) => setEditingMarketer(marketer)}
                 onEditLink={(link) => setEditingLink(link)}
                 onEditRule={(rule) => setEditingRule(rule)}
               />
@@ -1498,41 +1525,38 @@ const AffiliateCreateWizardModal: React.FC<AffiliateCreateWizardModalProps> = ({
 }) => {
   const { user } = useAuth();
 
-  const [mode, setMode] = useState<CreateMode | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [stores, setStores] = useState<StoreOption[]>([]);
 
-  const [marketerSource, setMarketerSource] = useState<'new' | 'existing'>('new');
+  const [formData, setFormData] = useState<UnifiedAffiliateForm>({
+    marketer_mode: 'new',
+    existing_marketer_id: '',
 
-  const [marketerData, setMarketerData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    notes: '',
-    is_active: true,
-  });
+    marketer_name: '',
+    marketer_email: '',
+    marketer_phone: '',
+    marketer_notes: '',
+    marketer_is_active: true,
 
-  const [linkData, setLinkData] = useState({
-    code: '',
-    apply_to: 'product' as 'product' | 'store' | 'all',
-    product_id: '',
-    store_id: '',
-    marketer_id: '',
-    description: '',
-    is_active: true,
-  });
+    link_code: '',
+    link_apply_to: 'product',
+    link_product_id: '',
+    link_store_id: '',
+    link_description: '',
+    link_is_active: true,
 
-  const [ruleData, setRuleData] = useState({
-    marketer_id: '',
-    scope_type: 'all' as 'product' | 'store' | 'all',
-    product_id: '',
-    store_id: '',
-    commission_type: 'percentage' as 'percentage' | 'fixed',
-    commission_value: '',
-    priority: '100',
-    is_active: true,
+    rule_scope_type: 'all',
+    rule_product_id: '',
+    rule_store_id: '',
+    rule_commission_type: 'percentage',
+    rule_commission_value: '',
+    rule_priority: '100',
+    rule_is_active: true,
+
+    expiry_mode: 'none',
+    expiry_date: '',
   });
 
   const [tiers, setTiers] = useState<TierDraft[]>([]);
@@ -1564,8 +1588,6 @@ const AffiliateCreateWizardModal: React.FC<AffiliateCreateWizardModalProps> = ({
 
     fetchOptions();
   }, [user?.id]);
-
-  const resetError = () => setError('');
 
   const addTier = () => {
     setTiers((prev) => [
@@ -1602,6 +1624,7 @@ const AffiliateCreateWizardModal: React.FC<AffiliateCreateWizardModalProps> = ({
       .maybeSingle();
 
     if (existingCodeError) throw existingCodeError;
+
     if (existingCodeRow) {
       throw new Error('كود الرابط مستخدم بالفعل، اختر كودًا مختلفًا');
     }
@@ -1627,17 +1650,17 @@ const AffiliateCreateWizardModal: React.FC<AffiliateCreateWizardModalProps> = ({
 
   const createMarketer = async () => {
     if (!user?.id) throw new Error('المستخدم غير موجود');
-    if (!marketerData.name.trim()) throw new Error('اسم المسوق مطلوب');
+    if (!formData.marketer_name.trim()) throw new Error('اسم المسوق مطلوب');
 
     const payload = {
       seller_id: user.id,
       user_id: null,
-      name: marketerData.name.trim(),
-      email: marketerData.email.trim() || null,
-      phone: marketerData.phone.trim() || null,
-      notes: marketerData.notes.trim() || null,
-      is_active: marketerData.is_active,
-      status: marketerData.is_active ? 'active' : 'inactive',
+      name: formData.marketer_name.trim(),
+      email: formData.marketer_email.trim() || null,
+      phone: formData.marketer_phone.trim() || null,
+      notes: formData.marketer_notes.trim() || null,
+      is_active: formData.marketer_is_active,
+      status: formData.marketer_is_active ? 'active' : 'inactive',
       total_clicks: 0,
       total_sales: 0,
       total_earnings: 0,
@@ -1653,16 +1676,16 @@ const AffiliateCreateWizardModal: React.FC<AffiliateCreateWizardModalProps> = ({
     return data.id as string;
   };
 
-  const createLink = async (resolvedMarketerId?: string | null) => {
+  const createLink = async (resolvedMarketerId: string) => {
     if (!user?.id) throw new Error('المستخدم غير موجود');
 
-    const normalizedCode = await validateLinkCode(linkData.code);
+    const normalizedCode = await validateLinkCode(formData.link_code);
 
-    if (linkData.apply_to === 'product' && !linkData.product_id) {
+    if (formData.link_apply_to === 'product' && !formData.link_product_id) {
       throw new Error('اختر المنتج للرابط');
     }
 
-    if (linkData.apply_to === 'store' && !linkData.store_id) {
+    if (formData.link_apply_to === 'store' && !formData.link_store_id) {
       throw new Error('اختر المتجر للرابط');
     }
 
@@ -1670,10 +1693,10 @@ const AffiliateCreateWizardModal: React.FC<AffiliateCreateWizardModalProps> = ({
       user_id: user.id,
       seller_id: user.id,
       code: normalizedCode,
-      apply_to: linkData.apply_to,
-      marketer_id: resolvedMarketerId || linkData.marketer_id || null,
-      description: linkData.description.trim() || null,
-      is_active: linkData.is_active,
+      apply_to: formData.link_apply_to,
+      marketer_id: resolvedMarketerId,
+      description: formData.link_description.trim() || null,
+      is_active: formData.link_is_active,
       clicks: 0,
       sales: 0,
       earnings: 0,
@@ -1681,52 +1704,53 @@ const AffiliateCreateWizardModal: React.FC<AffiliateCreateWizardModalProps> = ({
       store_id: null,
     };
 
-    if (linkData.apply_to === 'product') {
-      payload.product_id = linkData.product_id;
-    } else if (linkData.apply_to === 'store') {
-      payload.store_id = linkData.store_id;
+    if (formData.link_apply_to === 'product') {
+      payload.product_id = formData.link_product_id;
+    } else if (formData.link_apply_to === 'store') {
+      payload.store_id = formData.link_store_id;
     }
 
-    const { data, error: insertError } = await supabase
+    const { error: insertError } = await supabase
       .from('affiliate_links')
-      .insert(payload)
-      .select('id')
-      .single();
+      .insert(payload);
 
     if (insertError) throw insertError;
-    return data.id as string;
   };
 
-  const createRule = async (resolvedMarketerId?: string | null) => {
+  const createRule = async (resolvedMarketerId: string) => {
     if (!user?.id) throw new Error('المستخدم غير موجود');
 
-    const marketerIdToUse = resolvedMarketerId || ruleData.marketer_id;
-    if (!marketerIdToUse) throw new Error('اختر المسوق للقاعدة');
-
-    if (ruleData.scope_type === 'product' && !ruleData.product_id) {
+    if (formData.rule_scope_type === 'product' && !formData.rule_product_id) {
       throw new Error('اختر المنتج للقاعدة');
     }
 
-    if (ruleData.scope_type === 'store' && !ruleData.store_id) {
+    if (formData.rule_scope_type === 'store' && !formData.rule_store_id) {
       throw new Error('اختر المتجر للقاعدة');
     }
 
-    if (ruleData.commission_value.trim() === '') {
+    if (formData.rule_commission_value.trim() === '') {
       throw new Error('أدخل قيمة العمولة الأساسية');
     }
 
     validateTiers();
 
-    const payload = {
+    const payload: Record<string, any> = {
       seller_id: user.id,
-      marketer_id: marketerIdToUse,
-      scope_type: ruleData.scope_type,
-      product_id: ruleData.scope_type === 'product' ? ruleData.product_id : null,
-      store_id: ruleData.scope_type === 'store' ? ruleData.store_id : null,
-      commission_type: ruleData.commission_type,
-      commission_value: Number(ruleData.commission_value),
-      priority: Number(ruleData.priority || 100),
-      is_active: ruleData.is_active,
+      marketer_id: resolvedMarketerId,
+      rule_name: 'قاعدة عمولة',
+      scope_type: formData.rule_scope_type,
+      product_id:
+        formData.rule_scope_type === 'product' ? formData.rule_product_id : null,
+      store_id:
+        formData.rule_scope_type === 'store' ? formData.rule_store_id : null,
+      commission_type: formData.rule_commission_type,
+      commission_value: Number(formData.rule_commission_value),
+      priority: Number(formData.rule_priority || 100),
+      is_active: formData.rule_is_active,
+      expires_at:
+        formData.expiry_mode === 'date' && formData.expiry_date
+          ? `${formData.expiry_date}T23:59:59`
+          : null,
     };
 
     const { data: insertedRule, error: insertError } = await supabase
@@ -1753,48 +1777,29 @@ const AffiliateCreateWizardModal: React.FC<AffiliateCreateWizardModalProps> = ({
 
       if (tierInsertError) throw tierInsertError;
     }
-
-    return insertedRule.id as string;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.id || !mode) return;
+    if (!user?.id) return;
 
     setError('');
     setLoading(true);
 
     try {
-      if (mode === 'marketer') {
-        await createMarketer();
-      }
+      let marketerIdToUse = '';
 
-      if (mode === 'link') {
-        await createLink();
-      }
-
-      if (mode === 'rule') {
-        await createRule();
-      }
-
-      if (mode === 'full') {
-        let marketerIdToUse = '';
-
-        if (marketerSource === 'existing') {
-          if (!linkData.marketer_id) {
-            throw new Error('اختر المسوق الموجود');
-          }
-          marketerIdToUse = linkData.marketer_id;
-        } else {
-          marketerIdToUse = await createMarketer();
+      if (formData.marketer_mode === 'existing') {
+        if (!formData.existing_marketer_id) {
+          throw new Error('اختر المسوق الموجود');
         }
-
-        await createLink(marketerIdToUse);
-
-        await createRule(
-          marketerSource === 'existing' ? marketerIdToUse : marketerIdToUse
-        );
+        marketerIdToUse = formData.existing_marketer_id;
+      } else {
+        marketerIdToUse = await createMarketer();
       }
+
+      await createLink(marketerIdToUse);
+      await createRule(marketerIdToUse);
 
       onSuccess();
     } catch (err: any) {
@@ -1805,713 +1810,599 @@ const AffiliateCreateWizardModal: React.FC<AffiliateCreateWizardModalProps> = ({
     }
   };
 
-  const modeLabel =
-    mode === 'marketer'
-      ? 'إضافة مسوق فقط'
-      : mode === 'link'
-      ? 'إنشاء رابط فقط'
-      : mode === 'rule'
-      ? 'إنشاء قاعدة عمولة فقط'
-      : mode === 'full'
-      ? 'إعداد كامل'
-      : '';
-
-  const shouldShowMarketerSection =
-    mode === 'marketer' || (mode === 'full' && marketerSource === 'new');
-
-  const shouldShowLinkSection = mode === 'link' || mode === 'full';
-  const shouldShowRuleSection = mode === 'rule' || mode === 'full';
-
-  const resolvedRuleMarketerId =
-    mode === 'rule'
-      ? ruleData.marketer_id
-      : mode === 'full'
-      ? marketerSource === 'existing'
-        ? linkData.marketer_id
-        : 'سيتم استخدام المسوق الجديد'
-      : '';
-
   return (
     <ModalShell
-      title="إنشاء جديد"
-      subtitle="اختر المسار المناسب ثم أكمل الخطوات بشكل مرتب. تقدر تنشئ مسوق فقط، أو رابط فقط، أو قاعدة فقط، أو كل شيء مرة واحدة."
+      title="إنشاء عرض تسويق بالعمولة"
+      subtitle="من هنا تنشئ المسوق والرابط والعمولة والشرائح ومدة الصلاحية في نموذج واحد واضح."
       onClose={onClose}
       size="xl"
     >
-      <div className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6">
         {error && <ErrorBox text={error} />}
 
-        {!mode ? (
-          <div className="space-y-6">
-            <div className="rounded-3xl border border-gray-200 bg-gradient-to-l from-blue-50 to-violet-50 p-5">
-              <div className="flex items-start gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-violet-600 text-white flex items-center justify-center shrink-0">
-                  <Workflow className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">اختر طريقة الإنشاء</h3>
-                  <p className="text-sm text-gray-600 leading-7">
-                    هذه النافذة توحد كل العمليات في مكان واحد. اختر فقط ما تحتاجه بدل التنقل بين نوافذ متعددة.
-                  </p>
-                </div>
-              </div>
+        <div className="rounded-3xl border border-gray-200 bg-gradient-to-l from-violet-50 to-blue-50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-violet-600 text-white flex items-center justify-center shrink-0">
+              <Workflow className="w-6 h-6" />
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <WizardModeCard
-                title="إضافة مسوق"
-                description="أنشئ مسوقًا جديدًا فقط بدون رابط وبدون قاعدة عمولة."
-                icon={<Users className="w-6 h-6" />}
-                onClick={() => {
-                  resetError();
-                  setMode('marketer');
-                }}
-              />
-              <WizardModeCard
-                title="إنشاء رابط"
-                description="أنشئ رابطًا مباشرة، مع إمكانية ربطه بمسوق موجود أو تركه بدون مسوق."
-                icon={<LinkIcon className="w-6 h-6" />}
-                onClick={() => {
-                  resetError();
-                  setMode('link');
-                }}
-              />
-              <WizardModeCard
-                title="إضافة قاعدة عمولة"
-                description="أنشئ قاعدة عمولة عامة أو على منتج أو متجر، مع شرائح حسب الأيام."
-                icon={<Settings2 className="w-6 h-6" />}
-                onClick={() => {
-                  resetError();
-                  setMode('rule');
-                }}
-              />
-              <WizardModeCard
-                title="إعداد كامل"
-                description="أنشئ مسوقًا ورابطًا وقاعدة عمولة معًا في تدفق واحد مرتب."
-                icon={<Wand2 className="w-6 h-6" />}
-                onClick={() => {
-                  resetError();
-                  setMode('full');
-                }}
-                primary
-              />
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-6 py-3 rounded-2xl border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50"
-              >
-                إغلاق
-              </button>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">إعداد أفلييت متكامل</h3>
+              <p className="text-sm text-gray-600 leading-7">
+                أضف أو اختر مسوقًا، ثم جهز له رابط التسويق، وحدد العمولة والشرائح ومدة الصلاحية من مكان واحد.
+              </p>
             </div>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 rounded-3xl border border-gray-200 bg-gray-50 p-5">
-              <div className="flex items-start gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode(null);
-                    setError('');
-                  }}
-                  className="w-10 h-10 rounded-2xl border border-gray-300 bg-white hover:bg-gray-100 flex items-center justify-center shrink-0"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
-                <div>
-                  <div className="text-sm text-gray-500 mb-1">المسار الحالي</div>
-                  <div className="text-xl font-bold text-gray-900">{modeLabel}</div>
-                </div>
-              </div>
+        </div>
 
-              <div className="flex flex-wrap gap-2">
-                <TagChip text={mode === 'full' ? 'يشمل كل العناصر' : 'إنشاء مخصص'} success />
-                <TagChip text="خطوات موحدة وواضحة" />
-              </div>
-            </div>
-
-            {mode === 'full' && (
-              <div className="rounded-3xl border border-blue-100 bg-blue-50 p-5">
-                <h3 className="font-bold text-gray-900 mb-3">اختيار المسوق في الإعداد الكامل</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <SelectableOptionCard
-                    active={marketerSource === 'new'}
-                    title="إنشاء مسوق جديد"
-                    description="سينشئ لك مسوقًا جديدًا ثم يربط الرابط والقاعدة به تلقائيًا."
-                    onClick={() => {
-                      setMarketerSource('new');
-                      setLinkData((prev) => ({ ...prev, marketer_id: '' }));
-                      setRuleData((prev) => ({ ...prev, marketer_id: '' }));
-                    }}
-                  />
-                  <SelectableOptionCard
-                    active={marketerSource === 'existing'}
-                    title="استخدام مسوق موجود"
-                    description="سيتم تخطي إنشاء المسوق وربط الرابط والقاعدة بمسوق موجود."
-                    onClick={() => {
-                      setMarketerSource('existing');
-                    }}
-                  />
-                </div>
-
-                {marketerSource === 'existing' && (
-                  <div className="mt-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      اختر المسوق الموجود <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={linkData.marketer_id}
-                      onChange={(e) => {
-                        setLinkData((prev) => ({ ...prev, marketer_id: e.target.value }));
-                        setRuleData((prev) => ({ ...prev, marketer_id: e.target.value }));
-                      }}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required
-                    >
-                      <option value="">-- اختر المسوق --</option>
-                      {marketers.map((marketer) => (
-                        <option key={marketer.id} value={marketer.id}>
-                          {marketer.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {shouldShowMarketerSection && (
-              <SectionCard
-                title="بيانات المسوق"
-                subtitle="تعبئة بيانات المسوق الذي تريد إنشاءه"
-                icon={<Users className="w-5 h-5" />}
-              >
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      اسم المسوق <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={marketerData.name}
-                      onChange={(e) => setMarketerData({ ...marketerData, name: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required={shouldShowMarketerSection}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
-                    <input
-                      type="email"
-                      dir="ltr"
-                      value={marketerData.email}
-                      onChange={(e) => setMarketerData({ ...marketerData, email: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">رقم الهاتف</label>
-                    <input
-                      type="tel"
-                      dir="ltr"
-                      value={marketerData.phone}
-                      onChange={(e) => setMarketerData({ ...marketerData, phone: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات داخلية</label>
-                    <textarea
-                      rows={4}
-                      value={marketerData.notes}
-                      onChange={(e) => setMarketerData({ ...marketerData, notes: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="مثال: هذا المسوق مناسب لإعلانات تيك توك أو جمهور معين..."
-                    />
-                  </div>
-                </div>
-
-                <label className="mt-4 flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={marketerData.is_active}
-                    onChange={(e) => setMarketerData({ ...marketerData, is_active: e.target.checked })}
-                    className="w-5 h-5 text-blue-600 rounded"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">المسوق نشط</div>
-                    <div className="text-sm text-gray-500">يمكنه استقبال الروابط والعمولات إذا كان نشطًا.</div>
-                  </div>
-                </label>
-              </SectionCard>
-            )}
-
-            {shouldShowLinkSection && (
-              <SectionCard
-                title="بيانات الرابط"
-                subtitle="إنشاء رابط تتبع واضح للمسوق أو للحملة"
-                icon={<LinkIcon className="w-5 h-5" />}
-              >
-                <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800 leading-7 mb-5">
-                  الرابط هنا مخصص للتتبع والتوزيع، بينما نسبة العمولة نفسها تُدار من قواعد العمولة.
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      كود الرابط <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={linkData.code}
-                      onChange={(e) =>
-                        setLinkData({ ...linkData, code: e.target.value.toUpperCase() })
-                      }
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
-                      placeholder="AFF2024"
-                      required={shouldShowLinkSection}
-                    />
-                  </div>
-
-                  {mode === 'link' && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">المسوق (اختياري)</label>
-                      <select
-                        value={linkData.marketer_id}
-                        onChange={(e) => setLinkData({ ...linkData, marketer_id: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      >
-                        <option value="">-- بدون تخصيص --</option>
-                        {marketers.map((marketer) => (
-                          <option key={marketer.id} value={marketer.id}>
-                            {marketer.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  <div className={mode === 'link' ? 'md:col-span-2' : 'md:col-span-2'}>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      نطاق التطبيق <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={linkData.apply_to}
-                      onChange={(e) =>
-                        setLinkData({
-                          ...linkData,
-                          apply_to: e.target.value as 'product' | 'store' | 'all',
-                          product_id: e.target.value === 'product' ? linkData.product_id : '',
-                          store_id: e.target.value === 'store' ? linkData.store_id : '',
-                        })
-                      }
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required
-                    >
-                      <option value="product">منتج محدد</option>
-                      <option value="store">متجر محدد</option>
-                      <option value="all">جميع منتجاتي</option>
-                    </select>
-                  </div>
-
-                  {linkData.apply_to === 'product' && (
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        اختر المنتج <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={linkData.product_id}
-                        onChange={(e) => setLinkData({ ...linkData, product_id: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        required
-                      >
-                        <option value="">-- اختر منتج --</option>
-                        {products.map((product) => (
-                          <option key={product.id} value={product.id}>
-                            {getDisplayName(product)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {linkData.apply_to === 'store' && (
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        اختر المتجر <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={linkData.store_id}
-                        onChange={(e) => setLinkData({ ...linkData, store_id: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        required
-                      >
-                        <option value="">-- اختر متجر --</option>
-                        {stores.map((store) => (
-                          <option key={store.id} value={store.id}>
-                            {getDisplayName(store)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">وصف الرابط</label>
-                    <textarea
-                      rows={3}
-                      value={linkData.description}
-                      onChange={(e) => setLinkData({ ...linkData, description: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="مثال: رابط حملة انستغرام للمسوق فلان"
-                    />
-                  </div>
-                </div>
-
-                <label className="mt-4 flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={linkData.is_active}
-                    onChange={(e) => setLinkData({ ...linkData, is_active: e.target.checked })}
-                    className="w-5 h-5 text-blue-600 rounded"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">الرابط نشط</div>
-                    <div className="text-sm text-gray-500">يمكن استخدامه وتتبع نتائجه إذا كان نشطًا.</div>
-                  </div>
-                </label>
-              </SectionCard>
-            )}
-
-            {shouldShowRuleSection && (
-              <SectionCard
-                title="قاعدة العمولة"
-                subtitle="حدد العمولة الأساسية ثم أضف الشرائح الزمنية إذا احتجت"
-                icon={<Settings2 className="w-5 h-5" />}
-              >
-                <div className="rounded-2xl border border-violet-100 bg-violet-50 p-4 text-sm text-violet-800 leading-7 mb-5">
-                  مثال احترافي: عمولة أساسية 10%، ثم شريحة من 0 إلى 7 أيام = 20%، ومن 8 إلى 30 = 12%، وبعدها يرجع للعمولة الأساسية.
-                </div>
-
-                {mode === 'rule' && (
-                  <div className="mb-5">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      المسوق <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={ruleData.marketer_id}
-                      onChange={(e) => setRuleData({ ...ruleData, marketer_id: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required
-                    >
-                      <option value="">-- اختر المسوق --</option>
-                      {marketers.map((marketer) => (
-                        <option key={marketer.id} value={marketer.id}>
-                          {marketer.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {mode === 'full' && (
-                  <div className="mb-5 rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 leading-7">
-                    <strong>المسوق المستخدم لهذه القاعدة:</strong>{' '}
-                    {resolvedRuleMarketerId || 'سيتم تحديده بعد إكمال البيانات'}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      نوع القاعدة <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={ruleData.scope_type}
-                      onChange={(e) =>
-                        setRuleData({
-                          ...ruleData,
-                          scope_type: e.target.value as 'product' | 'store' | 'all',
-                          product_id: e.target.value === 'product' ? ruleData.product_id : '',
-                          store_id: e.target.value === 'store' ? ruleData.store_id : '',
-                        })
-                      }
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required
-                    >
-                      <option value="all">قاعدة عامة</option>
-                      <option value="product">على منتج محدد</option>
-                      <option value="store">على متجر محدد</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">الأولوية</label>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={ruleData.priority}
-                      onChange={(e) => setRuleData({ ...ruleData, priority: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="100"
-                    />
-                  </div>
-                </div>
-
-                {ruleData.scope_type === 'product' && (
-                  <div className="mb-5">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      المنتج <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={ruleData.product_id}
-                      onChange={(e) => setRuleData({ ...ruleData, product_id: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required
-                    >
-                      <option value="">-- اختر المنتج --</option>
-                      {products.map((product) => (
-                        <option key={product.id} value={product.id}>
-                          {getDisplayName(product)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {ruleData.scope_type === 'store' && (
-                  <div className="mb-5">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      المتجر <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={ruleData.store_id}
-                      onChange={(e) => setRuleData({ ...ruleData, store_id: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required
-                    >
-                      <option value="">-- اختر المتجر --</option>
-                      {stores.map((store) => (
-                        <option key={store.id} value={store.id}>
-                          {getDisplayName(store)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">نوع العمولة الأساسية</label>
-                    <select
-                      value={ruleData.commission_type}
-                      onChange={(e) =>
-                        setRuleData({
-                          ...ruleData,
-                          commission_type: e.target.value as 'percentage' | 'fixed',
-                        })
-                      }
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                      <option value="percentage">نسبة مئوية %</option>
-                      <option value="fixed">مبلغ ثابت</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">قيمة العمولة الأساسية</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={ruleData.commission_value}
-                      onChange={(e) => setRuleData({ ...ruleData, commission_value: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder={ruleData.commission_type === 'percentage' ? '10' : '25'}
-                    />
-                  </div>
-                </div>
-
-                <label className="mt-4 flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={ruleData.is_active}
-                    onChange={(e) => setRuleData({ ...ruleData, is_active: e.target.checked })}
-                    className="w-5 h-5 text-blue-600 rounded"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">القاعدة نشطة</div>
-                    <div className="text-sm text-gray-500">لن تُستخدم القاعدة إذا كانت غير نشطة.</div>
-                  </div>
-                </label>
-
-                <div className="mt-6 rounded-3xl border border-gray-200 p-5">
-                  <div className="flex items-center justify-between gap-4 mb-5">
-                    <div>
-                      <h3 className="text-lg font-bold text-gray-900">شرائح العمولة حسب الأيام</h3>
-                      <p className="text-sm text-gray-500 mt-1">
-                        اختيارية. إذا لم تضف شرائح فسيتم استخدام العمولة الأساسية.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={addTier}
-                      className="px-4 py-2.5 rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700 flex items-center gap-2"
-                    >
-                      <Plus className="w-4 h-4" />
-                      إضافة شريحة
-                    </button>
-                  </div>
-
-                  {tiers.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
-                      لا توجد شرائح. سيتم اعتماد العمولة الأساسية فقط.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {tiers.map((tier, index) => (
-                        <div key={tier.localId} className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="font-semibold text-gray-900">الشريحة #{index + 1}</div>
-                            <button
-                              type="button"
-                              onClick={() => removeTier(tier.localId)}
-                              className="text-red-600 hover:text-red-700"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-2">من اليوم</label>
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                value={tier.day_from}
-                                onChange={(e) => updateTier(tier.localId, { day_from: e.target.value })}
-                                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-2">إلى اليوم</label>
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                value={tier.day_to}
-                                onChange={(e) => updateTier(tier.localId, { day_to: e.target.value })}
-                                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                                placeholder="مفتوح"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-2">نوع العمولة</label>
-                              <select
-                                value={tier.commission_type}
-                                onChange={(e) =>
-                                  updateTier(tier.localId, {
-                                    commission_type: e.target.value as 'percentage' | 'fixed',
-                                  })
-                                }
-                                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                              >
-                                <option value="percentage">نسبة %</option>
-                                <option value="fixed">مبلغ ثابت</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-2">القيمة</label>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={tier.commission_value}
-                                onChange={(e) =>
-                                  updateTier(tier.localId, { commission_value: e.target.value })
-                                }
-                                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                              />
-                            </div>
-
-                            <div className="flex items-end">
-                              <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white w-full cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={tier.is_active}
-                                  onChange={(e) => updateTier(tier.localId, { is_active: e.target.checked })}
-                                  className="w-4 h-4 text-blue-600 rounded"
-                                />
-                                <span className="text-sm text-gray-700">نشطة</span>
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </SectionCard>
-            )}
-
-            <div className="rounded-3xl border border-gray-200 bg-gray-50 p-5">
-              <div className="flex items-start gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-gray-900 text-white flex items-center justify-center shrink-0">
-                  <Workflow className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-gray-900 mb-2">ملخص قبل الحفظ</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700 leading-7">
-                    {shouldShowMarketerSection && (
-                      <div className="rounded-2xl bg-white border border-gray-200 p-4">
-                        <div className="font-semibold text-gray-900 mb-1">المسوق</div>
-                        <div>{marketerData.name || '—'}</div>
-                        <div className="text-gray-500">{marketerData.email || marketerData.phone || 'بدون تواصل'}</div>
-                      </div>
-                    )}
-
-                    {shouldShowLinkSection && (
-                      <div className="rounded-2xl bg-white border border-gray-200 p-4">
-                        <div className="font-semibold text-gray-900 mb-1">الرابط</div>
-                        <div className="font-mono">{linkData.code || '—'}</div>
-                        <div className="text-gray-500">{getApplyToLabel(linkData.apply_to)}</div>
-                      </div>
-                    )}
-
-                    {shouldShowRuleSection && (
-                      <div className="rounded-2xl bg-white border border-gray-200 p-4">
-                        <div className="font-semibold text-gray-900 mb-1">قاعدة العمولة</div>
-                        <div>{formatCommission(ruleData.commission_type, Number(ruleData.commission_value || 0))}</div>
-                        <div className="text-gray-500">
-                          {getScopeTypeLabel(ruleData.scope_type)} • {tiers.length} شرائح
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <ModalActions
-              onClose={onClose}
-              submitText={loading ? 'جاري التنفيذ...' : 'حفظ العملية'}
-              loading={loading}
+        <SectionCard
+          title="المسوق"
+          subtitle="اختر مسوقًا موجودًا أو أنشئ مسوقًا جديدًا"
+          icon={<Users className="w-5 h-5" />}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+            <SelectableOptionCard
+              active={formData.marketer_mode === 'new'}
+              title="إنشاء مسوق جديد"
+              description="تضيف الاسم والبيانات هنا، وسيتم إنشاء المسوق وربطه تلقائيًا."
+              onClick={() =>
+                setFormData((prev) => ({
+                  ...prev,
+                  marketer_mode: 'new',
+                  existing_marketer_id: '',
+                }))
+              }
             />
-          </form>
-        )}
-      </div>
+            <SelectableOptionCard
+              active={formData.marketer_mode === 'existing'}
+              title="استخدام مسوق موجود"
+              description="لن يتم إنشاء مسوق جديد، وسيتم استخدام المسوق الموجود مباشرة."
+              onClick={() =>
+                setFormData((prev) => ({
+                  ...prev,
+                  marketer_mode: 'existing',
+                }))
+              }
+            />
+          </div>
+
+          {formData.marketer_mode === 'existing' ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                اختر المسوق <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={formData.existing_marketer_id}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    existing_marketer_id: e.target.value,
+                  }))
+                }
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">-- اختر المسوق --</option>
+                {marketers.map((marketer) => (
+                  <option key={marketer.id} value={marketer.id}>
+                    {marketer.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    اسم المسوق <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.marketer_name}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        marketer_name: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
+                  <input
+                    type="email"
+                    dir="ltr"
+                    value={formData.marketer_email}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        marketer_email: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">رقم الهاتف</label>
+                  <input
+                    type="tel"
+                    dir="ltr"
+                    value={formData.marketer_phone}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        marketer_phone: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات داخلية</label>
+                  <textarea
+                    rows={3}
+                    value={formData.marketer_notes}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        marketer_notes: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+
+              <label className="mt-4 flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.marketer_is_active}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      marketer_is_active: e.target.checked,
+                    }))
+                  }
+                  className="w-5 h-5 text-blue-600 rounded"
+                />
+                <div>
+                  <div className="font-medium text-gray-900">المسوق نشط</div>
+                  <div className="text-sm text-gray-500">سيكون جاهزًا للاستخدام مباشرة بعد الحفظ.</div>
+                </div>
+              </label>
+            </>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="رابط التسويق"
+          subtitle="حدد كود الرابط والنطاق الذي يعمل عليه"
+          icon={<LinkIcon className="w-5 h-5" />}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                كود الرابط <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.link_code}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    link_code: e.target.value.toUpperCase(),
+                  }))
+                }
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
+                placeholder="AFF2024"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                نطاق التطبيق <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={formData.link_apply_to}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    link_apply_to: e.target.value as 'product' | 'store' | 'all',
+                    link_product_id: e.target.value === 'product' ? prev.link_product_id : '',
+                    link_store_id: e.target.value === 'store' ? prev.link_store_id : '',
+                    rule_scope_type: e.target.value as 'product' | 'store' | 'all',
+                    rule_product_id: e.target.value === 'product' ? prev.rule_product_id : '',
+                    rule_store_id: e.target.value === 'store' ? prev.rule_store_id : '',
+                  }))
+                }
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="product">منتج محدد</option>
+                <option value="store">متجر محدد</option>
+                <option value="all">جميع المنتجات</option>
+              </select>
+            </div>
+
+            {formData.link_apply_to === 'product' && (
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  اختر المنتج <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={formData.link_product_id}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      link_product_id: e.target.value,
+                      rule_product_id: e.target.value,
+                    }))
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">-- اختر منتج --</option>
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {getDisplayName(product)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {formData.link_apply_to === 'store' && (
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  اختر المتجر <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={formData.link_store_id}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      link_store_id: e.target.value,
+                      rule_store_id: e.target.value,
+                    }))
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">-- اختر متجر --</option>
+                  {stores.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {getDisplayName(store)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">وصف الرابط</label>
+              <textarea
+                rows={3}
+                value={formData.link_description}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    link_description: e.target.value,
+                  }))
+                }
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="مثال: رابط حملة انستغرام أو تيك توك"
+              />
+            </div>
+          </div>
+
+          <label className="mt-4 flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.link_is_active}
+              onChange={(e) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  link_is_active: e.target.checked,
+                }))
+              }
+              className="w-5 h-5 text-blue-600 rounded"
+            />
+            <div>
+              <div className="font-medium text-gray-900">الرابط نشط</div>
+              <div className="text-sm text-gray-500">يمكن استخدام الرابط وتتبع نتائجه إذا كان نشطًا.</div>
+            </div>
+          </label>
+        </SectionCard>
+
+        <SectionCard
+          title="العمولة والشرائح"
+          subtitle="حدد العمولة الأساسية ويمكنك إضافة شرائح حسب الأيام"
+          icon={<Settings2 className="w-5 h-5" />}
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">نوع العمولة</label>
+              <select
+                value={formData.rule_commission_type}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    rule_commission_type: e.target.value as 'percentage' | 'fixed',
+                  }))
+                }
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="percentage">نسبة مئوية %</option>
+                <option value="fixed">مبلغ ثابت</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">قيمة العمولة</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.rule_commission_value}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    rule_commission_value: e.target.value,
+                  }))
+                }
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder={formData.rule_commission_type === 'percentage' ? '10' : '25'}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">الأولوية</label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={formData.rule_priority}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    rule_priority: e.target.value,
+                  }))
+                }
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="100"
+              />
+            </div>
+          </div>
+
+          <label className="mt-4 flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.rule_is_active}
+              onChange={(e) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  rule_is_active: e.target.checked,
+                }))
+              }
+              className="w-5 h-5 text-blue-600 rounded"
+            />
+            <div>
+              <div className="font-medium text-gray-900">القاعدة نشطة</div>
+              <div className="text-sm text-gray-500">سيتم احتساب هذه العمولة مباشرة إذا كانت نشطة.</div>
+            </div>
+          </label>
+
+          <div className="mt-6 rounded-3xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between gap-4 mb-5">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">شرائح العمولة حسب الأيام</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  اختيارية. إذا لم تضف شرائح فسيتم استخدام العمولة الأساسية.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={addTier}
+                className="px-4 py-2.5 rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700 flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                إضافة شريحة
+              </button>
+            </div>
+
+            {tiers.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
+                لا توجد شرائح. سيتم اعتماد العمولة الأساسية فقط.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {tiers.map((tier, index) => (
+                  <div key={tier.localId} className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="font-semibold text-gray-900">الشريحة #{index + 1}</div>
+                      <button
+                        type="button"
+                        onClick={() => removeTier(tier.localId)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-2">من اليوم</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={tier.day_from}
+                          onChange={(e) => updateTier(tier.localId, { day_from: e.target.value })}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-2">إلى اليوم</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={tier.day_to}
+                          onChange={(e) => updateTier(tier.localId, { day_to: e.target.value })}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+                          placeholder="مفتوح"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-2">نوع العمولة</label>
+                        <select
+                          value={tier.commission_type}
+                          onChange={(e) =>
+                            updateTier(tier.localId, {
+                              commission_type: e.target.value as 'percentage' | 'fixed',
+                            })
+                          }
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+                        >
+                          <option value="percentage">نسبة %</option>
+                          <option value="fixed">مبلغ ثابت</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-2">القيمة</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={tier.commission_value}
+                          onChange={(e) => updateTier(tier.localId, { commission_value: e.target.value })}
+                          className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+                        />
+                      </div>
+
+                      <div className="flex items-end">
+                        <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white w-full cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={tier.is_active}
+                            onChange={(e) => updateTier(tier.localId, { is_active: e.target.checked })}
+                            className="w-4 h-4 text-blue-600 rounded"
+                          />
+                          <span className="text-sm text-gray-700">نشطة</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="مدة الصلاحية"
+          subtitle="يمكنك تركها مفتوحة أو تحديد تاريخ انتهاء"
+          icon={<CalendarRange className="w-5 h-5" />}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">نوع المدة</label>
+              <select
+                value={formData.expiry_mode}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    expiry_mode: e.target.value as 'none' | 'date',
+                    expiry_date: e.target.value === 'date' ? prev.expiry_date : '',
+                  }))
+                }
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="none">بدون تاريخ انتهاء</option>
+                <option value="date">ينتهي في تاريخ محدد</option>
+              </select>
+            </div>
+
+            {formData.expiry_mode === 'date' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  تاريخ الانتهاء <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={formData.expiry_date}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      expiry_date: e.target.value,
+                    }))
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            )}
+          </div>
+        </SectionCard>
+
+        <div className="rounded-3xl border border-gray-200 bg-gray-50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-gray-900 text-white flex items-center justify-center shrink-0">
+              <Workflow className="w-5 h-5" />
+            </div>
+            <div className="w-full">
+              <h3 className="font-bold text-gray-900 mb-4">ملخص قبل الحفظ</h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700 leading-7">
+                <div className="rounded-2xl bg-white border border-gray-200 p-4">
+                  <div className="font-semibold text-gray-900 mb-1">المسوق</div>
+                  <div>
+                    {formData.marketer_mode === 'existing'
+                      ? marketers.find((m) => m.id === formData.existing_marketer_id)?.name || '—'
+                      : formData.marketer_name || '—'}
+                  </div>
+                  <div className="text-gray-500">
+                    {formData.marketer_mode === 'existing'
+                      ? 'مسوق موجود'
+                      : formData.marketer_email || formData.marketer_phone || 'بدون تواصل'}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-white border border-gray-200 p-4">
+                  <div className="font-semibold text-gray-900 mb-1">الرابط</div>
+                  <div className="font-mono">{formData.link_code || '—'}</div>
+                  <div className="text-gray-500">{getApplyToLabel(formData.link_apply_to)}</div>
+                </div>
+
+                <div className="rounded-2xl bg-white border border-gray-200 p-4">
+                  <div className="font-semibold text-gray-900 mb-1">العمولة</div>
+                  <div>{formatCommission(formData.rule_commission_type, Number(formData.rule_commission_value || 0))}</div>
+                  <div className="text-gray-500">{tiers.length} شرائح إضافية</div>
+                </div>
+
+                <div className="rounded-2xl bg-white border border-gray-200 p-4">
+                  <div className="font-semibold text-gray-900 mb-1">الصلاحية</div>
+                  <div>
+                    {formData.expiry_mode === 'date' && formData.expiry_date
+                      ? formData.expiry_date
+                      : 'بدون تاريخ انتهاء'}
+                  </div>
+                  <div className="text-gray-500">أولوية {formData.rule_priority || '100'}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <ModalActions
+          onClose={onClose}
+          submitText={loading ? 'جاري التنفيذ...' : 'حفظ العملية'}
+          loading={loading}
+        />
+      </form>
     </ModalShell>
   );
 };
@@ -3173,34 +3064,36 @@ const RuleFormModal: React.FC<RuleFormModalProps> = ({
 
     try {
       if (!formData.marketer_id) {
-        throw new Error('اختر المسوق');
-      }
+  throw new Error('اختر المسوق');
+}
 
-      if (formData.scope_type === 'product' && !formData.product_id) {
-        throw new Error('اختر المنتج لهذه القاعدة');
-      }
+if (formData.scope_type === 'product' && !formData.product_id) {
+  throw new Error('اختر المنتج لهذه القاعدة');
+}
 
-      if (formData.scope_type === 'store' && !formData.store_id) {
-        throw new Error('اختر المتجر لهذه القاعدة');
-      }
+if (formData.scope_type === 'store' && !formData.store_id) {
+  throw new Error('اختر المتجر لهذه القاعدة');
+}
 
-      if (formData.commission_value.trim() === '') {
-        throw new Error('أدخل قيمة العمولة الأساسية');
-      }
+if (formData.commission_value.trim() === '') {
+  throw new Error('أدخل قيمة العمولة الأساسية');
+}
 
       validateTiers();
 
       const payload = {
-        seller_id: user.id,
-        marketer_id: formData.marketer_id,
-        scope_type: formData.scope_type,
-        product_id: formData.scope_type === 'product' ? formData.product_id : null,
-        store_id: formData.scope_type === 'store' ? formData.store_id : null,
-        commission_type: formData.commission_type,
-        commission_value: Number(formData.commission_value),
-        priority: Number(formData.priority || 100),
-        is_active: formData.is_active,
-      };
+  seller_id: user.id,
+  marketer_id: formData.marketer_id,
+  scope_type: formData.scope_type,
+  product_id:
+    formData.scope_type === 'product' ? formData.product_id : null,
+  store_id:
+    formData.scope_type === 'store' ? formData.store_id : null,
+  commission_type: formData.commission_type,
+  commission_value: Number(formData.commission_value),
+  priority: Number(formData.priority || 100),
+  is_active: formData.is_active,
+};
 
       let ruleId = rule?.id || '';
 
