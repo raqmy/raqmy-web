@@ -1065,6 +1065,32 @@ const UnifiedCampaignsList: React.FC<{
                         />
                       )}
 
+                      {campaign.link?.report_token && (
+  <>
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(
+            `${window.location.origin}/affiliate-report/${campaign.link?.report_token}`
+          );
+          alert('تم نسخ رابط إحصائيات المسوق');
+        } catch (error) {
+          console.error('Error copying marketer stats link:', error);
+          alert('حدث خطأ أثناء نسخ رابط إحصائيات المسوق');
+        }
+      }}
+      className="w-full px-4 py-3 rounded-2xl border border-violet-200 text-violet-700 font-medium hover:bg-violet-50"
+    >
+      نسخ رابط إحصائيات المسوق
+    </button>
+
+    <p className="text-[11px] leading-5 text-gray-500 text-center px-2">
+      هذا الرابط تعطيه للمسوق ليشاهد إحصائياته لهذا العرض فقط بدون تسجيل دخول.
+    </p>
+  </>
+)}
+
                       {campaign.marketer?.id && (
                         <button
                           onClick={() => onViewAnalytics(campaign.marketer!.id)}
