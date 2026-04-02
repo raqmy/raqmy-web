@@ -51,6 +51,7 @@ type AffiliateLinkRow = {
   seller_id?: string | null;
   marketer_id?: string | null;
   code: string;
+  report_token?: string | null;
   apply_to?: 'product' | 'store' | 'all' | string | null;
   product_id?: string | null;
   store_id?: string | null;
