@@ -207,6 +207,18 @@ const conversionRate = (clicks?: number | null, sales?: number | null) => {
 
 const createLocalTierId = () => Math.random().toString(36).slice(2, 10);
 
+const uniqueIds = (values: Array<string | null | undefined>) =>
+  [...new Set(values.filter((value): value is string => Boolean(value)))];
+
+const buildMarketerMap = (items: AffiliateMarketerRow[]) =>
+  new Map(items.map((item) => [item.id, item]));
+
+const buildProductMap = (items: ProductOption[]) =>
+  new Map(items.map((item) => [item.id, item]));
+
+const buildStoreMap = (items: StoreOption[]) =>
+  new Map(items.map((item) => [item.id, item]));
+
 const buildRuleName = (marketerName: string, scopeType: string) => {
   const scopeLabel =
     scopeType === 'product' ? 'منتج' : scopeType === 'store' ? 'متجر' : 'عام';
@@ -300,77 +312,183 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     setMarketers((data || []) as AffiliateMarketerRow[]);
   };
 
-  const fetchLinks = async () => {
+    const fetchLinks = async () => {
     if (!user?.id) return;
 
-    const { data, error } = await supabase
+    const { data: rawLinks, error: linksError } = await supabase
       .from('affiliate_links')
-      .select(`
-        *,
-        marketer:affiliate_marketers(id, name),
-        product:products(id, name, title, slug),
-        store:stores(id, name, title, slug)
-      `)
-      .eq('seller_id', user.id)
+      .select('*')
+      .or(`seller_id.eq.${user.id},user_id.eq.${user.id}`)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching admin links:', error);
+    if (linksError) {
+      console.error('Error fetching admin links:', linksError);
       return;
     }
 
-    setLinks((data || []) as AffiliateLinkRow[]);
-  };
+    const linksRows = (rawLinks || []) as AffiliateLinkRow[];
 
-  const fetchRules = async () => {
-    if (!user?.id) return;
-
-    const { data: rulesData, error: rulesError } = await supabase
-      .from('affiliate_rules')
-      .select(`
-        *,
-        marketer:affiliate_marketers(id, name),
-        product:products(id, name, title, slug),
-        store:stores(id, name, title, slug)
-      `)
-      .eq('seller_id', user.id)
-      .order('priority', { ascending: true })
-      .order('created_at', { ascending: false });
-
-    if (rulesError) {
-      console.error('Error fetching admin rules:', rulesError);
+    if (linksRows.length === 0) {
+      setLinks([]);
       return;
     }
 
-    const ruleIds = (rulesData || []).map((rule: any) => rule.id);
-    let tiersMap = new Map<string, AffiliateRuleTierRow[]>();
+    const marketerIds = uniqueIds(linksRows.map((item) => item.marketer_id));
+    const productIds = uniqueIds(linksRows.map((item) => item.product_id));
+    const storeIds = uniqueIds(linksRows.map((item) => item.store_id));
 
-    if (ruleIds.length > 0) {
-      const { data: tiersData, error: tiersError } = await supabase
-        .from('affiliate_rule_tiers')
-        .select('*')
-        .in('rule_id', ruleIds)
-        .order('day_from', { ascending: true });
+    let marketerMap = new Map<string, AffiliateMarketerRow>();
+    let productMap = new Map<string, ProductOption>();
+    let storeMap = new Map<string, StoreOption>();
 
-      if (tiersError) {
-        console.error('Error fetching admin rule tiers:', tiersError);
+    if (marketerIds.length > 0) {
+      const { data: marketersData, error: marketersError } = await supabase
+        .from('affiliate_marketers')
+        .select('id, name, email, phone, status, is_active, seller_id, user_id')
+        .in('id', marketerIds);
+
+      if (marketersError) {
+        console.error('Error fetching link marketers:', marketersError);
       } else {
-        (tiersData || []).forEach((tier: any) => {
-          const key = tier.rule_id;
-          const current = tiersMap.get(key) || [];
-          current.push(tier as AffiliateRuleTierRow);
-          tiersMap.set(key, current);
-        });
+        marketerMap = buildMarketerMap((marketersData || []) as AffiliateMarketerRow[]);
       }
     }
 
-    const normalizedRules = (rulesData || []).map((rule: any) => ({
-      ...rule,
-      tiers: tiersMap.get(rule.id) || [],
-    })) as AffiliateRuleRow[];
+    if (productIds.length > 0) {
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('id, title, slug')
+        .in('id', productIds);
 
-    setRules(normalizedRules);
+      if (productsError) {
+        console.error('Error fetching link products:', productsError);
+      } else {
+        productMap = buildProductMap((productsData || []) as ProductOption[]);
+      }
+    }
+
+    if (storeIds.length > 0) {
+      const { data: storesData, error: storesError } = await supabase
+        .from('stores')
+        .select('id, title, slug')
+        .in('id', storeIds);
+
+      if (storesError) {
+        console.error('Error fetching link stores:', storesError);
+      } else {
+        storeMap = buildStoreMap((storesData || []) as StoreOption[]);
+      }
+    }
+
+    const normalizedLinks = linksRows.map((item) => ({
+      ...item,
+      marketer: item.marketer_id ? marketerMap.get(item.marketer_id) || null : null,
+      product: item.product_id ? productMap.get(item.product_id) || null : null,
+      store: item.store_id ? storeMap.get(item.store_id) || null : null,
+    })) as AffiliateLinkRow[];
+
+    setLinks(normalizedLinks);
   };
+
+    const fetchRules = async () => {
+  if (!user?.id) return;
+
+  const { data: rawRules, error: rulesError } = await supabase
+    .from('affiliate_rules')
+    .select('*')
+    .or(`seller_id.eq.${user.id},user_id.eq.${user.id}`)
+    .order('priority', { ascending: true })
+    .order('created_at', { ascending: false });
+
+  if (rulesError) {
+    console.error('Error fetching admin rules:', rulesError);
+    return;
+  }
+
+  const rulesRows = (rawRules || []) as AffiliateRuleRow[];
+
+  if (rulesRows.length === 0) {
+    setRules([]);
+    return;
+  }
+
+  const ruleIds = uniqueIds(rulesRows.map((item) => item.id));
+  const marketerIds = uniqueIds(rulesRows.map((item) => item.marketer_id));
+  const productIds = uniqueIds(rulesRows.map((item) => item.product_id));
+  const storeIds = uniqueIds(rulesRows.map((item) => item.store_id));
+
+  let tiersMap = new Map<string, AffiliateRuleTierRow[]>();
+  let marketerMap = new Map<string, AffiliateMarketerRow>();
+  let productMap = new Map<string, ProductOption>();
+  let storeMap = new Map<string, StoreOption>();
+
+  if (ruleIds.length > 0) {
+    const { data: tiersData, error: tiersError } = await supabase
+      .from('affiliate_rule_tiers')
+      .select('*')
+      .in('rule_id', ruleIds)
+      .order('day_from', { ascending: true });
+
+    if (tiersError) {
+      console.error('Error fetching admin rule tiers:', tiersError);
+    } else {
+      (tiersData || []).forEach((tier: any) => {
+        const current = tiersMap.get(tier.rule_id) || [];
+        current.push(tier as AffiliateRuleTierRow);
+        tiersMap.set(tier.rule_id, current);
+      });
+    }
+  }
+
+  if (marketerIds.length > 0) {
+    const { data: marketersData, error: marketersError } = await supabase
+      .from('affiliate_marketers')
+      .select('id, name, email, phone, status, is_active, seller_id, user_id')
+      .in('id', marketerIds);
+
+    if (marketersError) {
+      console.error('Error fetching rule marketers:', marketersError);
+    } else {
+      marketerMap = buildMarketerMap((marketersData || []) as AffiliateMarketerRow[]);
+    }
+  }
+
+  if (productIds.length > 0) {
+    const { data: productsData, error: productsError } = await supabase
+      .from('products')
+      .select('id, title, slug')
+      .in('id', productIds);
+
+    if (productsError) {
+      console.error('Error fetching rule products:', productsError);
+    } else {
+      productMap = buildProductMap((productsData || []) as ProductOption[]);
+    }
+  }
+
+  if (storeIds.length > 0) {
+    const { data: storesData, error: storesError } = await supabase
+      .from('stores')
+      .select('id, title, slug')
+      .in('id', storeIds);
+
+    if (storesError) {
+      console.error('Error fetching rule stores:', storesError);
+    } else {
+      storeMap = buildStoreMap((storesData || []) as StoreOption[]);
+    }
+  }
+
+  const normalizedRules = rulesRows.map((item) => ({
+    ...item,
+    marketer: item.marketer_id ? marketerMap.get(item.marketer_id) || null : null,
+    product: item.product_id ? productMap.get(item.product_id) || null : null,
+    store: item.store_id ? storeMap.get(item.store_id) || null : null,
+    tiers: tiersMap.get(item.id) || [],
+  })) as AffiliateRuleRow[];
+
+  setRules(normalizedRules);
+};
 
   const handleDeleteMarketer = async (marketerId: string) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا المسوق؟')) return;
