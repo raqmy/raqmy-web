@@ -1047,14 +1047,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </button>
 
             <button
-              onClick={() => setActiveTab('payment-settings')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'payment-settings' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <Settings className="w-5 h-5" />
-              <span>إعدادات الدفع</span>
-            </button>
+  onClick={() => onNavigate('admin-affiliate-management')}
+  className="flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap text-gray-600 hover:bg-gray-100"
+>
+  <Megaphone className="w-5 h-5" />
+  <span>التسويق بالعمولة</span>
+</button>
           </div>
         </div>
 
@@ -1109,15 +1107,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <button
-                onClick={() => onNavigate('payment-settings')}
-                className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
-              >
-                <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center mb-4">
-                  <Settings className="w-6 h-6 text-orange-600" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">إعدادات الدفع</h3>
-                <p className="text-sm text-gray-600">إدارة مفاتيح Paymob وبوابة الدفع</p>
-              </button>
+  onClick={() => onNavigate('admin-affiliate-management')}
+  className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
+>
+  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
+    <Megaphone className="w-6 h-6 text-purple-600" />
+  </div>
+  <h3 className="text-lg font-bold text-gray-900 mb-2">التسويق بالعمولة</h3>
+  <p className="text-sm text-gray-600">إدارة روابط وعمولات تسويق المنصة من لوحة الأدمن</p>
+</button>
 
               <button
                 onClick={() => onNavigate('admin-withdrawals')}
