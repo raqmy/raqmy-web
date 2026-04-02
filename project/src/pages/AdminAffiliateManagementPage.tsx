@@ -9,20 +9,16 @@ import {
   MousePointerClick,
   DollarSign,
   Search,
-  Sparkles,
   Settings2,
   Package,
   Store as StoreIcon,
   CalendarRange,
-  Eye,
-  SlidersHorizontal,
   Target,
-  CheckCircle2,
   AlertCircle,
-  Layers3,
   Megaphone,
   ShieldCheck,
-  Globe2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,8 +27,6 @@ import { CopyLinkButton } from '../components/shared/CopyLinkButton';
 interface AdminAffiliateManagementPageProps {
   onNavigate: (page: string) => void;
 }
-
-type ViewMode = 'overview' | 'campaigns' | 'marketers' | 'links' | 'rules';
 
 type AffiliateMarketerRow = {
   id: string;
@@ -162,6 +156,8 @@ type UnifiedCampaignForm = {
   rule_is_active: boolean;
 };
 
+type ScopeFilter = 'all' | 'product' | 'store' | 'platform';
+
 const getDisplayName = (item?: { name?: string | null; title?: string | null } | null) =>
   item?.title || item?.name || 'بدون اسم';
 
@@ -172,7 +168,7 @@ const getApplyToLabel = (value?: string | null) => {
     case 'store':
       return 'متجر محدد';
     case 'all':
-      return 'جميع المنصة';
+      return 'المنصة بالكامل';
     default:
       return value || 'غير محدد';
   }
@@ -236,14 +232,29 @@ const matchRuleForLink = (
     if (rule.marketer_id !== link.marketer_id) return false;
 
     if (rule.scope_type === 'all' && link.apply_to === 'all') return true;
-    if (rule.scope_type === 'product' && link.apply_to === 'product' && rule.product_id === link.product_id) return true;
-    if (rule.scope_type === 'store' && link.apply_to === 'store' && rule.store_id === link.store_id) return true;
+    if (
+      rule.scope_type === 'product' &&
+      link.apply_to === 'product' &&
+      rule.product_id === link.product_id
+    ) {
+      return true;
+    }
+    if (
+      rule.scope_type === 'store' &&
+      link.apply_to === 'store' &&
+      rule.store_id === link.store_id
+    ) {
+      return true;
+    }
 
     return false;
   });
 
   if (candidates.length === 0) {
-    const fallback = rules.filter((rule) => rule.marketer_id === link.marketer_id && rule.scope_type === 'all');
+    const fallback = rules.filter(
+      (rule) => rule.marketer_id === link.marketer_id && rule.scope_type === 'all'
+    );
+
     if (fallback.length === 0) return null;
 
     return [...fallback].sort(
@@ -256,27 +267,57 @@ const matchRuleForLink = (
   )[0];
 };
 
+const getCampaignScopeValue = (campaign: UnifiedCampaignRow): ScopeFilter => {
+  const source = campaign.link?.apply_to || campaign.rule?.scope_type || 'all';
+  if (source === 'product') return 'product';
+  if (source === 'store') return 'store';
+  return 'platform';
+};
+
+const getCampaignScopeLabel = (campaign: UnifiedCampaignRow) => {
+  const scope = getCampaignScopeValue(campaign);
+  if (scope === 'product') return 'منتج';
+  if (scope === 'store') return 'متجر';
+  return 'المنصة بالكامل';
+};
+
+const getCampaignObjectName = (campaign: UnifiedCampaignRow) => {
+  const scope = getCampaignScopeValue(campaign);
+
+  if (scope === 'product') {
+    return getDisplayName(campaign.link?.product || campaign.rule?.product);
+  }
+
+  if (scope === 'store') {
+    return getDisplayName(campaign.link?.store || campaign.rule?.store);
+  }
+
+  return 'المنصة بالكامل';
+};
+
+const isCampaignActive = (campaign: UnifiedCampaignRow) =>
+  (campaign.marketer?.is_active ?? true) === true &&
+  (campaign.link?.is_active ?? true) === true &&
+  (campaign.rule?.is_active ?? true) === true;
+
 export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPageProps> = ({
   onNavigate,
 }) => {
   const { user, profile } = useAuth() as any;
 
-  const [viewMode, setViewMode] = useState<ViewMode>('overview');
   const [loading, setLoading] = useState(true);
-
   const [marketers, setMarketers] = useState<AffiliateMarketerRow[]>([]);
   const [links, setLinks] = useState<AffiliateLinkRow[]>([]);
   const [rules, setRules] = useState<AffiliateRuleRow[]>([]);
 
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<UnifiedCampaignRow | null>(null);
-  const [editingMarketer, setEditingMarketer] = useState<AffiliateMarketerRow | null>(null);
-  const [editingLink, setEditingLink] = useState<AffiliateLinkRow | null>(null);
-  const [editingRule, setEditingRule] = useState<AffiliateRuleRow | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMarketerId, setSelectedMarketerId] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
+  const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.id) {
@@ -312,7 +353,7 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     setMarketers((data || []) as AffiliateMarketerRow[]);
   };
 
-    const fetchLinks = async () => {
+  const fetchLinks = async () => {
     if (!user?.id) return;
 
     const { data: rawLinks, error: linksError } = await supabase
@@ -344,7 +385,7 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     if (marketerIds.length > 0) {
       const { data: marketersData, error: marketersError } = await supabase
         .from('affiliate_marketers')
-        .select('id, name, email, phone, status, is_active, seller_id, user_id')
+        .select('id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings')
         .in('id', marketerIds);
 
       if (marketersError) {
@@ -390,170 +431,104 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     setLinks(normalizedLinks);
   };
 
-    const fetchRules = async () => {
-  if (!user?.id) return;
+  const fetchRules = async () => {
+    if (!user?.id) return;
 
-  const { data: rawRules, error: rulesError } = await supabase
-    .from('affiliate_rules')
-    .select('*')
-    .or(`seller_id.eq.${user.id},user_id.eq.${user.id}`)
-    .order('priority', { ascending: true })
-    .order('created_at', { ascending: false });
-
-  if (rulesError) {
-    console.error('Error fetching admin rules:', rulesError);
-    return;
-  }
-
-  const rulesRows = (rawRules || []) as AffiliateRuleRow[];
-
-  if (rulesRows.length === 0) {
-    setRules([]);
-    return;
-  }
-
-  const ruleIds = uniqueIds(rulesRows.map((item) => item.id));
-  const marketerIds = uniqueIds(rulesRows.map((item) => item.marketer_id));
-  const productIds = uniqueIds(rulesRows.map((item) => item.product_id));
-  const storeIds = uniqueIds(rulesRows.map((item) => item.store_id));
-
-  let tiersMap = new Map<string, AffiliateRuleTierRow[]>();
-  let marketerMap = new Map<string, AffiliateMarketerRow>();
-  let productMap = new Map<string, ProductOption>();
-  let storeMap = new Map<string, StoreOption>();
-
-  if (ruleIds.length > 0) {
-    const { data: tiersData, error: tiersError } = await supabase
-      .from('affiliate_rule_tiers')
+    const { data: rawRules, error: rulesError } = await supabase
+      .from('affiliate_rules')
       .select('*')
-      .in('rule_id', ruleIds)
-      .order('day_from', { ascending: true });
+      .or(`seller_id.eq.${user.id},user_id.eq.${user.id}`)
+      .order('priority', { ascending: true })
+      .order('created_at', { ascending: false });
 
-    if (tiersError) {
-      console.error('Error fetching admin rule tiers:', tiersError);
-    } else {
-      (tiersData || []).forEach((tier: any) => {
-        const current = tiersMap.get(tier.rule_id) || [];
-        current.push(tier as AffiliateRuleTierRow);
-        tiersMap.set(tier.rule_id, current);
-      });
-    }
-  }
-
-  if (marketerIds.length > 0) {
-    const { data: marketersData, error: marketersError } = await supabase
-      .from('affiliate_marketers')
-      .select('id, name, email, phone, status, is_active, seller_id, user_id')
-      .in('id', marketerIds);
-
-    if (marketersError) {
-      console.error('Error fetching rule marketers:', marketersError);
-    } else {
-      marketerMap = buildMarketerMap((marketersData || []) as AffiliateMarketerRow[]);
-    }
-  }
-
-  if (productIds.length > 0) {
-    const { data: productsData, error: productsError } = await supabase
-      .from('products')
-      .select('id, title, slug')
-      .in('id', productIds);
-
-    if (productsError) {
-      console.error('Error fetching rule products:', productsError);
-    } else {
-      productMap = buildProductMap((productsData || []) as ProductOption[]);
-    }
-  }
-
-  if (storeIds.length > 0) {
-    const { data: storesData, error: storesError } = await supabase
-      .from('stores')
-      .select('id, title, slug')
-      .in('id', storeIds);
-
-    if (storesError) {
-      console.error('Error fetching rule stores:', storesError);
-    } else {
-      storeMap = buildStoreMap((storesData || []) as StoreOption[]);
-    }
-  }
-
-  const normalizedRules = rulesRows.map((item) => ({
-    ...item,
-    marketer: item.marketer_id ? marketerMap.get(item.marketer_id) || null : null,
-    product: item.product_id ? productMap.get(item.product_id) || null : null,
-    store: item.store_id ? storeMap.get(item.store_id) || null : null,
-    tiers: tiersMap.get(item.id) || [],
-  })) as AffiliateRuleRow[];
-
-  setRules(normalizedRules);
-};
-
-  const handleDeleteMarketer = async (marketerId: string) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا المسوق؟')) return;
-
-    try {
-      const { error } = await supabase
-        .from('affiliate_marketers')
-        .delete()
-        .eq('id', marketerId)
-        .eq('seller_id', user?.id);
-
-      if (error) throw error;
-
-      fetchAllData();
-    } catch (error) {
-      console.error('Error deleting marketer:', error);
-      alert('حدث خطأ أثناء حذف المسوق');
-    }
-  };
-
-  const handleDeleteLink = async (linkId: string) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا الرابط؟')) return;
-
-    try {
-      const { error } = await supabase
-        .from('affiliate_links')
-        .delete()
-        .eq('id', linkId)
-        .eq('seller_id', user?.id);
-
-      if (error) throw error;
-
-      fetchAllData();
-    } catch (error) {
-      console.error('Error deleting link:', error);
-      alert('حدث خطأ أثناء حذف الرابط');
-    }
-  };
-
-  const handleDeleteRule = async (ruleId: string) => {
-    if (!window.confirm('هل أنت متأكد من حذف قاعدة العمولة؟ سيتم حذف الشرائح المرتبطة بها أيضًا.')) {
+    if (rulesError) {
+      console.error('Error fetching admin rules:', rulesError);
       return;
     }
 
-    try {
-      const { error: tiersError } = await supabase
-        .from('affiliate_rule_tiers')
-        .delete()
-        .eq('rule_id', ruleId);
+    const rulesRows = (rawRules || []) as AffiliateRuleRow[];
 
-      if (tiersError) throw tiersError;
-
-      const { error: ruleError } = await supabase
-        .from('affiliate_rules')
-        .delete()
-        .eq('id', ruleId)
-        .eq('seller_id', user?.id);
-
-      if (ruleError) throw ruleError;
-
-      fetchAllData();
-    } catch (error) {
-      console.error('Error deleting rule:', error);
-      alert('حدث خطأ أثناء حذف قاعدة العمولة');
+    if (rulesRows.length === 0) {
+      setRules([]);
+      return;
     }
+
+    const ruleIds = uniqueIds(rulesRows.map((item) => item.id));
+    const marketerIds = uniqueIds(rulesRows.map((item) => item.marketer_id));
+    const productIds = uniqueIds(rulesRows.map((item) => item.product_id));
+    const storeIds = uniqueIds(rulesRows.map((item) => item.store_id));
+
+    let tiersMap = new Map<string, AffiliateRuleTierRow[]>();
+    let marketerMap = new Map<string, AffiliateMarketerRow>();
+    let productMap = new Map<string, ProductOption>();
+    let storeMap = new Map<string, StoreOption>();
+
+    if (ruleIds.length > 0) {
+      const { data: tiersData, error: tiersError } = await supabase
+        .from('affiliate_rule_tiers')
+        .select('*')
+        .in('rule_id', ruleIds)
+        .order('day_from', { ascending: true });
+
+      if (tiersError) {
+        console.error('Error fetching admin rule tiers:', tiersError);
+      } else {
+        (tiersData || []).forEach((tier: any) => {
+          const current = tiersMap.get(tier.rule_id) || [];
+          current.push(tier as AffiliateRuleTierRow);
+          tiersMap.set(tier.rule_id, current);
+        });
+      }
+    }
+
+    if (marketerIds.length > 0) {
+      const { data: marketersData, error: marketersError } = await supabase
+        .from('affiliate_marketers')
+        .select('id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings')
+        .in('id', marketerIds);
+
+      if (marketersError) {
+        console.error('Error fetching rule marketers:', marketersError);
+      } else {
+        marketerMap = buildMarketerMap((marketersData || []) as AffiliateMarketerRow[]);
+      }
+    }
+
+    if (productIds.length > 0) {
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('id, title, slug')
+        .in('id', productIds);
+
+      if (productsError) {
+        console.error('Error fetching rule products:', productsError);
+      } else {
+        productMap = buildProductMap((productsData || []) as ProductOption[]);
+      }
+    }
+
+    if (storeIds.length > 0) {
+      const { data: storesData, error: storesError } = await supabase
+        .from('stores')
+        .select('id, title, slug')
+        .in('id', storeIds);
+
+      if (storesError) {
+        console.error('Error fetching rule stores:', storesError);
+      } else {
+        storeMap = buildStoreMap((storesData || []) as StoreOption[]);
+      }
+    }
+
+    const normalizedRules = rulesRows.map((item) => ({
+      ...item,
+      marketer: item.marketer_id ? marketerMap.get(item.marketer_id) || null : null,
+      product: item.product_id ? productMap.get(item.product_id) || null : null,
+      store: item.store_id ? storeMap.get(item.store_id) || null : null,
+      tiers: tiersMap.get(item.id) || [],
+    })) as AffiliateRuleRow[];
+
+    setRules(normalizedRules);
   };
 
   const handleDeleteCampaign = async (campaign: UnifiedCampaignRow) => {
@@ -605,7 +580,6 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
       const marketer =
         marketers.find((marketer) => marketer.id === link.marketer_id) || null;
       const rule = matchRuleForLink(link, rules, marketerNameMap);
-
       const scopeLabel = getApplyToLabel(link.apply_to);
       const marketerName = marketer?.name || link.marketer?.name || 'بدون مسوق';
 
@@ -619,7 +593,10 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     });
 
     const ruleOnly = rules
-      .filter((rule) => !links.some((link) => matchRuleForLink(link, [rule], marketerNameMap)?.id === rule.id))
+      .filter(
+        (rule) =>
+          !links.some((link) => matchRuleForLink(link, [rule], marketerNameMap)?.id === rule.id)
+      )
       .map((rule) => {
         const marketer =
           marketers.find((marketer) => marketer.id === rule.marketer_id) || null;
@@ -640,15 +617,23 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     const q = searchQuery.trim().toLowerCase();
 
     return unifiedCampaigns.filter((campaign) => {
-      const marketerName = (campaign.marketer?.name || campaign.rule?.marketer?.name || '').toLowerCase();
+      const marketerName = (
+        campaign.marketer?.name ||
+        campaign.rule?.marketer?.name ||
+        ''
+      ).toLowerCase();
+
       const code = (campaign.link?.code || '').toLowerCase();
       const title = (campaign.title || '').toLowerCase();
-      const productName = getDisplayName(campaign.link?.product || campaign.rule?.product).toLowerCase();
-      const storeName = getDisplayName(campaign.link?.store || campaign.rule?.store).toLowerCase();
-      const isActive =
-        (campaign.link?.is_active ?? true) === true &&
-        (campaign.rule?.is_active ?? true) === true &&
-        (campaign.marketer?.is_active ?? true) === true;
+      const productName = getDisplayName(
+        campaign.link?.product || campaign.rule?.product
+      ).toLowerCase();
+      const storeName = getDisplayName(
+        campaign.link?.store || campaign.rule?.store
+      ).toLowerCase();
+      const objectName = getCampaignObjectName(campaign).toLowerCase();
+      const isActive = isCampaignActive(campaign);
+      const campaignScope = getCampaignScopeValue(campaign);
 
       const matchesQuery =
         !q ||
@@ -656,7 +641,8 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
         code.includes(q) ||
         title.includes(q) ||
         productName.includes(q) ||
-        storeName.includes(q);
+        storeName.includes(q) ||
+        objectName.includes(q);
 
       const matchesMarketer =
         selectedMarketerId === 'all' ||
@@ -669,128 +655,50 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
         (statusFilter === 'active' && isActive) ||
         (statusFilter === 'inactive' && !isActive);
 
-      return matchesQuery && matchesMarketer && matchesStatus;
+      const matchesScope =
+        scopeFilter === 'all' ||
+        (scopeFilter === 'platform' && campaignScope === 'platform') ||
+        campaignScope === scopeFilter;
+
+      return matchesQuery && matchesMarketer && matchesStatus && matchesScope;
     });
-  }, [unifiedCampaigns, searchQuery, selectedMarketerId, statusFilter]);
-
-  const filteredMarketers = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-
-    return marketers.filter((m) => {
-      const name = (m.name || '').toLowerCase();
-      const email = (m.email || '').toLowerCase();
-      const phone = (m.phone || '').toLowerCase();
-      const isActive = (m.is_active ?? m.status === 'active') === true;
-
-      const matchesQuery =
-        !q || name.includes(q) || email.includes(q) || phone.includes(q);
-
-      const matchesStatus =
-        statusFilter === 'all' ||
-        (statusFilter === 'active' && isActive) ||
-        (statusFilter === 'inactive' && !isActive);
-
-      return matchesQuery && matchesStatus;
-    });
-  }, [marketers, searchQuery, statusFilter]);
-
-  const filteredLinks = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-
-    return links.filter((l) => {
-      const code = (l.code || '').toLowerCase();
-      const marketerName = (
-        l.marketer?.name ||
-        marketerNameMap.get(l.marketer_id || '') ||
-        ''
-      ).toLowerCase();
-      const productName = getDisplayName(l.product).toLowerCase();
-      const storeName = getDisplayName(l.store).toLowerCase();
-      const isActive = l.is_active === true;
-
-      const matchesQuery =
-        !q ||
-        code.includes(q) ||
-        marketerName.includes(q) ||
-        productName.includes(q) ||
-        storeName.includes(q);
-
-      const matchesMarketer =
-        selectedMarketerId === 'all' || l.marketer_id === selectedMarketerId;
-
-      const matchesStatus =
-        statusFilter === 'all' ||
-        (statusFilter === 'active' && isActive) ||
-        (statusFilter === 'inactive' && !isActive);
-
-      return matchesQuery && matchesMarketer && matchesStatus;
-    });
-  }, [links, searchQuery, selectedMarketerId, statusFilter, marketerNameMap]);
-
-  const filteredRules = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-
-    return rules.filter((rule) => {
-      const marketerName = (
-        rule.marketer?.name ||
-        marketerNameMap.get(rule.marketer_id) ||
-        ''
-      ).toLowerCase();
-
-      const scopeName =
-        rule.scope_type === 'product'
-          ? getDisplayName(rule.product).toLowerCase()
-          : rule.scope_type === 'store'
-          ? getDisplayName(rule.store).toLowerCase()
-          : 'all';
-
-      const isActive = rule.is_active === true;
-
-      const matchesQuery =
-        !q ||
-        marketerName.includes(q) ||
-        scopeName.includes(q) ||
-        getScopeTypeLabel(rule.scope_type).toLowerCase().includes(q);
-
-      const matchesMarketer =
-        selectedMarketerId === 'all' || rule.marketer_id === selectedMarketerId;
-
-      const matchesStatus =
-        statusFilter === 'all' ||
-        (statusFilter === 'active' && isActive) ||
-        (statusFilter === 'inactive' && !isActive);
-
-      return matchesQuery && matchesMarketer && matchesStatus;
-    });
-  }, [rules, searchQuery, selectedMarketerId, statusFilter, marketerNameMap]);
+  }, [unifiedCampaigns, searchQuery, selectedMarketerId, statusFilter, scopeFilter]);
 
   const overviewStats = useMemo(() => {
-    const totalClicks = marketers.reduce((sum, item) => sum + Number(item.total_clicks || 0), 0);
-    const totalSales = marketers.reduce((sum, item) => sum + Number(item.total_sales || 0), 0);
-    const totalEarnings = marketers.reduce((sum, item) => sum + Number(item.total_earnings || 0), 0);
-    const activeMarketers = marketers.filter((item) => (item.is_active ?? item.status === 'active') === true).length;
-    const activeLinks = links.filter((item) => item.is_active === true).length;
-    const activeRules = rules.filter((item) => item.is_active === true).length;
+    const totalClicks = unifiedCampaigns.reduce(
+      (sum, item) => sum + Number(item.link?.clicks || item.marketer?.total_clicks || 0),
+      0
+    );
+    const totalSales = unifiedCampaigns.reduce(
+      (sum, item) => sum + Number(item.link?.sales || item.marketer?.total_sales || 0),
+      0
+    );
+    const totalEarnings = unifiedCampaigns.reduce(
+      (sum, item) => sum + Number(item.link?.earnings || item.marketer?.total_earnings || 0),
+      0
+    );
+    const activeCampaigns = unifiedCampaigns.filter((item) => isCampaignActive(item)).length;
+    const activeMarketers = marketers.filter(
+      (item) => (item.is_active ?? item.status === 'active') === true
+    ).length;
 
     return {
       totalClicks,
       totalSales,
       totalEarnings,
-      activeMarketers,
-      totalMarketers: marketers.length,
-      totalLinks: links.length,
-      activeLinks,
-      totalRules: rules.length,
-      activeRules,
       totalCampaigns: unifiedCampaigns.length,
-      conversion: totalClicks > 0 ? `${((totalSales / totalClicks) * 100).toFixed(1)}%` : '0.0%',
+      activeCampaigns,
+      activeMarketers,
+      conversion:
+        totalClicks > 0 ? `${((totalSales / totalClicks) * 100).toFixed(1)}%` : '0.0%',
     };
-  }, [marketers, links, rules, unifiedCampaigns]);
+  }, [unifiedCampaigns, marketers]);
 
   const resetFilters = () => {
     setSearchQuery('');
     setSelectedMarketerId('all');
     setStatusFilter('all');
+    setScopeFilter('all');
   };
 
   if (profile?.role !== 'admin' && profile?.role !== 'superadmin') {
@@ -827,128 +735,89 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8 rounded-3xl overflow-hidden bg-gradient-to-l from-violet-600 via-fuchsia-600 to-blue-600 text-white shadow-lg">
           <div className="p-8 lg:p-10">
-            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
               <div>
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-sm mb-4">
                   <ShieldCheck className="w-4 h-4" />
                   أفلييت المنصة
                 </div>
-                <h1 className="text-3xl lg:text-4xl font-bold mb-3">إدارة التسويق بالعمولة للمنصة</h1>
-                <p className="text-white/90 max-w-2xl leading-7">
-                  من هنا تدير أفلييت رقمي نفسه: المسوقين، الروابط، وقواعد العمولة الخاصة بتسويق المنصة ومنتجاتها ومتاجرها من لوحة الأدمن.
+                <h1 className="text-3xl lg:text-4xl font-bold mb-3">إدارة عروض أفلييت المنصة</h1>
+                <p className="text-white/90 max-w-3xl leading-7">
+                  صفحة موحدة لإدارة عروض أفلييت المنصة. كل عرض يجمع المسوق والرابط وقاعدة العمولة
+                  والشرائح في مكان واحد واضح وسهل.
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 min-w-[320px]">
-                <SummaryMiniCard
-                  label="العروض الموحدة"
-                  value={overviewStats.totalCampaigns}
-                  icon={<Megaphone className="w-5 h-5" />}
-                />
-                <SummaryMiniCard
-                  label="المسوقون النشطون"
-                  value={overviewStats.activeMarketers}
-                  icon={<Users className="w-5 h-5" />}
-                />
-                <SummaryMiniCard
-                  label="الروابط النشطة"
-                  value={overviewStats.activeLinks}
-                  icon={<LinkIcon className="w-5 h-5" />}
-                />
-                <SummaryMiniCard
-                  label="إجمالي النقرات"
-                  value={overviewStats.totalClicks}
-                  icon={<MousePointerClick className="w-5 h-5" />}
-                />
-                <SummaryMiniCard
-                  label="إجمالي المبيعات"
-                  value={overviewStats.totalSales}
-                  icon={<TrendingUp className="w-5 h-5" />}
-                />
-                <SummaryMiniCard
-                  label="إجمالي الأرباح"
-                  value={formatMoney(overviewStats.totalEarnings)}
-                  icon={<DollarSign className="w-5 h-5" />}
-                />
-              </div>
+              <button
+                onClick={() => {
+                  setEditingCampaign(null);
+                  setShowCampaignModal(true);
+                }}
+                className="px-5 py-3 rounded-2xl bg-white text-violet-700 font-semibold hover:bg-violet-50 flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                إنشاء عرض أفلييت
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mt-8">
+              <SummaryMiniCard
+                label="العروض النشطة"
+                value={overviewStats.activeCampaigns}
+                icon={<Megaphone className="w-5 h-5" />}
+              />
+              <SummaryMiniCard
+                label="المسوقون النشطون"
+                value={overviewStats.activeMarketers}
+                icon={<Users className="w-5 h-5" />}
+              />
+              <SummaryMiniCard
+                label="إجمالي النقرات"
+                value={overviewStats.totalClicks}
+                icon={<MousePointerClick className="w-5 h-5" />}
+              />
+              <SummaryMiniCard
+                label="إجمالي الأرباح"
+                value={formatMoney(overviewStats.totalEarnings)}
+                icon={<DollarSign className="w-5 h-5" />}
+              />
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6">
-          <div className="p-4 lg:p-6 border-b border-gray-100">
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-5 lg:p-6 border-b border-gray-100">
             <div className="flex flex-col xl:flex-row xl:items-center gap-4">
-              <div className="flex flex-wrap gap-2">
-                <TopViewTab
-                  active={viewMode === 'overview'}
-                  onClick={() => setViewMode('overview')}
-                  icon={<Layers3 className="w-4 h-4" />}
-                  label="نظرة عامة"
-                />
-                <TopViewTab
-                  active={viewMode === 'campaigns'}
-                  onClick={() => setViewMode('campaigns')}
-                  icon={<Megaphone className="w-4 h-4" />}
-                  label={`العروض (${unifiedCampaigns.length})`}
-                />
-                <TopViewTab
-                  active={viewMode === 'marketers'}
-                  onClick={() => setViewMode('marketers')}
-                  icon={<Users className="w-4 h-4" />}
-                  label={`المسوقون (${marketers.length})`}
-                />
-                <TopViewTab
-                  active={viewMode === 'links'}
-                  onClick={() => setViewMode('links')}
-                  icon={<LinkIcon className="w-4 h-4" />}
-                  label={`الروابط (${links.length})`}
-                />
-                <TopViewTab
-                  active={viewMode === 'rules'}
-                  onClick={() => setViewMode('rules')}
-                  icon={<Settings2 className="w-4 h-4" />}
-                  label={`قواعد العمولة (${rules.length})`}
-                />
+              <div className="flex-1">
+                <div className="text-lg font-bold text-gray-900">العروض الموحدة</div>
+                <div className="text-sm text-gray-500 mt-1">
+                  قائمة واحدة تعرض كل ما يخص العرض: المسوق، الرابط، العمولة، الأداء، والتفاصيل عند الطلب.
+                </div>
               </div>
 
-              <div className="flex-1"></div>
-
-              <div className="flex flex-wrap gap-2">
-                <QuickActionButton
-                  onClick={() => {
-                    setEditingCampaign(null);
-                    setShowCampaignModal(true);
-                  }}
-                  icon={<Plus className="w-4 h-4" />}
-                  label="إنشاء عرض أفلييت"
-                  primary
-                />
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <span>الإجمالي:</span>
+                <span className="font-bold text-gray-900">{filteredCampaigns.length}</span>
               </div>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-800 leading-7">
-              الإدارة هنا مبنية بشكل أوضح للأدمن: <strong>عرض موحد</strong> يربط المسوق والرابط وقاعدة العمولة في نافذة واحدة، مع بقاء التبويبات التفصيلية للمراجعة والتحكم.
-            </div>
-          </div>
-
-          <div className="p-4 lg:p-6 border-b border-gray-100 bg-gray-50/70">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-              <div className="lg:col-span-5 relative">
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 mt-5">
+              <div className="xl:col-span-4 relative">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input
                   type="text"
                   placeholder="ابحث بالمسوق أو الكود أو المنتج أو المتجر..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
                 />
               </div>
 
-              <div className="lg:col-span-3">
+              <div className="xl:col-span-3">
                 <select
                   value={selectedMarketerId}
                   onChange={(e) => setSelectedMarketerId(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
                 >
                   <option value="all">كل المسوقين</option>
                   {marketers.map((marketer) => (
@@ -959,11 +828,24 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
                 </select>
               </div>
 
-              <div className="lg:col-span-2">
+              <div className="xl:col-span-2">
+                <select
+                  value={scopeFilter}
+                  onChange={(e) => setScopeFilter(e.target.value as ScopeFilter)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  <option value="all">كل الأنواع</option>
+                  <option value="platform">المنصة بالكامل</option>
+                  <option value="product">منتج</option>
+                  <option value="store">متجر</option>
+                </select>
+              </div>
+
+              <div className="xl:col-span-2">
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
                 >
                   <option value="all">كل الحالات</option>
                   <option value="active">نشط فقط</option>
@@ -971,71 +853,63 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
                 </select>
               </div>
 
-              <div className="lg:col-span-2">
+              <div className="xl:col-span-1">
                 <button
                   onClick={resetFilters}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white hover:bg-gray-100 text-gray-700 font-medium flex items-center justify-center gap-2"
+                  className="w-full px-4 py-3 rounded-2xl border border-gray-300 bg-white hover:bg-gray-100 text-gray-700 font-medium"
                 >
-                  <SlidersHorizontal className="w-4 h-4" />
-                  إعادة الضبط
+                  إعادة
                 </button>
               </div>
             </div>
           </div>
 
-          <div className="p-4 lg:p-6">
-            {viewMode === 'overview' && (
-              <AdminAffiliateOverviewSection
-                stats={overviewStats}
-                marketers={marketers}
-                links={links}
-                rules={rules}
-                campaigns={unifiedCampaigns}
-                onNavigate={onNavigate}
-                onEditCampaign={(campaign) => {
-                  setEditingCampaign(campaign);
-                  setShowCampaignModal(true);
-                }}
-                onEditLink={(link) => setEditingLink(link)}
-                onEditRule={(rule) => setEditingRule(rule)}
+          <div className="p-5 lg:p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
+              <KpiCard
+                title="عدد العروض"
+                value={filteredCampaigns.length}
+                helper="بعد الفلاتر الحالية"
+                icon={<Megaphone className="w-5 h-5" />}
               />
-            )}
+              <KpiCard
+                title="إجمالي المبيعات"
+                value={overviewStats.totalSales}
+                helper={`التحويل ${overviewStats.conversion}`}
+                icon={<TrendingUp className="w-5 h-5" />}
+              />
+              <KpiCard
+                title="إجمالي النقرات"
+                value={overviewStats.totalClicks}
+                helper="لكل العروض"
+                icon={<MousePointerClick className="w-5 h-5" />}
+              />
+              <KpiCard
+                title="إجمالي الأرباح"
+                value={formatMoney(overviewStats.totalEarnings)}
+                helper="نتيجة كل الروابط"
+                icon={<DollarSign className="w-5 h-5" />}
+              />
+              <KpiCard
+                title="المسوقون النشطون"
+                value={overviewStats.activeMarketers}
+                helper="من إجمالي المسوقين"
+                icon={<Users className="w-5 h-5" />}
+              />
+            </div>
 
-            {viewMode === 'campaigns' && (
-              <AdminCampaignsTab
-                campaigns={filteredCampaigns}
-                onEdit={(campaign) => {
-                  setEditingCampaign(campaign);
-                  setShowCampaignModal(true);
-                }}
-                onDelete={handleDeleteCampaign}
-              />
-            )}
-
-            {viewMode === 'marketers' && (
-              <MarketersTab
-                marketers={filteredMarketers}
-                onEdit={setEditingMarketer}
-                onDelete={handleDeleteMarketer}
-                onViewAnalytics={(marketerId) => onNavigate(`marketer-analytics-${marketerId}`)}
-              />
-            )}
-
-            {viewMode === 'links' && (
-              <LinksTab
-                links={filteredLinks}
-                onEdit={setEditingLink}
-                onDelete={handleDeleteLink}
-              />
-            )}
-
-            {viewMode === 'rules' && (
-              <RulesTab
-                rules={filteredRules}
-                onEdit={setEditingRule}
-                onDelete={handleDeleteRule}
-              />
-            )}
+            <UnifiedCampaignsList
+              campaigns={filteredCampaigns}
+              expandedCampaignId={expandedCampaignId}
+              onToggleExpand={(campaignId) =>
+                setExpandedCampaignId((prev) => (prev === campaignId ? null : campaignId))
+              }
+              onEdit={(campaign) => {
+                setEditingCampaign(campaign);
+                setShowCampaignModal(true);
+              }}
+              onDelete={handleDeleteCampaign}
+            />
           </div>
         </div>
       </div>
@@ -1051,41 +925,6 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
           onSuccess={() => {
             setShowCampaignModal(false);
             setEditingCampaign(null);
-            fetchAllData();
-          }}
-        />
-      )}
-
-      {editingMarketer && (
-        <MarketerFormModal
-          marketer={editingMarketer}
-          onClose={() => setEditingMarketer(null)}
-          onSuccess={() => {
-            setEditingMarketer(null);
-            fetchAllData();
-          }}
-        />
-      )}
-
-      {editingLink && (
-        <LinkFormModal
-          link={editingLink}
-          marketers={marketers}
-          onClose={() => setEditingLink(null)}
-          onSuccess={() => {
-            setEditingLink(null);
-            fetchAllData();
-          }}
-        />
-      )}
-
-      {editingRule && (
-        <RuleFormModal
-          rule={editingRule}
-          marketers={marketers}
-          onClose={() => setEditingRule(null)}
-          onSuccess={() => {
-            setEditingRule(null);
             fetchAllData();
           }}
         />
@@ -1108,268 +947,37 @@ const SummaryMiniCard: React.FC<{
   </div>
 );
 
-const TopViewTab: React.FC<{
-  active: boolean;
-  onClick: () => void;
+const KpiCard: React.FC<{
+  title: string;
+  value: string | number;
+  helper: string;
   icon: React.ReactNode;
-  label: string;
-}> = ({ active, onClick, icon, label }) => (
-  <button
-    onClick={onClick}
-    className={`px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-colors ${
-      active
-        ? 'bg-blue-600 text-white shadow-sm'
-        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-    }`}
-  >
-    {icon}
-    <span>{label}</span>
-  </button>
-);
-
-const QuickActionButton: React.FC<{
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  primary?: boolean;
-}> = ({ onClick, icon, label, primary = false }) => (
-  <button
-    onClick={onClick}
-    className={`px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-colors ${
-      primary
-        ? 'bg-violet-600 text-white hover:bg-violet-700'
-        : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-    }`}
-  >
-    {icon}
-    <span>{label}</span>
-  </button>
-);
-
-const AdminAffiliateOverviewSection: React.FC<{
-  stats: {
-    totalClicks: number;
-    totalSales: number;
-    totalEarnings: number;
-    activeMarketers: number;
-    totalMarketers: number;
-    totalLinks: number;
-    activeLinks: number;
-    totalRules: number;
-    activeRules: number;
-    totalCampaigns: number;
-    conversion: string;
-  };
-  marketers: AffiliateMarketerRow[];
-  links: AffiliateLinkRow[];
-  rules: AffiliateRuleRow[];
-  campaigns: UnifiedCampaignRow[];
-  onNavigate: (page: string) => void;
-  onEditCampaign: (campaign: UnifiedCampaignRow) => void;
-  onEditLink: (link: AffiliateLinkRow) => void;
-  onEditRule: (rule: AffiliateRuleRow) => void;
-}> = ({ stats, marketers, links, rules, campaigns, onNavigate, onEditCampaign, onEditLink, onEditRule }) => {
-  const topCampaigns = [...campaigns]
-    .sort(
-      (a, b) =>
-        Number(b.link?.earnings || b.marketer?.total_earnings || 0) -
-        Number(a.link?.earnings || a.marketer?.total_earnings || 0)
-    )
-    .slice(0, 3);
-
-  const topLinks = [...links]
-    .sort((a, b) => Number(b.earnings || 0) - Number(a.earnings || 0))
-    .slice(0, 3);
-
-  const latestRules = [...rules].slice(0, 3);
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <OverviewStatCard
-          title="العروض الموحدة"
-          value={stats.totalCampaigns}
-          subValue={`${stats.totalLinks} رابط • ${stats.totalRules} قاعدة`}
-          icon={<Megaphone className="w-5 h-5" />}
-        />
-        <OverviewStatCard
-          title="إجمالي المسوقين"
-          value={stats.totalMarketers}
-          subValue={`${stats.activeMarketers} نشط`}
-          icon={<Users className="w-5 h-5" />}
-        />
-        <OverviewStatCard
-          title="المبيعات من أفلييت المنصة"
-          value={stats.totalSales}
-          subValue={`معدل التحويل ${stats.conversion}`}
-          icon={<TrendingUp className="w-5 h-5" />}
-        />
-        <OverviewStatCard
-          title="إجمالي الأرباح"
-          value={formatMoney(stats.totalEarnings)}
-          subValue={`${stats.activeLinks} روابط نشطة`}
-          icon={<DollarSign className="w-5 h-5" />}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <PanelCard
-          title="أفضل عروض المنصة"
-          subtitle="أعلى العروض أداءً"
-          icon={<Megaphone className="w-5 h-5" />}
-        >
-          {topCampaigns.length === 0 ? (
-            <EmptyMiniState text="لا توجد عروض بعد" />
-          ) : (
-            <div className="space-y-3">
-              {topCampaigns.map((campaign) => (
-                <div key={campaign.id} className="rounded-2xl border border-gray-100 p-4 bg-gray-50/70">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-bold text-gray-900">{campaign.title}</div>
-                      <div className="text-sm text-gray-500 mt-1">
-                        {campaign.link?.code || 'بدون رابط'} • {campaign.rule ? formatCommission(campaign.rule.commission_type, campaign.rule.commission_value) : 'بدون قاعدة'}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => onEditCampaign(campaign)}
-                      className="text-sm text-blue-600 hover:text-blue-700"
-                    >
-                      تعديل
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 mt-4 text-center">
-                    <MiniMetric label="النقرات" value={campaign.link?.clicks || 0} />
-                    <MiniMetric label="المبيعات" value={campaign.link?.sales || 0} />
-                    <MiniMetric label="الأرباح" value={formatMoney(campaign.link?.earnings || campaign.marketer?.total_earnings || 0)} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </PanelCard>
-
-        <PanelCard
-          title="أفضل الروابط"
-          subtitle="روابط المنصة الأعلى أداءً"
-          icon={<LinkIcon className="w-5 h-5" />}
-        >
-          {topLinks.length === 0 ? (
-            <EmptyMiniState text="لا توجد روابط بعد" />
-          ) : (
-            <div className="space-y-3">
-              {topLinks.map((link) => (
-                <div key={link.id} className="rounded-2xl border border-gray-100 p-4 bg-gray-50/70">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-bold text-gray-900 font-mono">{link.code}</div>
-                      <div className="text-sm text-gray-500 mt-1">
-                        {getApplyToLabel(link.apply_to)} • {link.marketer?.name || 'بدون تخصيص'}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => onEditLink(link)}
-                      className="text-sm text-blue-600 hover:text-blue-700"
-                    >
-                      تعديل
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 mt-4 text-center">
-                    <MiniMetric label="النقرات" value={link.clicks || 0} />
-                    <MiniMetric label="المبيعات" value={link.sales || 0} />
-                    <MiniMetric label="الأرباح" value={formatMoney(link.earnings)} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </PanelCard>
-
-        <PanelCard
-          title="أحدث قواعد العمولة"
-          subtitle="قواعد المنصة والشرائح الزمنية"
-          icon={<Settings2 className="w-5 h-5" />}
-        >
-          {latestRules.length === 0 ? (
-            <EmptyMiniState text="لا توجد قواعد عمولة بعد" />
-          ) : (
-            <div className="space-y-3">
-              {latestRules.map((rule) => (
-                <div key={rule.id} className="rounded-2xl border border-gray-100 p-4 bg-gray-50/70">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-bold text-gray-900">
-                        {rule.marketer?.name || 'مسوق غير معروف'}
-                      </div>
-                      <div className="text-sm text-gray-500 mt-1">
-                        {getScopeTypeLabel(rule.scope_type)} • {formatCommission(rule.commission_type, rule.commission_value)}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => onEditRule(rule)}
-                      className="text-sm text-blue-600 hover:text-blue-700"
-                    >
-                      تعديل
-                    </button>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <TagChip text={`الأولوية ${rule.priority || 100}`} />
-                    <TagChip text={`${rule.tiers?.length || 0} شرائح`} />
-                    <TagChip text={rule.is_active ? 'نشطة' : 'غير نشطة'} success={rule.is_active === true} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </PanelCard>
-      </div>
-
-      <div className="rounded-3xl border border-blue-100 bg-gradient-to-l from-blue-50 to-violet-50 p-6">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0">
-            <Globe2 className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">ماذا يدير الأدمن هنا؟</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700 leading-7">
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 mt-1 text-green-600 shrink-0" />
-                <span>تسويق المنصة نفسها وليس متجر تاجر محدد.</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 mt-1 text-green-600 shrink-0" />
-                <span>ربط المسوق والرابط والعمولة في عرض واحد واضح.</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 mt-1 text-green-600 shrink-0" />
-                <span>إمكانية التسويق لمنتج أو متجر أو للمنصة بشكل عام.</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 mt-1 text-green-600 shrink-0" />
-                <span>عرض تبويبات تفصيلية للمراجعة والتحرير عند الحاجة.</span>
-              </div>
-            </div>
-          </div>
-        </div>
+}> = ({ title, value, helper, icon }) => (
+  <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+    <div className="flex items-center justify-between mb-3">
+      <div className="text-sm text-gray-500">{title}</div>
+      <div className="w-10 h-10 rounded-2xl bg-white text-blue-600 flex items-center justify-center border border-gray-100">
+        {icon}
       </div>
     </div>
-  );
-};
+    <div className="text-xl font-bold text-gray-900 mb-1">{value}</div>
+    <div className="text-xs text-gray-500">{helper}</div>
+  </div>
+);
 
-const AdminCampaignsTab: React.FC<{
+const UnifiedCampaignsList: React.FC<{
   campaigns: UnifiedCampaignRow[];
+  expandedCampaignId: string | null;
+  onToggleExpand: (campaignId: string) => void;
   onEdit: (campaign: UnifiedCampaignRow) => void;
   onDelete: (campaign: UnifiedCampaignRow) => void;
-}> = ({ campaigns, onEdit, onDelete }) => {
+}> = ({ campaigns, expandedCampaignId, onToggleExpand, onEdit, onDelete }) => {
   if (campaigns.length === 0) {
     return (
       <div className="text-center py-16 bg-gray-50 rounded-3xl border border-dashed border-gray-300">
         <Megaphone className="w-16 h-16 text-gray-400 mx-auto mb-4" />
         <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد عروض أفلييت</h3>
-        <p className="text-gray-600">أنشئ عرضًا موحدًا يربط المسوق والرابط وقاعدة العمولة.</p>
+        <p className="text-gray-600">أنشئ أول عرض موحد وسيظهر هنا بكل تفاصيله بشكل منظم وواضح.</p>
       </div>
     );
   }
@@ -1377,337 +985,253 @@ const AdminCampaignsTab: React.FC<{
   return (
     <div className="space-y-5">
       {campaigns.map((campaign) => {
-        const isActive =
-          (campaign.marketer?.is_active ?? true) === true &&
-          (campaign.link?.is_active ?? true) === true &&
-          (campaign.rule?.is_active ?? true) === true;
+        const active = isCampaignActive(campaign);
+        const isExpanded = expandedCampaignId === campaign.id;
+        const scopeLabel = getCampaignScopeLabel(campaign);
+        const objectName = getCampaignObjectName(campaign);
+        const marketerName =
+          campaign.marketer?.name || campaign.rule?.marketer?.name || 'بدون مسوق';
 
         return (
           <div
             key={campaign.id}
-            className="bg-white border border-gray-200 rounded-3xl p-6 hover:shadow-md transition-shadow"
+            className="rounded-3xl border border-gray-200 bg-white shadow-sm overflow-hidden"
           >
-            <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start gap-4">
-                  <div className="w-14 h-14 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-2xl flex items-center justify-center shrink-0">
-                    <Megaphone className="w-7 h-7 text-white" />
+            <div className="p-5 lg:p-6">
+              <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white flex items-center justify-center shrink-0">
+                      <Megaphone className="w-7 h-7" />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                        <h3 className="text-xl font-bold text-gray-900">{campaign.title}</h3>
+
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                            active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                          }`}
+                        >
+                          {active ? 'نشط' : 'غير نشط'}
+                        </span>
+
+                        <TagChip text={scopeLabel} />
+                        {campaign.rule && (
+                          <TagChip
+                            text={formatCommission(
+                              campaign.rule.commission_type,
+                              campaign.rule.commission_value
+                            )}
+                            success
+                          />
+                        )}
+                      </div>
+
+                      <p className="text-sm text-gray-500 leading-7 mb-4">
+                        المسوق: <span className="font-medium text-gray-800">{marketerName}</span>
+                        {' • '}
+                        النطاق: <span className="font-medium text-gray-800">{objectName}</span>
+                        {' • '}
+                        الكود:{' '}
+                        <span className="font-mono font-medium text-gray-800">
+                          {campaign.link?.code || '—'}
+                        </span>
+                      </p>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <MetricCard
+                          icon={<MousePointerClick className="w-4 h-4" />}
+                          label="النقرات"
+                          value={campaign.link?.clicks || campaign.marketer?.total_clicks || 0}
+                        />
+                        <MetricCard
+                          icon={<TrendingUp className="w-4 h-4" />}
+                          label="المبيعات"
+                          value={campaign.link?.sales || campaign.marketer?.total_sales || 0}
+                        />
+                        <MetricCard
+                          icon={<DollarSign className="w-4 h-4" />}
+                          label="الأرباح"
+                          value={formatMoney(
+                            campaign.link?.earnings || campaign.marketer?.total_earnings || 0
+                          )}
+                        />
+                        <MetricCard
+                          icon={<Target className="w-4 h-4" />}
+                          label="التحويل"
+                          value={conversionRate(
+                            campaign.link?.clicks || 0,
+                            campaign.link?.sales || 0
+                          )}
+                        />
+                      </div>
+                    </div>
                   </div>
+                </div>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <h3 className="text-xl font-bold text-gray-900">{campaign.title}</h3>
-                      <span
-                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                          isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {isActive ? 'نشط' : 'غير نشط'}
-                      </span>
-                      {campaign.rule && (
-                        <TagChip text={formatCommission(campaign.rule.commission_type, campaign.rule.commission_value)} success />
-                      )}
-                    </div>
+                <div className="xl:w-[260px] shrink-0">
+                  <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                    <div className="text-sm text-gray-500 mb-3">إجراءات العرض</div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-sm text-gray-600">
-                      <InfoRow
-                        icon={<Users className="w-4 h-4" />}
-                        label="المسوق"
-                        value={campaign.marketer?.name || campaign.rule?.marketer?.name || 'بدون تخصيص'}
-                      />
-                      <InfoRow
-                        icon={<LinkIcon className="w-4 h-4" />}
-                        label="الكود"
-                        value={campaign.link?.code || 'بدون رابط'}
-                      />
-                      <InfoRow
-                        icon={<Package className="w-4 h-4" />}
-                        label="المنتج"
-                        value={
-                          campaign.link?.apply_to === 'product' || campaign.rule?.scope_type === 'product'
-                            ? getDisplayName(campaign.link?.product || campaign.rule?.product)
-                            : '—'
-                        }
-                      />
-                      <InfoRow
-                        icon={<StoreIcon className="w-4 h-4" />}
-                        label="المتجر"
-                        value={
-                          campaign.link?.apply_to === 'store' || campaign.rule?.scope_type === 'store'
-                            ? getDisplayName(campaign.link?.store || campaign.rule?.store)
-                            : '—'
-                        }
-                      />
-                    </div>
-
-                    {campaign.link && (
-                      <div className="mt-4">
+                    <div className="space-y-2">
+                      {campaign.link && (
                         <CopyLinkButton
                           url={`${window.location.origin}?ref=${campaign.link.code}`}
                           label="نسخ رابط العرض"
                           variant="minimal"
                         />
-                      </div>
-                    )}
+                      )}
 
-                    {campaign.rule?.tiers && campaign.rule.tiers.length > 0 && (
-                      <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                        <div className="flex items-center gap-2 mb-3">
-                          <CalendarRange className="w-4 h-4 text-gray-500" />
-                          <span className="font-semibold text-gray-800">الشرائح حسب الأيام</span>
-                        </div>
-                        <div className="space-y-2">
-                          {campaign.rule.tiers.map((tier) => (
-                            <div
-                              key={tier.id}
-                              className="grid grid-cols-1 md:grid-cols-4 gap-2 rounded-xl bg-white border border-gray-100 px-4 py-3 text-sm"
-                            >
-                              <div>
-                                <span className="text-gray-500">من اليوم:</span>{' '}
-                                <span className="font-medium text-gray-900">{tier.day_from ?? 0}</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-500">إلى اليوم:</span>{' '}
-                                <span className="font-medium text-gray-900">{tier.day_to ?? 'مفتوح'}</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-500">العمولة:</span>{' '}
-                                <span className="font-medium text-gray-900">
-                                  {formatCommission(tier.commission_type, tier.commission_value)}
-                                </span>
-                              </div>
-                              <div>
-                                <span
-                                  className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${
-                                    tier.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                                  }`}
-                                >
-                                  {tier.is_active ? 'نشطة' : 'غير نشطة'}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                      <button
+                        onClick={() => onEdit(campaign)}
+                        className="w-full px-4 py-3 rounded-2xl border border-gray-300 text-gray-700 font-medium hover:bg-white flex items-center justify-center gap-2"
+                      >
+                        <Edit className="w-4 h-4" />
+                        تعديل العرض
+                      </button>
+
+                      <button
+                        onClick={() => onToggleExpand(campaign.id)}
+                        className="w-full px-4 py-3 rounded-2xl border border-gray-300 text-gray-700 font-medium hover:bg-white flex items-center justify-center gap-2"
+                      >
+                        {isExpanded ? (
+                          <>
+                            <ChevronUp className="w-4 h-4" />
+                            إخفاء التفاصيل
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="w-4 h-4" />
+                            عرض التفاصيل
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => onDelete(campaign)}
+                        className="w-full px-4 py-3 rounded-2xl border border-red-200 text-red-600 font-medium hover:bg-red-50 flex items-center justify-center gap-2"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        حذف العرض
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              <div className="xl:w-[360px]">
-                <div className="grid grid-cols-2 gap-3">
-                  <MetricCard
-                    icon={<MousePointerClick className="w-4 h-4" />}
-                    label="النقرات"
-                    value={campaign.link?.clicks || campaign.marketer?.total_clicks || 0}
-                  />
-                  <MetricCard
-                    icon={<TrendingUp className="w-4 h-4" />}
-                    label="المبيعات"
-                    value={campaign.link?.sales || campaign.marketer?.total_sales || 0}
-                  />
-                  <MetricCard
-                    icon={<DollarSign className="w-4 h-4" />}
-                    label="الأرباح"
-                    value={formatMoney(campaign.link?.earnings || campaign.marketer?.total_earnings || 0)}
-                  />
-                  <MetricCard
-                    icon={<Target className="w-4 h-4" />}
-                    label="التحويل"
-                    value={conversionRate(campaign.link?.clicks || 0, campaign.link?.sales || 0)}
-                  />
-                </div>
-
-                <div className="flex items-center gap-2 mt-4">
-                  <button
-                    onClick={() => onEdit(campaign)}
-                    className="flex-1 px-4 py-3 rounded-2xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 flex items-center justify-center gap-2"
-                  >
-                    <Edit className="w-4 h-4" />
-                    تعديل العرض
-                  </button>
-                  <button
-                    onClick={() => onDelete(campaign)}
-                    className="px-4 py-3 rounded-2xl border border-red-200 text-red-600 hover:bg-red-50"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
             </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
 
-const OverviewStatCard: React.FC<{
-  title: string;
-  value: string | number;
-  subValue: string;
-  icon: React.ReactNode;
-}> = ({ title, value, subValue, icon }) => (
-  <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-    <div className="flex items-center justify-between mb-4">
-      <div className="text-sm text-gray-500">{title}</div>
-      <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-        {icon}
-      </div>
-    </div>
-    <div className="text-2xl font-bold text-gray-900 mb-1">{value}</div>
-    <div className="text-sm text-gray-500">{subValue}</div>
-  </div>
-);
+            {isExpanded && (
+              <div className="border-t border-gray-100 bg-gray-50/60 px-5 lg:px-6 py-5">
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+                  <DetailsCard
+                    title="بيانات المسوق"
+                    icon={<Users className="w-5 h-5" />}
+                  >
+                    <InfoRow label="الاسم" value={marketerName} />
+                    <InfoRow label="البريد" value={campaign.marketer?.email || '—'} />
+                    <InfoRow label="الهاتف" value={campaign.marketer?.phone || '—'} />
+                    <InfoRow
+                      label="الحالة"
+                      value={(campaign.marketer?.is_active ?? true) ? 'نشط' : 'غير نشط'}
+                    />
+                    {campaign.marketer?.notes && (
+                      <div className="mt-3 rounded-2xl border border-gray-100 bg-white p-4 text-sm text-gray-600 leading-7">
+                        {campaign.marketer.notes}
+                      </div>
+                    )}
+                  </DetailsCard>
 
-const PanelCard: React.FC<{
-  title: string;
-  subtitle: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ title, subtitle, icon, children }) => (
-  <div className="rounded-3xl border border-gray-100 bg-white p-5 shadow-sm">
-    <div className="flex items-start gap-3 mb-5">
-      <div className="w-10 h-10 rounded-2xl bg-gray-100 text-gray-700 flex items-center justify-center shrink-0">
-        {icon}
-      </div>
-      <div>
-        <h3 className="font-bold text-gray-900">{title}</h3>
-        <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
-      </div>
-    </div>
-    {children}
-  </div>
-);
+                  <DetailsCard
+                    title="بيانات الرابط"
+                    icon={<LinkIcon className="w-5 h-5" />}
+                  >
+                    <InfoRow label="الكود" value={campaign.link?.code || '—'} />
+                    <InfoRow
+                      label="النطاق"
+                      value={campaign.link ? getApplyToLabel(campaign.link.apply_to) : '—'}
+                    />
+                    <InfoRow label="العنصر" value={objectName} />
+                    <InfoRow
+                      label="الحالة"
+                      value={(campaign.link?.is_active ?? true) ? 'نشط' : 'غير نشط'}
+                    />
+                    <InfoRow
+                      label="الوصف"
+                      value={campaign.link?.description || 'بدون وصف'}
+                    />
+                  </DetailsCard>
 
-const EmptyMiniState: React.FC<{ text: string }> = ({ text }) => (
-  <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
-    {text}
-  </div>
-);
-
-const MiniMetric: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
-  <div className="rounded-xl bg-white border border-gray-100 px-3 py-3">
-    <div className="text-xs text-gray-500 mb-1">{label}</div>
-    <div className="font-bold text-gray-900">{value}</div>
-  </div>
-);
-
-const TagChip: React.FC<{ text: string; success?: boolean }> = ({ text, success = false }) => (
-  <span
-    className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-      success ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-    }`}
-  >
-    {text}
-  </span>
-);
-
-interface MarketersTabProps {
-  marketers: AffiliateMarketerRow[];
-  onEdit: (marketer: AffiliateMarketerRow) => void;
-  onDelete: (marketerId: string) => void;
-  onViewAnalytics: (marketerId: string) => void;
-}
-
-const MarketersTab: React.FC<MarketersTabProps> = ({
-  marketers,
-  onEdit,
-  onDelete,
-  onViewAnalytics,
-}) => {
-  if (marketers.length === 0) {
-    return (
-      <div className="text-center py-16 bg-gray-50 rounded-3xl border border-dashed border-gray-300">
-        <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-xl font-bold text-gray-900 mb-2">لا يوجد مسوقون</h3>
-        <p className="text-gray-600">ابدأ بإضافة مسوقين ثم أنشئ لهم عروض وروابط واضحة.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-      {marketers.map((marketer) => {
-        const isActive = marketer.is_active ?? marketer.status === 'active';
-
-        return (
-          <div
-            key={marketer.id}
-            className="bg-white border border-gray-200 rounded-3xl p-6 hover:shadow-md transition-shadow"
-          >
-            <div className="flex items-start justify-between mb-5 gap-4">
-              <div className="flex items-center gap-4 min-w-0">
-                <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-pink-600 rounded-2xl flex items-center justify-center shrink-0">
-                  <Users className="w-7 h-7 text-white" />
+                  <DetailsCard
+                    title="قاعدة العمولة"
+                    icon={<Settings2 className="w-5 h-5" />}
+                  >
+                    <InfoRow
+                      label="نوع القاعدة"
+                      value={campaign.rule ? getScopeTypeLabel(campaign.rule.scope_type) : '—'}
+                    />
+                    <InfoRow
+                      label="العمولة الأساسية"
+                      value={
+                        campaign.rule
+                          ? formatCommission(
+                              campaign.rule.commission_type,
+                              campaign.rule.commission_value
+                            )
+                          : '—'
+                      }
+                    />
+                    <InfoRow
+                      label="الأولوية"
+                      value={String(campaign.rule?.priority || 100)}
+                    />
+                    <InfoRow
+                      label="الحالة"
+                      value={(campaign.rule?.is_active ?? true) ? 'نشطة' : 'غير نشطة'}
+                    />
+                    <InfoRow
+                      label="عدد الشرائح"
+                      value={String(campaign.rule?.tiers?.length || 0)}
+                    />
+                  </DetailsCard>
                 </div>
 
-                <div className="min-w-0">
-                  <h3 className="text-lg font-bold text-gray-900 truncate">{marketer.name}</h3>
-                  <div className="flex flex-wrap items-center gap-2 mt-2">
-                    <span
-                      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                        isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}
-                    >
-                      {isActive ? 'نشط' : 'غير نشط'}
-                    </span>
-
-                    {marketer.email && <TagChip text={marketer.email} />}
-                    {marketer.phone && <TagChip text={marketer.phone} />}
+                <div className="mt-5 rounded-3xl border border-gray-200 bg-white p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <CalendarRange className="w-5 h-5 text-gray-500" />
+                    <h4 className="font-bold text-gray-900">شرائح العمولة حسب الأيام</h4>
                   </div>
+
+                  {!campaign.rule?.tiers || campaign.rule.tiers.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
+                      لا توجد شرائح. سيتم استخدام العمولة الأساسية لهذا العرض.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {campaign.rule.tiers.map((tier) => (
+                        <div
+                          key={tier.id}
+                          className="grid grid-cols-1 md:grid-cols-4 gap-3 rounded-2xl border border-gray-100 bg-gray-50/70 px-4 py-4"
+                        >
+                          <MiniInfo label="من اليوم" value={String(tier.day_from ?? 0)} />
+                          <MiniInfo
+                            label="إلى اليوم"
+                            value={tier.day_to !== null && tier.day_to !== undefined ? String(tier.day_to) : 'مفتوح'}
+                          />
+                          <MiniInfo
+                            label="العمولة"
+                            value={formatCommission(tier.commission_type, tier.commission_value)}
+                          />
+                          <MiniInfo
+                            label="الحالة"
+                            value={tier.is_active ? 'نشطة' : 'غير نشطة'}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => onViewAnalytics(marketer.id)}
-                  className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-xl"
-                  title="عرض التحليلات"
-                >
-                  <Eye className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => onEdit(marketer)}
-                  className="p-2.5 text-gray-600 hover:bg-gray-100 rounded-xl"
-                >
-                  <Edit className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => onDelete(marketer.id)}
-                  className="p-2.5 text-red-600 hover:bg-red-50 rounded-xl"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <MetricCard
-                icon={<MousePointerClick className="w-4 h-4" />}
-                label="النقرات"
-                value={marketer.total_clicks || 0}
-              />
-              <MetricCard
-                icon={<TrendingUp className="w-4 h-4" />}
-                label="المبيعات"
-                value={marketer.total_sales || 0}
-              />
-              <MetricCard
-                icon={<DollarSign className="w-4 h-4" />}
-                label="الأرباح"
-                value={formatMoney(marketer.total_earnings)}
-              />
-              <MetricCard
-                icon={<Target className="w-4 h-4" />}
-                label="التحويل"
-                value={conversionRate(marketer.total_clicks, marketer.total_sales)}
-              />
-            </div>
-
-            {marketer.notes && (
-              <div className="mt-5 rounded-2xl bg-gray-50 border border-gray-100 p-4 text-sm text-gray-600 leading-7">
-                {marketer.notes}
               </div>
             )}
           </div>
@@ -1731,295 +1255,51 @@ const MetricCard: React.FC<{
   </div>
 );
 
-interface LinksTabProps {
-  links: AffiliateLinkRow[];
-  onEdit: (link: AffiliateLinkRow) => void;
-  onDelete: (linkId: string) => void;
-}
+const TagChip: React.FC<{ text: string; success?: boolean }> = ({ text, success = false }) => (
+  <span
+    className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+      success ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+    }`}
+  >
+    {text}
+  </span>
+);
 
-const LinksTab: React.FC<LinksTabProps> = ({ links, onEdit, onDelete }) => {
-  if (links.length === 0) {
-    return (
-      <div className="text-center py-16 bg-gray-50 rounded-3xl border border-dashed border-gray-300">
-        <LinkIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد روابط</h3>
-        <p className="text-gray-600">أنشئ روابط المنصة مع ربطها بالمسوق أو اتركها عامة.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      {links.map((link) => (
-        <div
-          key={link.id}
-          className="bg-white border border-gray-200 rounded-3xl p-6 hover:shadow-md transition-shadow"
-        >
-          <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-start gap-4">
-                <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-2xl flex items-center justify-center shrink-0">
-                  <LinkIcon className="w-7 h-7 text-white" />
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                    <h3 className="text-xl font-bold text-gray-900 font-mono">{link.code}</h3>
-                    <span
-                      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                        link.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}
-                    >
-                      {link.is_active ? 'نشط' : 'غير نشط'}
-                    </span>
-                    <TagChip text={getApplyToLabel(link.apply_to)} />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-600">
-                    <InfoRow
-                      icon={<Users className="w-4 h-4" />}
-                      label="المسوق"
-                      value={link.marketer?.name || 'بدون تخصيص'}
-                    />
-                    <InfoRow
-                      icon={<Package className="w-4 h-4" />}
-                      label="المنتج"
-                      value={
-                        link.apply_to === 'product'
-                          ? getDisplayName(link.product)
-                          : link.apply_to === 'all'
-                          ? 'المنصة بالكامل'
-                          : '—'
-                      }
-                    />
-                    <InfoRow
-                      icon={<StoreIcon className="w-4 h-4" />}
-                      label="المتجر"
-                      value={
-                        link.apply_to === 'store'
-                          ? getDisplayName(link.store)
-                          : link.apply_to === 'all'
-                          ? 'المنصة بالكامل'
-                          : '—'
-                      }
-                    />
-                    <InfoRow
-                      icon={<CalendarRange className="w-4 h-4" />}
-                      label="الوصف"
-                      value={link.description || 'بدون وصف'}
-                    />
-                  </div>
-
-                  <div className="mt-4">
-                    <CopyLinkButton
-                      url={`${window.location.origin}?ref=${link.code}`}
-                      label="نسخ رابط التسويق"
-                      variant="minimal"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="xl:w-[360px]">
-              <div className="grid grid-cols-2 gap-3">
-                <MetricCard
-                  icon={<MousePointerClick className="w-4 h-4" />}
-                  label="النقرات"
-                  value={link.clicks || 0}
-                />
-                <MetricCard
-                  icon={<TrendingUp className="w-4 h-4" />}
-                  label="المبيعات"
-                  value={link.sales || 0}
-                />
-                <MetricCard
-                  icon={<DollarSign className="w-4 h-4" />}
-                  label="الأرباح"
-                  value={formatMoney(link.earnings)}
-                />
-                <MetricCard
-                  icon={<Target className="w-4 h-4" />}
-                  label="التحويل"
-                  value={conversionRate(link.clicks, link.sales)}
-                />
-              </div>
-
-              <div className="flex items-center gap-2 mt-4">
-                <button
-                  onClick={() => onEdit(link)}
-                  className="flex-1 px-4 py-3 rounded-2xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 flex items-center justify-center gap-2"
-                >
-                  <Edit className="w-4 h-4" />
-                  تعديل الرابط
-                </button>
-                <button
-                  onClick={() => onDelete(link.id)}
-                  className="px-4 py-3 rounded-2xl border border-red-200 text-red-600 hover:bg-red-50"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-const InfoRow: React.FC<{
+const DetailsCard: React.FC<{
+  title: string;
   icon: React.ReactNode;
-  label: string;
-  value: string;
-}> = ({ icon, label, value }) => (
-  <div className="rounded-2xl bg-gray-50 border border-gray-100 px-4 py-3">
-    <div className="flex items-center gap-2 text-gray-500 mb-1">
-      {icon}
-      <span className="text-xs">{label}</span>
+  children: React.ReactNode;
+}> = ({ title, icon, children }) => (
+  <div className="rounded-3xl border border-gray-200 bg-white p-5">
+    <div className="flex items-center gap-2 mb-4">
+      <div className="w-10 h-10 rounded-2xl bg-gray-100 text-gray-700 flex items-center justify-center">
+        {icon}
+      </div>
+      <div className="font-bold text-gray-900">{title}</div>
     </div>
-    <div className="font-medium text-gray-800 truncate">{value}</div>
+    <div className="space-y-3">{children}</div>
   </div>
 );
 
-interface RulesTabProps {
-  rules: AffiliateRuleRow[];
-  onEdit: (rule: AffiliateRuleRow) => void;
-  onDelete: (ruleId: string) => void;
-}
+const InfoRow: React.FC<{
+  label: string;
+  value: string;
+}> = ({ label, value }) => (
+  <div className="rounded-2xl bg-gray-50 border border-gray-100 px-4 py-3">
+    <div className="text-xs text-gray-500 mb-1">{label}</div>
+    <div className="font-medium text-gray-800 break-words">{value}</div>
+  </div>
+);
 
-const RulesTab: React.FC<RulesTabProps> = ({ rules, onEdit, onDelete }) => {
-  if (rules.length === 0) {
-    return (
-      <div className="text-center py-16 bg-gray-50 rounded-3xl border border-dashed border-gray-300">
-        <Settings2 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-        <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد قواعد عمولة</h3>
-        <p className="text-gray-600">ابدأ بإنشاء قاعدة عامة أو على منتج أو متجر مع شرائح الأيام.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      {rules.map((rule) => (
-        <div key={rule.id} className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
-            <div className="flex-1">
-              <div className="flex flex-wrap items-center gap-2 mb-3">
-                <span className="text-lg font-bold text-gray-900">
-                  {rule.marketer?.name || 'مسوق غير معروف'}
-                </span>
-                <TagChip text={getScopeTypeLabel(rule.scope_type)} />
-                <TagChip text={formatCommission(rule.commission_type, rule.commission_value)} success />
-                <TagChip text={`الأولوية ${rule.priority || 100}`} />
-                <TagChip text={rule.is_active ? 'نشطة' : 'غير نشطة'} success={rule.is_active === true} />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-                <InfoRow
-                  icon={<Users className="w-4 h-4" />}
-                  label="المسوق"
-                  value={rule.marketer?.name || '—'}
-                />
-                <InfoRow
-                  icon={<Package className="w-4 h-4" />}
-                  label="المنتج"
-                  value={rule.scope_type === 'product' ? getDisplayName(rule.product) : '—'}
-                />
-                <InfoRow
-                  icon={<StoreIcon className="w-4 h-4" />}
-                  label="المتجر"
-                  value={rule.scope_type === 'store' ? getDisplayName(rule.store) : '—'}
-                />
-              </div>
-
-              <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <CalendarRange className="w-4 h-4 text-gray-500" />
-                  <span className="font-semibold text-gray-800">شرائح العمولة حسب الأيام</span>
-                </div>
-
-                {!rule.tiers || rule.tiers.length === 0 ? (
-                  <div className="text-sm text-gray-500">
-                    لا توجد شرائح. سيتم استخدام العمولة الأساسية لهذه القاعدة.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {rule.tiers.map((tier) => (
-                      <div
-                        key={tier.id}
-                        className="grid grid-cols-1 md:grid-cols-4 gap-2 rounded-xl bg-white border border-gray-100 px-4 py-3 text-sm"
-                      >
-                        <div>
-                          <span className="text-gray-500">من اليوم:</span>{' '}
-                          <span className="font-medium text-gray-900">{tier.day_from ?? 0}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">إلى اليوم:</span>{' '}
-                          <span className="font-medium text-gray-900">
-                            {tier.day_to ?? 'مفتوح'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">العمولة:</span>{' '}
-                          <span className="font-medium text-gray-900">
-                            {formatCommission(tier.commission_type, tier.commission_value)}
-                          </span>
-                        </div>
-                        <div>
-                          <span
-                            className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${
-                              tier.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                            }`}
-                          >
-                            {tier.is_active ? 'نشطة' : 'غير نشطة'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="xl:w-[220px]">
-              <div className="rounded-2xl bg-gray-50 border border-gray-100 p-4">
-                <div className="text-sm text-gray-500 mb-2">ملخص القاعدة</div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-gray-500">العمولة الأساسية</span>
-                    <span className="font-bold text-gray-900">
-                      {formatCommission(rule.commission_type, rule.commission_value)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-gray-500">عدد الشرائح</span>
-                    <span className="font-bold text-gray-900">{rule.tiers?.length || 0}</span>
-                  </div>
-                </div>
-
-                <div className="flex gap-2 mt-4">
-                  <button
-                    onClick={() => onEdit(rule)}
-                    className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-white"
-                  >
-                    تعديل
-                  </button>
-                  <button
-                    onClick={() => onDelete(rule.id)}
-                    className="px-4 py-2.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
+const MiniInfo: React.FC<{
+  label: string;
+  value: string;
+}> = ({ label, value }) => (
+  <div className="rounded-2xl bg-white border border-gray-100 px-4 py-3">
+    <div className="text-xs text-gray-500 mb-1">{label}</div>
+    <div className="font-semibold text-gray-900">{value}</div>
+  </div>
+);
 
 interface AdminCampaignFormModalProps {
   campaign?: UnifiedCampaignRow | null;
@@ -2054,8 +1334,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
   const [tiers, setTiers] = useState<TierDraft[]>(initialTiers);
 
   const [formData, setFormData] = useState<UnifiedCampaignForm>({
-    marketer_mode: campaign?.marketer ? 'new' : 'existing',
-    existing_marketer_id: campaign?.marketer?.id || campaign?.rule?.marketer_id || campaign?.link?.marketer_id || '',
+    marketer_mode: campaign?.marketer ? 'existing' : 'new',
+    existing_marketer_id:
+      campaign?.marketer?.id || campaign?.rule?.marketer_id || campaign?.link?.marketer_id || '',
 
     marketer_name: campaign?.marketer?.name || '',
     marketer_email: campaign?.marketer?.email || '',
@@ -2175,7 +1456,7 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
       total_earnings: campaign?.marketer?.total_earnings ?? 0,
     };
 
-    if (campaign?.marketer?.id) {
+    if (campaign?.marketer?.id && formData.marketer_mode === 'new') {
       const { error } = await supabase
         .from('affiliate_marketers')
         .update(payload)
@@ -2305,7 +1586,6 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
         .eq('seller_id', user.id);
 
       if (error) throw error;
-
       ruleId = campaign.rule.id;
     } else {
       const { data, error } = await supabase
@@ -2319,7 +1599,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
     }
 
     const existingTierIds = new Set((campaign?.rule?.tiers || []).map((tier) => tier.id));
-    const currentTierIds = new Set(tiers.filter((tier) => tier.id).map((tier) => tier.id as string));
+    const currentTierIds = new Set(
+      tiers.filter((tier) => tier.id).map((tier) => tier.id as string)
+    );
     const tierIdsToDelete = [...existingTierIds].filter((id) => !currentTierIds.has(id));
 
     if (tierIdsToDelete.length > 0) {
@@ -2371,7 +1653,6 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
       const marketerId = await createOrUpdateMarketer();
       await createOrUpdateLink(marketerId);
       await createOrUpdateRule(marketerId);
-
       onSuccess();
     } catch (err: any) {
       console.error('Error saving admin affiliate campaign:', err);
@@ -2383,7 +1664,7 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
 
   return (
     <ModalShell
-      title={campaign ? 'تعديل عرض أفلييت المنصة' : 'إنشاء عرض أفلييت جديد للمنصة'}
+      title={campaign ? 'تعديل عرض أفلييت المنصة' : 'إنشاء عرض أفلييت جديد'}
       subtitle="من نافذة واحدة: اختر مسوقًا أو أنشئ مسوقًا جديدًا، ثم اربط له الرابط وقاعدة العمولة الخاصة بتسويق المنصة."
       onClose={onClose}
       size="xl"
@@ -2430,7 +1711,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
               </label>
               <select
                 value={formData.existing_marketer_id}
-                onChange={(e) => setFormData({ ...formData, existing_marketer_id: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, existing_marketer_id: e.target.value })
+                }
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
               >
@@ -2459,7 +1742,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    البريد الإلكتروني
+                  </label>
                   <input
                     type="email"
                     dir="ltr"
@@ -2481,7 +1766,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات داخلية</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    ملاحظات داخلية
+                  </label>
                   <textarea
                     rows={3}
                     value={formData.marketer_notes}
@@ -2496,12 +1783,16 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
                 <input
                   type="checkbox"
                   checked={formData.marketer_is_active}
-                  onChange={(e) => setFormData({ ...formData, marketer_is_active: e.target.checked })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, marketer_is_active: e.target.checked })
+                  }
                   className="w-5 h-5 text-blue-600 rounded"
                 />
                 <div>
                   <div className="font-medium text-gray-900">المسوق نشط</div>
-                  <div className="text-sm text-gray-500">سيكون جاهزًا لاستقبال الروابط والعمولات.</div>
+                  <div className="text-sm text-gray-500">
+                    سيكون جاهزًا لاستقبال الروابط والعمولات.
+                  </div>
                 </div>
               </label>
             </>
@@ -2525,7 +1816,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
               <input
                 type="text"
                 value={formData.link_code}
-                onChange={(e) => setFormData({ ...formData, link_code: e.target.value.toUpperCase() })}
+                onChange={(e) =>
+                  setFormData({ ...formData, link_code: e.target.value.toUpperCase() })
+                }
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
                 placeholder="RAQMYAFF"
                 required
@@ -2618,7 +1911,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
             />
             <div>
               <div className="font-medium text-gray-900">الرابط نشط</div>
-              <div className="text-sm text-gray-500">يمكن استخدامه وتتبع نتائجه إذا كان نشطًا.</div>
+              <div className="text-sm text-gray-500">
+                يمكن استخدامه وتتبع نتائجه إذا كان نشطًا.
+              </div>
             </div>
           </label>
         </SectionCard>
@@ -2714,7 +2009,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">نوع العمولة الأساسية</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                نوع العمولة الأساسية
+              </label>
               <select
                 value={formData.rule_commission_type}
                 onChange={(e) =>
@@ -2731,13 +2028,17 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">قيمة العمولة الأساسية</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                قيمة العمولة الأساسية
+              </label>
               <input
                 type="number"
                 min="0"
                 step="0.01"
                 value={formData.rule_commission_value}
-                onChange={(e) => setFormData({ ...formData, rule_commission_value: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, rule_commission_value: e.target.value })
+                }
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder={formData.rule_commission_type === 'percentage' ? '10' : '25'}
               />
@@ -2783,7 +2084,10 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
             ) : (
               <div className="space-y-4">
                 {tiers.map((tier, index) => (
-                  <div key={tier.localId} className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                  <div
+                    key={tier.localId}
+                    className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4"
+                  >
                     <div className="flex items-center justify-between mb-4">
                       <div className="font-semibold text-gray-900">الشريحة #{index + 1}</div>
                       <button
@@ -2856,7 +2160,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
                           <input
                             type="checkbox"
                             checked={tier.is_active}
-                            onChange={(e) => updateTier(tier.localId, { is_active: e.target.checked })}
+                            onChange={(e) =>
+                              updateTier(tier.localId, { is_active: e.target.checked })
+                            }
                             className="w-4 h-4 text-blue-600 rounded"
                           />
                           <span className="text-sm text-gray-700">نشطة</span>
@@ -2925,948 +2231,6 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
   );
 };
 
-interface MarketerFormModalProps {
-  marketer?: AffiliateMarketerRow | null;
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-const MarketerFormModal: React.FC<MarketerFormModalProps> = ({
-  marketer,
-  onClose,
-  onSuccess,
-}) => {
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [formData, setFormData] = useState({
-    name: marketer?.name || '',
-    email: marketer?.email || '',
-    phone: marketer?.phone || '',
-    notes: marketer?.notes || '',
-    is_active: marketer?.is_active ?? true,
-  });
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user?.id) return;
-
-    setError('');
-    setLoading(true);
-
-    try {
-      const data = {
-        seller_id: user.id,
-        name: formData.name.trim(),
-        email: formData.email.trim() || null,
-        phone: formData.phone.trim() || null,
-        notes: formData.notes.trim() || null,
-        is_active: formData.is_active,
-        status: formData.is_active ? 'active' : 'inactive',
-        total_clicks: marketer?.total_clicks ?? 0,
-        total_sales: marketer?.total_sales ?? 0,
-        total_earnings: marketer?.total_earnings ?? 0,
-      };
-
-      if (marketer) {
-        const { error: updateError } = await supabase
-          .from('affiliate_marketers')
-          .update(data)
-          .eq('id', marketer.id)
-          .eq('seller_id', user.id);
-
-        if (updateError) throw updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from('affiliate_marketers')
-          .insert({
-            ...data,
-            user_id: null,
-          });
-
-        if (insertError) throw insertError;
-      }
-
-      onSuccess();
-    } catch (err: any) {
-      console.error('Error saving marketer:', err);
-      setError(err.message || 'حدث خطأ أثناء حفظ المسوق');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <ModalShell
-      title={marketer ? 'تعديل المسوق' : 'إضافة مسوق جديد'}
-      subtitle="تحرير بيانات المسوق من لوحة أفلييت المنصة."
-      onClose={onClose}
-      size="lg"
-    >
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {error && <ErrorBox text={error} />}
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            اسم المسوق <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            required
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              dir="ltr"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">رقم الهاتف</label>
-            <input
-              type="tel"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              dir="ltr"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات داخلية</label>
-          <textarea
-            value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            rows={4}
-            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="مثال: مناسب لحملات المؤثرين أو سناب..."
-          />
-        </div>
-
-        <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={formData.is_active}
-            onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-            className="w-5 h-5 text-blue-600 rounded"
-          />
-          <div>
-            <div className="font-medium text-gray-900">المسوق نشط</div>
-            <div className="text-sm text-gray-500">يمكنه استقبال الروابط والعمولات إذا كان نشطًا.</div>
-          </div>
-        </label>
-
-        <ModalActions
-          onClose={onClose}
-          submitText={loading ? 'جاري الحفظ...' : marketer ? 'حفظ التغييرات' : 'إضافة المسوق'}
-          loading={loading}
-        />
-      </form>
-    </ModalShell>
-  );
-};
-
-interface LinkFormModalProps {
-  link?: AffiliateLinkRow | null;
-  marketers: AffiliateMarketerRow[];
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-const LinkFormModal: React.FC<LinkFormModalProps> = ({
-  link,
-  marketers,
-  onClose,
-  onSuccess,
-}) => {
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [products, setProducts] = useState<ProductOption[]>([]);
-  const [stores, setStores] = useState<StoreOption[]>([]);
-
-  const [formData, setFormData] = useState({
-    code: link?.code || '',
-    apply_to: (link?.apply_to as 'product' | 'store' | 'all') || 'all',
-    product_id: link?.product_id || '',
-    store_id: link?.store_id || '',
-    marketer_id: link?.marketer_id || '',
-    description: link?.description || '',
-    is_active: link?.is_active ?? true,
-  });
-
-  useEffect(() => {
-    fetchGlobalData();
-  }, [user?.id]);
-
-  const fetchGlobalData = async () => {
-    try {
-      const [{ data: productsData }, { data: storesData }] = await Promise.all([
-        supabase
-          .from('products')
-          .select('id, name, title, slug')
-          .eq('is_active', true)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('stores')
-          .select('id, name, title, slug')
-          .eq('is_active', true)
-          .order('created_at', { ascending: false }),
-      ]);
-
-      setProducts((productsData || []) as ProductOption[]);
-      setStores((storesData || []) as StoreOption[]);
-    } catch (fetchError) {
-      console.error('Error fetching admin global data:', fetchError);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user?.id) return;
-
-    setError('');
-    setLoading(true);
-
-    try {
-      const normalizedCode = formData.code.trim().toUpperCase();
-
-      if (!normalizedCode) {
-        throw new Error('كود الرابط مطلوب');
-      }
-
-      if (formData.apply_to === 'product' && !formData.product_id) {
-        throw new Error('اختر المنتج');
-      }
-
-      if (formData.apply_to === 'store' && !formData.store_id) {
-        throw new Error('اختر المتجر');
-      }
-
-      const { data: existingCodeRow, error: existingCodeError } = await supabase
-        .from('affiliate_links')
-        .select('id')
-        .eq('code', normalizedCode)
-        .maybeSingle();
-
-      if (existingCodeError) {
-        throw existingCodeError;
-      }
-
-      if (existingCodeRow && (!link || existingCodeRow.id !== link.id)) {
-        throw new Error('كود الرابط مستخدم بالفعل، اختر كودًا مختلفًا');
-      }
-
-      const data: Record<string, any> = {
-        user_id: user.id,
-        seller_id: user.id,
-        code: normalizedCode,
-        apply_to: formData.apply_to,
-        marketer_id: formData.marketer_id || null,
-        description: formData.description.trim() || null,
-        is_active: formData.is_active,
-      };
-
-      if (formData.apply_to === 'product') {
-        data.product_id = formData.product_id;
-        data.store_id = null;
-      } else if (formData.apply_to === 'store') {
-        data.store_id = formData.store_id;
-        data.product_id = null;
-      } else {
-        data.product_id = null;
-        data.store_id = null;
-      }
-
-      if (link) {
-        const { error: updateError } = await supabase
-          .from('affiliate_links')
-          .update(data)
-          .eq('id', link.id)
-          .eq('seller_id', user.id);
-
-        if (updateError) throw updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from('affiliate_links')
-          .insert({
-            ...data,
-            clicks: 0,
-            sales: 0,
-            earnings: 0,
-          });
-
-        if (insertError) throw insertError;
-      }
-
-      onSuccess();
-    } catch (err: any) {
-      console.error('Error saving link:', err);
-
-      if (err?.code === '23505') {
-        setError('كود الرابط مستخدم بالفعل، اختر كودًا مختلفًا');
-      } else {
-        setError(err.message || 'حدث خطأ أثناء حفظ الرابط');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <ModalShell
-      title={link ? 'تعديل رابط أفلييت المنصة' : 'إنشاء رابط أفلييت جديد'}
-      subtitle="تعديل أو إنشاء رابط خاص بتسويق المنصة من جهة الأدمن."
-      onClose={onClose}
-      size="lg"
-    >
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {error && <ErrorBox text={error} />}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              كود الرابط <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={formData.code}
-              onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
-              placeholder="RAQMYAFF"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">المسوق (اختياري)</label>
-            <select
-              value={formData.marketer_id}
-              onChange={(e) => setFormData({ ...formData, marketer_id: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">-- بدون تخصيص --</option>
-              {marketers.map((marketer) => (
-                <option key={marketer.id} value={marketer.id}>
-                  {marketer.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            نطاق التطبيق <span className="text-red-500">*</span>
-          </label>
-          <select
-            value={formData.apply_to}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                apply_to: e.target.value as 'product' | 'store' | 'all',
-                product_id: e.target.value === 'product' ? formData.product_id : '',
-                store_id: e.target.value === 'store' ? formData.store_id : '',
-              })
-            }
-            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            required
-          >
-            <option value="all">المنصة بالكامل</option>
-            <option value="product">منتج محدد</option>
-            <option value="store">متجر محدد</option>
-          </select>
-        </div>
-
-        {formData.apply_to === 'product' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              اختر المنتج <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={formData.product_id}
-              onChange={(e) => setFormData({ ...formData, product_id: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            >
-              <option value="">-- اختر منتج --</option>
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {getDisplayName(product)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {formData.apply_to === 'store' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              اختر المتجر <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={formData.store_id}
-              onChange={(e) => setFormData({ ...formData, store_id: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            >
-              <option value="">-- اختر متجر --</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {getDisplayName(store)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">وصف الرابط</label>
-          <textarea
-            value={formData.description}
-            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            rows={3}
-            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="مثال: حملة المنصة في تيك توك"
-          />
-        </div>
-
-        <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={formData.is_active}
-            onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-            className="w-5 h-5 text-blue-600 rounded"
-          />
-          <div>
-            <div className="font-medium text-gray-900">الرابط نشط</div>
-            <div className="text-sm text-gray-500">يمكن استخدامه وتتبع نتائجه إذا كان نشطًا.</div>
-          </div>
-        </label>
-
-        <ModalActions
-          onClose={onClose}
-          submitText={loading ? 'جاري الحفظ...' : link ? 'حفظ التغييرات' : 'إنشاء الرابط'}
-          loading={loading}
-        />
-      </form>
-    </ModalShell>
-  );
-};
-
-interface RuleFormModalProps {
-  rule?: AffiliateRuleRow | null;
-  marketers: AffiliateMarketerRow[];
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-const RuleFormModal: React.FC<RuleFormModalProps> = ({
-  rule,
-  marketers,
-  onClose,
-  onSuccess,
-}) => {
-  const { user } = useAuth();
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [products, setProducts] = useState<ProductOption[]>([]);
-  const [stores, setStores] = useState<StoreOption[]>([]);
-
-  const initialTiers: TierDraft[] =
-    rule?.tiers?.map((tier) => ({
-      id: tier.id,
-      localId: tier.id || createLocalTierId(),
-      day_from: tier.day_from?.toString() ?? '0',
-      day_to: tier.day_to?.toString() ?? '',
-      commission_type: (tier.commission_type as 'percentage' | 'fixed') || 'percentage',
-      commission_value: tier.commission_value?.toString() ?? '',
-      is_active: tier.is_active ?? true,
-    })) || [];
-
-  const [formData, setFormData] = useState({
-    marketer_id: rule?.marketer_id || '',
-    scope_type: (rule?.scope_type as 'product' | 'store' | 'all') || 'all',
-    product_id: rule?.product_id || '',
-    store_id: rule?.store_id || '',
-    commission_type: (rule?.commission_type as 'percentage' | 'fixed') || 'percentage',
-    commission_value:
-      rule?.commission_value !== null && rule?.commission_value !== undefined
-        ? String(rule.commission_value)
-        : '',
-    priority: rule?.priority !== null && rule?.priority !== undefined ? String(rule.priority) : '100',
-    is_active: rule?.is_active ?? true,
-  });
-
-  const [tiers, setTiers] = useState<TierDraft[]>(initialTiers);
-
-  useEffect(() => {
-    fetchOptions();
-  }, [user?.id]);
-
-  const fetchOptions = async () => {
-    try {
-      const [{ data: productsData }, { data: storesData }] = await Promise.all([
-        supabase
-          .from('products')
-          .select('id, name, title, slug')
-          .eq('is_active', true)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('stores')
-          .select('id, name, title, slug')
-          .eq('is_active', true)
-          .order('created_at', { ascending: false }),
-      ]);
-
-      setProducts((productsData || []) as ProductOption[]);
-      setStores((storesData || []) as StoreOption[]);
-    } catch (fetchError) {
-      console.error('Error fetching rule options:', fetchError);
-    }
-  };
-
-  const addTier = () => {
-    setTiers((prev) => [
-      ...prev,
-      {
-        localId: createLocalTierId(),
-        day_from: '0',
-        day_to: '',
-        commission_type: 'percentage',
-        commission_value: '',
-        is_active: true,
-      },
-    ]);
-  };
-
-  const updateTier = (localId: string, patch: Partial<TierDraft>) => {
-    setTiers((prev) =>
-      prev.map((tier) => (tier.localId === localId ? { ...tier, ...patch } : tier))
-    );
-  };
-
-  const removeTier = (localId: string) => {
-    setTiers((prev) => prev.filter((tier) => tier.localId !== localId));
-  };
-
-  const validateTiers = () => {
-    for (const tier of tiers) {
-      if (tier.commission_value.trim() === '') {
-        throw new Error('كل شريحة يجب أن تحتوي على قيمة عمولة');
-      }
-
-      if (Number(tier.day_from) < 0) {
-        throw new Error('يوم البداية في الشرائح لا يمكن أن يكون أقل من 0');
-      }
-
-      if (tier.day_to.trim() !== '' && Number(tier.day_to) < Number(tier.day_from)) {
-        throw new Error('يوم النهاية يجب أن يكون أكبر من أو يساوي يوم البداية');
-      }
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user?.id) return;
-
-    setError('');
-    setLoading(true);
-
-    try {
-      if (!formData.marketer_id) {
-        throw new Error('اختر المسوق');
-      }
-
-      if (formData.scope_type === 'product' && !formData.product_id) {
-        throw new Error('اختر المنتج لهذه القاعدة');
-      }
-
-      if (formData.scope_type === 'store' && !formData.store_id) {
-        throw new Error('اختر المتجر لهذه القاعدة');
-      }
-
-      if (formData.commission_value.trim() === '') {
-        throw new Error('أدخل قيمة العمولة الأساسية');
-      }
-
-      validateTiers();
-
-      const marketerName =
-        marketers.find((item) => item.id === formData.marketer_id)?.name ||
-        rule?.marketer?.name ||
-        'أفلييت';
-
-      const payload = {
-        seller_id: user.id,
-        marketer_id: formData.marketer_id,
-        rule_name: rule?.rule_name || buildRuleName(marketerName, formData.scope_type),
-        scope_type: formData.scope_type,
-        product_id: formData.scope_type === 'product' ? formData.product_id : null,
-        store_id: formData.scope_type === 'store' ? formData.store_id : null,
-        commission_type: formData.commission_type,
-        commission_value: Number(formData.commission_value),
-        priority: Number(formData.priority || 100),
-        is_active: formData.is_active,
-      };
-
-      let ruleId = rule?.id || '';
-
-      if (rule) {
-        const { error: updateError } = await supabase
-          .from('affiliate_rules')
-          .update(payload)
-          .eq('id', rule.id)
-          .eq('seller_id', user.id);
-
-        if (updateError) throw updateError;
-      } else {
-        const { data: insertedRule, error: insertError } = await supabase
-          .from('affiliate_rules')
-          .insert(payload)
-          .select('id')
-          .single();
-
-        if (insertError) throw insertError;
-        ruleId = insertedRule.id;
-      }
-
-      if (!ruleId && rule?.id) {
-        ruleId = rule.id;
-      }
-
-      const existingTierIds = new Set((rule?.tiers || []).map((tier) => tier.id));
-      const currentTierIds = new Set(tiers.filter((tier) => tier.id).map((tier) => tier.id as string));
-      const tierIdsToDelete = [...existingTierIds].filter((id) => !currentTierIds.has(id));
-
-      if (tierIdsToDelete.length > 0) {
-        const { error } = await supabase
-          .from('affiliate_rule_tiers')
-          .delete()
-          .in('id', tierIdsToDelete);
-
-        if (error) throw error;
-      }
-
-      for (const tier of tiers) {
-        const tierPayload = {
-          rule_id: ruleId,
-          day_from: Number(tier.day_from || 0),
-          day_to: tier.day_to.trim() === '' ? null : Number(tier.day_to),
-          commission_type: tier.commission_type,
-          commission_value: Number(tier.commission_value),
-          is_active: tier.is_active,
-        };
-
-        if (tier.id) {
-          const { error } = await supabase
-            .from('affiliate_rule_tiers')
-            .update(tierPayload)
-            .eq('id', tier.id);
-
-          if (error) throw error;
-        } else {
-          const { error } = await supabase
-            .from('affiliate_rule_tiers')
-            .insert(tierPayload);
-
-          if (error) throw error;
-        }
-      }
-
-      onSuccess();
-    } catch (err: any) {
-      console.error('Error saving rule:', err);
-      setError(err.message || 'حدث خطأ أثناء حفظ قاعدة العمولة');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <ModalShell
-      title={rule ? 'تعديل قاعدة عمولة المنصة' : 'إضافة قاعدة عمولة جديدة'}
-      subtitle="إدارة قاعدة عمولة مستقلة من لوحة الأدمن."
-      onClose={onClose}
-      size="xl"
-    >
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {error && <ErrorBox text={error} />}
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            المسوق <span className="text-red-500">*</span>
-          </label>
-          <select
-            value={formData.marketer_id}
-            onChange={(e) => setFormData({ ...formData, marketer_id: e.target.value })}
-            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            required
-          >
-            <option value="">-- اختر المسوق --</option>
-            {marketers.map((marketer) => (
-              <option key={marketer.id} value={marketer.id}>
-                {marketer.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              نوع القاعدة <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={formData.scope_type}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  scope_type: e.target.value as 'product' | 'store' | 'all',
-                  product_id: e.target.value === 'product' ? formData.product_id : '',
-                  store_id: e.target.value === 'store' ? formData.store_id : '',
-                })
-              }
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            >
-              <option value="all">قاعدة عامة</option>
-              <option value="product">على منتج محدد</option>
-              <option value="store">على متجر محدد</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">الأولوية</label>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={formData.priority}
-              onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-        </div>
-
-        {formData.scope_type === 'product' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              المنتج <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={formData.product_id}
-              onChange={(e) => setFormData({ ...formData, product_id: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            >
-              <option value="">-- اختر المنتج --</option>
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {getDisplayName(product)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {formData.scope_type === 'store' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              المتجر <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={formData.store_id}
-              onChange={(e) => setFormData({ ...formData, store_id: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            >
-              <option value="">-- اختر المتجر --</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {getDisplayName(store)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">نوع العمولة الأساسية</label>
-            <select
-              value={formData.commission_type}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  commission_type: e.target.value as 'percentage' | 'fixed',
-                })
-              }
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="percentage">نسبة مئوية %</option>
-              <option value="fixed">مبلغ ثابت</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">قيمة العمولة الأساسية</label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={formData.commission_value}
-              onChange={(e) => setFormData({ ...formData, commission_value: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-        </div>
-
-        <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={formData.is_active}
-            onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-            className="w-5 h-5 text-blue-600 rounded"
-          />
-          <div>
-            <div className="font-medium text-gray-900">القاعدة نشطة</div>
-            <div className="text-sm text-gray-500">لن تُستخدم القاعدة إذا كانت غير نشطة.</div>
-          </div>
-        </label>
-
-        <div className="rounded-3xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between gap-4 mb-5">
-            <div>
-              <h3 className="text-lg font-bold text-gray-900">شرائح العمولة حسب الأيام</h3>
-              <p className="text-sm text-gray-500 mt-1">
-                اختيارية. إذا لم تضف شرائح فسيتم استخدام العمولة الأساسية.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={addTier}
-              className="px-4 py-2.5 rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700 flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              إضافة شريحة
-            </button>
-          </div>
-
-          {tiers.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
-              لا توجد شرائح. سيتم اعتماد العمولة الأساسية فقط.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {tiers.map((tier, index) => (
-                <div key={tier.localId} className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="font-semibold text-gray-900">الشريحة #{index + 1}</div>
-                    <button
-                      type="button"
-                      onClick={() => removeTier(tier.localId)}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-2">من اليوم</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={tier.day_from}
-                        onChange={(e) => updateTier(tier.localId, { day_from: e.target.value })}
-                        className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-2">إلى اليوم</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={tier.day_to}
-                        onChange={(e) => updateTier(tier.localId, { day_to: e.target.value })}
-                        className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                        placeholder="مفتوح"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-2">نوع العمولة</label>
-                      <select
-                        value={tier.commission_type}
-                        onChange={(e) =>
-                          updateTier(tier.localId, {
-                            commission_type: e.target.value as 'percentage' | 'fixed',
-                          })
-                        }
-                        className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                      >
-                        <option value="percentage">نسبة %</option>
-                        <option value="fixed">مبلغ ثابت</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-2">القيمة</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={tier.commission_value}
-                        onChange={(e) => updateTier(tier.localId, { commission_value: e.target.value })}
-                        className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                      />
-                    </div>
-
-                    <div className="flex items-end">
-                      <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white w-full cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={tier.is_active}
-                          onChange={(e) => updateTier(tier.localId, { is_active: e.target.checked })}
-                          className="w-4 h-4 text-blue-600 rounded"
-                        />
-                        <span className="text-sm text-gray-700">نشطة</span>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <ModalActions
-          onClose={onClose}
-          submitText={loading ? 'جاري الحفظ...' : rule ? 'حفظ التغييرات' : 'إضافة القاعدة'}
-          loading={loading}
-        />
-      </form>
-    </ModalShell>
-  );
-};
-
 const SelectableOptionCard: React.FC<{
   active: boolean;
   title: string;
@@ -3877,9 +2241,7 @@ const SelectableOptionCard: React.FC<{
     type="button"
     onClick={onClick}
     className={`text-right rounded-2xl border p-4 transition-colors ${
-      active
-        ? 'border-blue-500 bg-blue-50'
-        : 'border-gray-200 bg-white hover:border-blue-200'
+      active ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-blue-200'
     }`}
   >
     <div className="font-semibold text-gray-900 mb-1">{title}</div>
