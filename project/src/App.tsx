@@ -11,6 +11,7 @@ import { SupportPage } from './pages/SupportPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { AdminDashboard } from './pages/AdminDashboard';
+import { AdminAffiliateManagementPage } from './pages/AdminAffiliateManagementPage';
 import { AffiliateDashboard } from './pages/AffiliateDashboard';
 import { OrdersPage } from './pages/OrdersPage';
 import { StoreDetailPage } from './pages/StoreDetailPage';
@@ -96,6 +97,7 @@ const parsePathToPage = (pathname: string) => {
     'seller-dashboard': 'seller-dashboard',
     'user-dashboard': 'user-dashboard',
     admin: 'admin',
+    'admin-affiliate-management': 'admin-affiliate-management',
     'affiliate-dashboard': 'affiliate-dashboard',
     'coupons-management': 'coupons-management',
     'affiliate-management': 'affiliate-management',
@@ -833,6 +835,7 @@ function AppContent() {
     switch (currentPage) {
       case 'home':
         return <HomePage onNavigate={navigateWithContext} />;
+
       case 'auth':
         return (
           <AuthPage
@@ -841,94 +844,136 @@ function AppContent() {
             onNavigate={navigateWithContext}
           />
         );
+
       case 'verify-phone':
         return <VerifyPhonePage />;
+
       case 'merchant-bank-details':
         return <MerchantBankDetailsPage onNavigate={navigateWithContext} />;
+
       case 'pricing':
         return <PricingPage onNavigate={navigateWithContext} />;
+
       case 'marketplace':
         return <MarketplacePage onNavigate={navigateWithContext} />;
+
       case 'seller-dashboard':
         return profile?.role === 'seller' || profile?.role === 'admin' ? (
           <SellerDashboard onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
+
       case 'user-dashboard':
         return <ProfilePage onNavigate={navigateWithContext} />;
+
       case 'admin':
-        return profile?.role === 'admin' ? (
+        return profile?.role === 'admin' || profile?.role === 'superadmin' ? (
           <AdminDashboard onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
+
+      case 'admin-affiliate-management':
+        return profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+          <AdminAffiliateManagementPage onNavigate={navigateWithContext} />
+        ) : (
+          <HomePage onNavigate={navigateWithContext} />
+        );
+
       case 'affiliate-dashboard':
         return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
           <AffiliateDashboard onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
+
       case 'coupons-management':
         return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
           <CouponsManagementPage onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
+
       case 'affiliate-management':
         return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
           <AffiliateManagementPage onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
+
       case 'cart':
         return <CartPage onNavigate={navigateWithContext} />;
+
       case 'checkout':
         return <CheckoutPage onNavigate={navigateWithContext} />;
+
       case 'payment-failed':
         return <PaymentFailedPage onNavigate={navigateWithContext} />;
+
       case 'orders':
         return <OrdersPage onNavigate={navigateWithContext} />;
+
       case 'orders-management':
         return <OrdersManagementPage onNavigate={navigateWithContext} />;
+
       case 'payment-settings':
         return <PaymentSettingsPage onNavigate={navigateWithContext} />;
+
       case 'bank-account':
         return <BankAccountPage onNavigate={navigateWithContext} />;
+
       case 'withdrawal-requests':
         return <WithdrawalRequestsPage onNavigate={navigateWithContext} />;
+
       case 'admin-withdrawals':
         return <AdminWithdrawalsPage onNavigate={navigateWithContext} />;
+
       case 'transactions':
         return <TransactionsPage onNavigate={navigateWithContext} />;
+
       case 'admin-management':
         return <AdminManagementPage onNavigate={navigateWithContext} />;
+
       case 'admin-verification-apis':
         return <AdminVerificationApisPage onNavigate={navigateWithContext} />;
+
       case 'merchant-withdraw':
         return <MerchantWithdrawPage onNavigate={navigateWithContext} />;
+
       case 'admin-announcements':
         return <AdminAnnouncementsPage onNavigate={navigateWithContext} />;
+
       case 'favorites':
         return <FavoritesPage onNavigate={navigateWithContext} />;
+
       case 'viewed-products':
         return <ViewedProductsPage onNavigate={navigateWithContext} />;
+
       case 'support':
         return <SupportPage />;
+
       case 'profile':
         return <ProfilePage onNavigate={navigateWithContext} />;
+
       case 'privacy-policy':
         return <PrivacyPolicyPage />;
+
       case 'refund-policy':
         return <RefundPolicyPage />;
+
       case 'affiliate-policy':
         return <AffiliatePolicyPage />;
+
       case 'merchant-agreement':
         return <MerchantAgreementPage />;
+
       case 'privacy':
         return <PrivacyPolicyPage />;
+
       case 'terms':
         return <MerchantAgreementPage />;
+
       default:
         return <HomePage onNavigate={navigateWithContext} />;
     }
