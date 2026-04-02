@@ -19,6 +19,7 @@ import { StorefrontPage } from './pages/StorefrontPage';
 import { CouponsManagementPage } from './pages/CouponsManagementPage';
 import { AffiliateManagementPage } from './pages/AffiliateManagementPage';
 import { MarketerAnalyticsPage } from './pages/MarketerAnalyticsPage';
+import { MarketerAffiliateStatsPage } from './pages/MarketerAffiliateStatsPage';
 import { CartPage } from './pages/CartPage';
 import { CheckoutPage } from './pages/CheckoutPage';
 import { PaymentPage } from './pages/PaymentPage';
@@ -51,6 +52,10 @@ const parsePathToPage = (pathname: string) => {
   const segments = normalizedPath.split('/').filter(Boolean);
 
   if (segments.length === 0) return 'home';
+
+  if (segments[0] === 'affiliate-report' && segments[1]) {
+    return 'affiliate-report';
+  }
 
   if (segments[0] === 's' && segments[1]) {
     const storeSlug = decodeURIComponent(segments[1]);
@@ -236,6 +241,10 @@ const isStoreContextPage = (page: string) =>
 const getPublicPathFromPage = (page: string) => {
   const activeStoreSlug = getActiveStoreSlugFromContext(page);
 
+  if (page === 'affiliate-report') {
+    return null;
+  }
+
   if (page.startsWith('storefront-')) {
     return `/s/${encodeURIComponent(page.replace('storefront-', ''))}`;
   }
@@ -346,7 +355,7 @@ function AppContent() {
 
   const storeSlug = getActiveStoreSlugFromContext(currentPage);
   const isStoreMode = isStoreContextPage(currentPage);
-  const shouldHidePlatformChrome = isStoreMode;
+  const shouldHidePlatformChrome = isStoreMode || currentPage === 'affiliate-report';
 
   useEffect(() => {
     handleAffiliateTracking();
@@ -776,6 +785,10 @@ function AppContent() {
   }
 
   const renderPage = () => {
+    if (currentPage === 'affiliate-report') {
+      return <MarketerAffiliateStatsPage />;
+    }
+
     if (currentPage.startsWith('product-slug-')) {
       const productSlug = currentPage.replace('product-slug-', '');
       return <ProductDetailPage productSlug={productSlug} onNavigate={navigateWithContext} />;
