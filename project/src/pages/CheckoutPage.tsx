@@ -6,6 +6,9 @@ import {
   CreditCard,
   Store as StoreIcon,
   ArrowLeft,
+  Tag,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Product } from '../lib/supabase';
@@ -52,6 +55,39 @@ interface ResolvedAffiliateAttribution {
   affiliate_marketer_id: string | null;
   affiliate_rule_id: string | null;
   affiliate_ref_code: string | null;
+}
+
+interface DiscountCouponRow {
+  id: string;
+  user_id: string;
+  code: string;
+  discount_type: 'percentage' | 'fixed' | string;
+  discount_value: number;
+  is_active: boolean | null;
+  created_at?: string | null;
+  affiliate_marketer_id?: string | null;
+  affiliate_link_id?: string | null;
+  min_purchase_amount?: number | null;
+  max_discount_amount?: number | null;
+  usage_limit?: number | null;
+  used_count?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
+}
+
+interface AppliedCouponState {
+  coupon: DiscountCouponRow;
+  eligibleProductIds: string[];
+  eligibleStoreIds: string[];
+  eligibleSubtotal: number;
+  discountAmount: number;
+  scopeType: 'all' | 'products' | 'stores';
+}
+
+interface OrderItemPricing {
+  discountedUnitPrice: number;
+  discountedSubtotal: number;
+  discountShare: number;
 }
 
 const getActiveStoreScopeSlug = () => {
@@ -112,7 +148,10 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   return null;
 };
 
-const productMatchesScope = (product: ProductWithMeta | null | undefined, scope: ScopeInfo | null) => {
+const productMatchesScope = (
+  product: ProductWithMeta | null | undefined,
+  scope: ScopeInfo | null
+) => {
   if (!scope) return true;
   if (!product) return false;
 
@@ -121,6 +160,13 @@ const productMatchesScope = (product: ProductWithMeta | null | undefined, scope:
   }
 
   return (product.user_id as string | null) === scope.merchantUserId;
+};
+
+const formatMoney = (value: number) => `${Number(value || 0).toFixed(2)} ريال`;
+
+const normalizeDateOnly = (value?: string | null) => {
+  if (!value) return null;
+  return new Date(`${value}T00:00:00`);
 };
 
 const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: string) => void }> = ({
@@ -161,6 +207,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypal'>('card');
   const [scopeInfo, setScopeInfo] = useState<ScopeInfo | null>(null);
 
+  const [couponCode, setCouponCode] = useState('');
+  const [couponError, setCouponError] = useState('');
+  const [couponSuccess, setCouponSuccess] = useState('');
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCouponState | null>(null);
+
   const [formData, setFormData] = useState({
     shippingAddress: '',
     notes: '',
@@ -190,6 +242,18 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
+  useEffect(() => {
+    if (!appliedCoupon) return;
+
+    const stillValid =
+      couponCode.trim().toUpperCase() === appliedCoupon.coupon.code.trim().toUpperCase();
+
+    if (!stillValid) {
+      setAppliedCoupon(null);
+      setCouponSuccess('');
+    }
+  }, [couponCode, appliedCoupon]);
+
   const fetchCartItems = async (resolvedScope?: ScopeInfo | null) => {
     try {
       const scope = resolvedScope === undefined ? scopeInfo : resolvedScope;
@@ -213,13 +277,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
         const allProducts = (productsData || []) as ProductWithMeta[];
 
-        const storeIds = Array.from(
-          new Set(allProducts.map((p) => p.store_id).filter(Boolean))
-        ) as string[];
+        const storeIds = Array.from(new Set(allProducts.map((p) => p.store_id).filter(Boolean))) as string[];
 
-        const userIds = Array.from(
-          new Set(allProducts.map((p) => p.user_id).filter(Boolean))
-        ) as string[];
+        const userIds = Array.from(new Set(allProducts.map((p) => p.user_id).filter(Boolean))) as string[];
 
         const [storesRes, merchantsRes] = await Promise.all([
           storeIds.length > 0
@@ -233,9 +293,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
             : Promise.resolve({ data: [], error: null } as any),
         ]);
 
-        const storesMap = new Map<string, any>(
-          ((storesRes.data || []) as any[]).map((store) => [store.id, store])
-        );
+        const storesMap = new Map<string, any>(((storesRes.data || []) as any[]).map((store) => [store.id, store]));
 
         const merchantsMap = new Map<string, any>(
           ((merchantsRes.data || []) as any[]).map((merchant) => [merchant.user_id, merchant])
@@ -285,6 +343,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     }, 0);
   };
 
+  const totalAmount = useMemo(() => calculateTotal(), [cartItems]);
+  const discountAmount = appliedCoupon?.discountAmount || 0;
+  const finalAmount = Math.max(0, Number((totalAmount - discountAmount).toFixed(2)));
+
   const uniqueSellerIds = useMemo(() => {
     return Array.from(
       new Set(cartItems.map((item) => item.product?.user_id).filter((id): id is string => !!id))
@@ -293,6 +355,271 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
   const hasMultipleSellers = uniqueSellerIds.length > 1;
   const singleSellerId = uniqueSellerIds.length === 1 ? uniqueSellerIds[0] : null;
+
+  const getCouponEligibleItems = (
+    items: CartItem[],
+    productIds: string[],
+    storeIds: string[]
+  ): CartItem[] => {
+    if (productIds.length > 0) {
+      return items.filter((item) => productIds.includes(item.product_id));
+    }
+
+    if (storeIds.length > 0) {
+      return items.filter((item) => !!item.product?.store_id && storeIds.includes(item.product.store_id));
+    }
+
+    return items;
+  };
+
+  const calculateCouponDiscount = (
+    coupon: DiscountCouponRow,
+    eligibleSubtotal: number
+  ) => {
+    if (eligibleSubtotal <= 0) return 0;
+
+    let calculatedDiscount = 0;
+
+    if (coupon.discount_type === 'percentage') {
+      calculatedDiscount = eligibleSubtotal * (Number(coupon.discount_value || 0) / 100);
+    } else if (coupon.discount_type === 'fixed') {
+      calculatedDiscount = Number(coupon.discount_value || 0);
+    } else {
+      return 0;
+    }
+
+    if (coupon.max_discount_amount !== null && coupon.max_discount_amount !== undefined) {
+      calculatedDiscount = Math.min(calculatedDiscount, Number(coupon.max_discount_amount));
+    }
+
+    calculatedDiscount = Math.min(calculatedDiscount, eligibleSubtotal);
+
+    return Number(calculatedDiscount.toFixed(2));
+  };
+
+  const handleApplyCoupon = async () => {
+    setCouponError('');
+    setCouponSuccess('');
+
+    const normalizedCode = couponCode.trim().toUpperCase();
+
+    if (!normalizedCode) {
+      setCouponError('أدخل كود الخصم أولًا');
+      return;
+    }
+
+    if (cartItems.length === 0) {
+      setCouponError('لا يمكن تطبيق الكوبون لأن السلة فارغة');
+      return;
+    }
+
+    setIsApplyingCoupon(true);
+
+    try {
+      const { data: couponData, error: couponFetchError } = await supabase
+        .from('discount_coupons')
+        .select(
+          'id, user_id, code, discount_type, discount_value, is_active, created_at, affiliate_marketer_id, affiliate_link_id, min_purchase_amount, max_discount_amount, usage_limit, used_count, start_date, end_date'
+        )
+        .eq('code', normalizedCode)
+        .maybeSingle();
+
+      if (couponFetchError) {
+        throw couponFetchError;
+      }
+
+      if (!couponData) {
+        setAppliedCoupon(null);
+        setCouponError('كود الخصم غير موجود');
+        return;
+      }
+
+      const coupon = couponData as DiscountCouponRow;
+
+      if (!coupon.is_active) {
+        setAppliedCoupon(null);
+        setCouponError('كود الخصم غير نشط');
+        return;
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const startDate = normalizeDateOnly(coupon.start_date);
+      const endDate = normalizeDateOnly(coupon.end_date);
+
+      if (startDate && today < startDate) {
+        setAppliedCoupon(null);
+        setCouponError('كود الخصم غير متاح بعد');
+        return;
+      }
+
+      if (endDate && today > endDate) {
+        setAppliedCoupon(null);
+        setCouponError('انتهت صلاحية كود الخصم');
+        return;
+      }
+
+      if (
+        coupon.usage_limit !== null &&
+        coupon.usage_limit !== undefined &&
+        Number(coupon.used_count || 0) >= Number(coupon.usage_limit)
+      ) {
+        setAppliedCoupon(null);
+        setCouponError('تم الوصول إلى الحد الأقصى لاستخدام هذا الكوبون');
+        return;
+      }
+
+      const [{ data: couponProductsData, error: couponProductsError }, { data: couponStoresData, error: couponStoresError }] =
+        await Promise.all([
+          supabase.from('coupon_products').select('product_id').eq('coupon_id', coupon.id),
+          supabase.from('coupon_stores').select('store_id').eq('coupon_id', coupon.id),
+        ]);
+
+      if (couponProductsError) throw couponProductsError;
+      if (couponStoresError) throw couponStoresError;
+
+      const eligibleProductIds = (couponProductsData || [])
+        .map((item: any) => item.product_id)
+        .filter(Boolean) as string[];
+
+      const eligibleStoreIds = (couponStoresData || [])
+        .map((item: any) => item.store_id)
+        .filter(Boolean) as string[];
+
+      const eligibleItems = getCouponEligibleItems(cartItems, eligibleProductIds, eligibleStoreIds);
+
+      if (eligibleItems.length === 0) {
+        setAppliedCoupon(null);
+        setCouponError('هذا الكوبون لا ينطبق على المنتجات الموجودة في السلة');
+        return;
+      }
+
+      const eligibleSubtotal = Number(
+        eligibleItems
+          .reduce((sum, item) => sum + Number(item.product?.price || 0) * item.quantity, 0)
+          .toFixed(2)
+      );
+
+      if (
+        coupon.min_purchase_amount !== null &&
+        coupon.min_purchase_amount !== undefined &&
+        eligibleSubtotal < Number(coupon.min_purchase_amount)
+      ) {
+        setAppliedCoupon(null);
+        setCouponError(
+          `الحد الأدنى لاستخدام هذا الكوبون هو ${formatMoney(Number(coupon.min_purchase_amount))}`
+        );
+        return;
+      }
+
+      const calculatedDiscount = calculateCouponDiscount(coupon, eligibleSubtotal);
+
+      if (calculatedDiscount <= 0) {
+        setAppliedCoupon(null);
+        setCouponError('تعذر احتساب الخصم لهذا الكوبون');
+        return;
+      }
+
+      const scopeType: 'all' | 'products' | 'stores' =
+        eligibleProductIds.length > 0 ? 'products' : eligibleStoreIds.length > 0 ? 'stores' : 'all';
+
+      setAppliedCoupon({
+        coupon,
+        eligibleProductIds,
+        eligibleStoreIds,
+        eligibleSubtotal,
+        discountAmount: calculatedDiscount,
+        scopeType,
+      });
+
+      setCouponSuccess(`تم تطبيق الكوبون بنجاح وخصم ${formatMoney(calculatedDiscount)}`);
+    } catch (error: any) {
+      console.error('Error applying coupon:', error);
+      setAppliedCoupon(null);
+      setCouponError(error?.message || 'حدث خطأ أثناء تطبيق الكوبون');
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponSuccess('');
+    setCouponError('');
+    setCouponCode('');
+  };
+
+  const getOrderItemPricings = (items: CartItem[], applied: AppliedCouponState | null): OrderItemPricing[] => {
+    const originalSubtotals = items.map((item) =>
+      Number((Number(item.product?.price || 0) * item.quantity).toFixed(2))
+    );
+
+    if (!applied || applied.discountAmount <= 0) {
+      return items.map((_, index) => {
+        const subtotal = originalSubtotals[index];
+        const quantity = Math.max(1, items[index].quantity);
+        return {
+          discountedSubtotal: subtotal,
+          discountedUnitPrice: Number((subtotal / quantity).toFixed(2)),
+          discountShare: 0,
+        };
+      });
+    }
+
+    const eligibleItems = getCouponEligibleItems(items, applied.eligibleProductIds, applied.eligibleStoreIds);
+    const eligibleIds = new Set(eligibleItems.map((item) => item.id));
+    const eligibleSubtotal = applied.eligibleSubtotal;
+
+    if (eligibleSubtotal <= 0) {
+      return items.map((_, index) => {
+        const subtotal = originalSubtotals[index];
+        const quantity = Math.max(1, items[index].quantity);
+        return {
+          discountedSubtotal: subtotal,
+          discountedUnitPrice: Number((subtotal / quantity).toFixed(2)),
+          discountShare: 0,
+        };
+      });
+    }
+
+    let remainingDiscount = Number(applied.discountAmount.toFixed(2));
+
+    return items.map((item, index) => {
+      const subtotal = originalSubtotals[index];
+      const quantity = Math.max(1, item.quantity);
+
+      if (!eligibleIds.has(item.id)) {
+        return {
+          discountedSubtotal: subtotal,
+          discountedUnitPrice: Number((subtotal / quantity).toFixed(2)),
+          discountShare: 0,
+        };
+      }
+
+      const isLastEligible =
+        eligibleItems.findIndex((eligibleItem) => eligibleItem.id === item.id) === eligibleItems.length - 1;
+
+      let discountShare = 0;
+
+      if (isLastEligible) {
+        discountShare = remainingDiscount;
+      } else {
+        discountShare = Number(((subtotal / eligibleSubtotal) * applied.discountAmount).toFixed(2));
+        discountShare = Math.min(discountShare, remainingDiscount);
+        remainingDiscount = Number((remainingDiscount - discountShare).toFixed(2));
+      }
+
+      const discountedSubtotal = Number(Math.max(0, subtotal - discountShare).toFixed(2));
+      const discountedUnitPrice = Number((discountedSubtotal / quantity).toFixed(2));
+
+      return {
+        discountedSubtotal,
+        discountedUnitPrice,
+        discountShare,
+      };
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -326,9 +653,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    const totalAmount = calculateTotal();
-    if (totalAmount <= 0) {
-      setError('المبلغ الإجمالي غير صالح');
+    if (finalAmount <= 0) {
+      setError('المبلغ النهائي غير صالح');
       return;
     }
 
@@ -380,6 +706,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         })
       );
 
+      const itemPricings = getOrderItemPricings(cartItems, appliedCoupon);
+
       const { data: orderNumberData, error: orderNumberError } = await supabase.rpc(
         'generate_order_number'
       );
@@ -397,9 +725,40 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         throw new Error('تعذر إنشاء رقم الطلب');
       }
 
-      const validItemAttributions = resolvedAttributionsByItem.filter(
+      const couponEligibleItemIds = new Set(
+        getCouponEligibleItems(
+          cartItems,
+          appliedCoupon?.eligibleProductIds || [],
+          appliedCoupon?.eligibleStoreIds || []
+        ).map((item) => item.id)
+      );
+
+      const itemAffiliateFallbacks = cartItems.map((item) => {
+        const eligibleForCouponAffiliate =
+          !!appliedCoupon &&
+          couponEligibleItemIds.has(item.id) &&
+          (!!appliedCoupon.coupon.affiliate_link_id || !!appliedCoupon.coupon.affiliate_marketer_id);
+
+        if (!eligibleForCouponAffiliate) {
+          return null;
+        }
+
+        return {
+          attribution_id: null,
+          affiliate_link_id: appliedCoupon?.coupon.affiliate_link_id || null,
+          affiliate_marketer_id: appliedCoupon?.coupon.affiliate_marketer_id || null,
+          affiliate_rule_id: null,
+          affiliate_ref_code: appliedCoupon?.coupon.code || null,
+        } as ResolvedAffiliateAttribution;
+      });
+
+      const mergedItemAffiliations = resolvedAttributionsByItem.map((resolved, index) => {
+        return resolved || itemAffiliateFallbacks[index] || null;
+      });
+
+      const validItemAttributions = mergedItemAffiliations.filter(
         (item): item is ResolvedAffiliateAttribution =>
-          !!item && !!item.attribution_id && !!item.affiliate_link_id
+          !!item && (!!item.affiliate_link_id || !!item.affiliate_marketer_id)
       );
 
       const canUseOrderLevelAffiliate =
@@ -417,12 +776,25 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
       const orderAffiliate = canUseOrderLevelAffiliate ? validItemAttributions[0] : null;
 
+      const couponNote = appliedCoupon
+        ? [
+            `Coupon Code: ${appliedCoupon.coupon.code}`,
+            `Coupon Discount Type: ${appliedCoupon.coupon.discount_type}`,
+            `Coupon Discount Value: ${appliedCoupon.coupon.discount_value}`,
+            `Coupon Applied Discount: ${discountAmount.toFixed(2)}`,
+            `Order Original Total: ${totalAmount.toFixed(2)}`,
+            `Order Final Total: ${finalAmount.toFixed(2)}`,
+          ].join(' | ')
+        : '';
+
+      const finalNotes = [formData.notes?.trim(), couponNote].filter(Boolean).join('\n');
+
       const orderPayload = {
         order_number: orderNumber,
         user_id: profile.id,
         seller_id: singleSellerId,
         merchant_id: singleSellerId,
-        total_amount: totalAmount,
+        total_amount: finalAmount,
         status: 'pending_payment',
         currency: 'SAR',
         payment_method: paymentMethod,
@@ -431,15 +803,17 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         customer_email: profile?.email || '',
         customer_phone: profile?.phone || '',
         shipping_address: formData.shippingAddress || '',
-        notes: formData.notes || '',
+        notes: finalNotes || '',
         sale_source: scopeInfo ? 'direct' : 'marketplace',
         affiliate_link_id: orderAffiliate?.affiliate_link_id || null,
         affiliate_marketer_id: orderAffiliate?.affiliate_marketer_id || null,
         affiliate_rule_id: orderAffiliate?.affiliate_rule_id || null,
         affiliate_attribution_id: orderAffiliate?.attribution_id || null,
-        affiliate_ref_code: orderAffiliate?.affiliate_ref_code || affiliateLocalData?.ref_code || null,
+        affiliate_ref_code:
+          orderAffiliate?.affiliate_ref_code || affiliateLocalData?.ref_code || appliedCoupon?.coupon.code || null,
         affiliate_commission_amount: 0,
-        affiliate_commission_status: orderAffiliate ? 'pending' : 'none',
+        affiliate_commission_status:
+          orderAffiliate?.affiliate_link_id || orderAffiliate?.affiliate_marketer_id ? 'pending' : 'none',
       };
 
       const { data: order, error: orderError } = await supabase
@@ -454,26 +828,29 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       }
 
       const orderItems = cartItems.map((item, index) => {
-        const price = Number(item.product!.price);
+        const originalPrice = Number(item.product!.price);
         const sellerId = item.product!.user_id!;
-        const itemAffiliate = resolvedAttributionsByItem[index];
+        const itemAffiliate = mergedItemAffiliations[index];
+        const pricing = itemPricings[index];
 
         return {
           order_id: order.id,
           product_id: item.product_id,
           seller_id: sellerId,
           quantity: item.quantity,
-          price,
-          product_price: price,
-          subtotal: Number((price * item.quantity).toFixed(2)),
+          price: pricing.discountedUnitPrice,
+          product_price: originalPrice,
+          subtotal: pricing.discountedSubtotal,
           product_name: (item.product as any)?.title ?? (item.product as any)?.name ?? 'منتج',
           affiliate_link_id: itemAffiliate?.affiliate_link_id || null,
           affiliate_marketer_id: itemAffiliate?.affiliate_marketer_id || null,
           affiliate_rule_id: itemAffiliate?.affiliate_rule_id || null,
           affiliate_attribution_id: itemAffiliate?.attribution_id || null,
-          affiliate_ref_code: itemAffiliate?.affiliate_ref_code || affiliateLocalData?.ref_code || null,
+          affiliate_ref_code:
+            itemAffiliate?.affiliate_ref_code || affiliateLocalData?.ref_code || appliedCoupon?.coupon.code || null,
           affiliate_commission_amount: 0,
-          affiliate_commission_status: itemAffiliate ? 'pending' : 'none',
+          affiliate_commission_status:
+            itemAffiliate?.affiliate_link_id || itemAffiliate?.affiliate_marketer_id ? 'pending' : 'none',
         };
       });
 
@@ -684,15 +1061,98 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                   })}
                 </div>
 
+                <div className="mb-6 p-4 border border-gray-200 rounded-xl bg-gray-50">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Tag className="w-4 h-4 text-purple-600" />
+                    <h4 className="font-semibold text-gray-900">كود الخصم</h4>
+                  </div>
+
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      type="text"
+                      value={couponCode}
+                      onChange={(e) => {
+                        setCouponCode(e.target.value.toUpperCase());
+                        setCouponError('');
+                        if (couponSuccess && appliedCoupon) {
+                          const sameCode =
+                            e.target.value.trim().toUpperCase() ===
+                            appliedCoupon.coupon.code.trim().toUpperCase();
+
+                          if (!sameCode) {
+                            setCouponSuccess('');
+                            setAppliedCoupon(null);
+                          }
+                        }
+                      }}
+                      placeholder="أدخل كود الخصم"
+                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+
+                    {appliedCoupon ? (
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        className="px-4 py-3 rounded-lg bg-red-50 text-red-600 font-semibold hover:bg-red-100 transition-colors"
+                      >
+                        إزالة
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleApplyCoupon}
+                        disabled={isApplyingCoupon}
+                        className="px-4 py-3 rounded-lg bg-purple-600 text-white font-semibold hover:bg-purple-700 transition-colors disabled:opacity-50"
+                      >
+                        {isApplyingCoupon ? 'جاري...' : 'تطبيق'}
+                      </button>
+                    )}
+                  </div>
+
+                  {couponError && (
+                    <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm mb-3">
+                      <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      <span>{couponError}</span>
+                    </div>
+                  )}
+
+                  {couponSuccess && appliedCoupon && (
+                    <div className="flex items-start gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">
+                      <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      <div className="space-y-1">
+                        <p>{couponSuccess}</p>
+                        <p className="text-xs text-green-600">
+                          الكود: <span className="font-bold">{appliedCoupon.coupon.code}</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="border-t border-gray-200 pt-4 mb-6">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-gray-600">المجموع الفرعي</span>
-                    <span className="font-semibold">{calculateTotal().toFixed(2)} ريال</span>
+                    <span className="font-semibold">{formatMoney(totalAmount)}</span>
                   </div>
+
+                  {appliedCoupon && (
+                    <>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-gray-600">المبلغ المؤهل للخصم</span>
+                        <span className="font-semibold">{formatMoney(appliedCoupon.eligibleSubtotal)}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-green-700 font-medium">الخصم</span>
+                        <span className="font-bold text-green-700">- {formatMoney(discountAmount)}</span>
+                      </div>
+                    </>
+                  )}
+
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-bold text-gray-900">المجموع الكلي</span>
                     <span className="text-2xl font-bold text-blue-600">
-                      {calculateTotal().toFixed(2)} ريال
+                      {formatMoney(finalAmount)}
                     </span>
                   </div>
                 </div>
