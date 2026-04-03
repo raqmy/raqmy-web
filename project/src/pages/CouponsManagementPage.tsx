@@ -697,7 +697,6 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
         start_date: formData.start_date,
         end_date: formData.end_date || null,
         is_active: formData.is_active,
-        apply_to: formData.apply_to,
         affiliate_marketer_id: formData.affiliate_marketer_id || null,
         affiliate_link_id: formData.affiliate_link_id || null,
       };
