@@ -364,7 +364,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
               <div
                 key={product.id}
                 onClick={() =>
-                  onNavigate(product.slug ? `product-slug-${product.slug}` : `product-${product.id}`)
+                  onNavigate(`product-slug-${product.slug || product.id}`)
                 }
                 className="bg-white rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden group"
               >
