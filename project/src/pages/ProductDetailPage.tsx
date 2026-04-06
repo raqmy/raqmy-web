@@ -199,20 +199,44 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setLoading(true);
 
     try {
-      let query = supabase.from('products').select('*');
+      let data = null;
+      let error = null;
 
       if (productSlug) {
-        query = query.eq('slug', productSlug);
+        const slugResult = await supabase
+          .from('products')
+          .select('*')
+          .eq('slug', productSlug)
+          .maybeSingle();
+
+        data = slugResult.data;
+        error = slugResult.error;
+
+        if (!data) {
+          const idFallbackResult = await supabase
+            .from('products')
+            .select('*')
+            .eq('id', productSlug)
+            .maybeSingle();
+
+          data = idFallbackResult.data;
+          error = idFallbackResult.error;
+        }
       } else if (productId) {
-        query = query.eq('id', productId);
+        const idResult = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', productId)
+          .maybeSingle();
+
+        data = idResult.data;
+        error = idResult.error;
       } else {
         setProduct(null);
         setResolvedProductId(null);
         setLoading(false);
         return;
       }
-
-      const { data, error } = await query.maybeSingle();
 
       if (error) {
         console.error('Error fetching product:', error);
