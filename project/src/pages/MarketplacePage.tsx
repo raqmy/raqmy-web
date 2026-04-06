@@ -7,6 +7,7 @@ interface ProductWithDetails extends Product {
   seller?: UserProfile | null;
   thumbnail_url?: string | null;
   display_name?: string;
+  slug?: string;
 }
 
 interface MarketplacePageProps {
@@ -50,7 +51,6 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
         return;
       }
 
-      // 🔹 جلب الصور الأساسية
       const productIds = data.map((p: any) => p.id);
 
       const { data: imagesData } = await supabase
@@ -60,7 +60,6 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
         .order('is_primary', { ascending: false })
         .order('display_order', { ascending: true });
 
-      // 🔹 خريطة product_id → أفضل صورة
       const imageMap = new Map<string, string>();
       (imagesData || []).forEach((img: any) => {
         if (!imageMap.has(img.product_id) && img.image_url) {
@@ -93,7 +92,6 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
 
           const displayName = product.title ?? product.name ?? 'منتج رقمي';
 
-          // ✅ الحل هنا
           const finalThumbnail =
             product.thumbnail_url && product.thumbnail_url.trim() !== ''
               ? product.thumbnail_url
@@ -134,7 +132,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
               <div
                 key={product.id}
                 className="bg-white rounded-xl overflow-hidden shadow cursor-pointer"
-                onClick={() => onNavigate(`product-${product.id}`)}
+                onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
               >
                 <div className="aspect-video bg-gray-100 flex items-center justify-center">
                   {product.thumbnail_url ? (
