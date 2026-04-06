@@ -1246,9 +1246,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     !hasReachedWithdrawalLimit &&
     !withdrawalSubmitting;
 
-  const openProduct = (productId: string) => {
-    onNavigate(`product-detail-${productId}`);
-  };
+  const openProduct = (product: NormalizedProduct) => {
+  onNavigate(`product-slug-${product.slug || product.id}`);
+};
 
   const openStorefront = (store: Store) => {
     if (store.slug) {
@@ -1530,7 +1530,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
                     <div
                       className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center cursor-pointer"
-                      onClick={() => openProduct(product.id)}
+                      onClick={() => openProduct(product)}
                       role="button"
                       tabIndex={0}
                     >
@@ -1548,7 +1548,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <div className="p-6">
                       <h3
                         className="text-lg font-bold text-gray-900 mb-2 line-clamp-1 cursor-pointer hover:text-blue-600"
-                        onClick={() => openProduct(product.id)}
+                        onClick={() => openProduct(product)}
                       >
                         {product.name || 'بدون اسم'}
                       </h3>
