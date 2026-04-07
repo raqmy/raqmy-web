@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronUp,
   Megaphone,
+  CheckSquare,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -65,6 +66,8 @@ type AffiliateLinkRow = {
   marketer?: { id: string; name?: string | null } | null;
   product?: { id: string; name?: string | null; title?: string | null; slug?: string | null } | null;
   store?: { id: string; name?: string | null; title?: string | null; slug?: string | null } | null;
+  product_ids?: string[];
+  store_ids?: string[];
 };
 
 type AffiliateRuleRow = {
@@ -86,6 +89,8 @@ type AffiliateRuleRow = {
   product?: { id: string; name?: string | null; title?: string | null; slug?: string | null } | null;
   store?: { id: string; name?: string | null; title?: string | null; slug?: string | null } | null;
   tiers?: AffiliateRuleTierRow[];
+  product_ids?: string[];
+  store_ids?: string[];
 };
 
 type AffiliateRuleTierRow = {
@@ -146,12 +151,16 @@ type UnifiedAffiliateForm = {
   link_apply_to: 'product' | 'store' | 'all';
   link_product_id: string;
   link_store_id: string;
+  link_product_ids: string[];
+  link_store_ids: string[];
   link_description: string;
   link_is_active: boolean;
 
   rule_scope_type: 'product' | 'store' | 'all';
   rule_product_id: string;
   rule_store_id: string;
+  rule_product_ids: string[];
+  rule_store_ids: string[];
   rule_commission_type: 'percentage' | 'fixed';
   rule_commission_value: string;
   rule_priority: string;
@@ -229,23 +238,23 @@ const buildRuleName = (marketerName: string, scopeType: string) => {
 const matchRuleForLink = (link: AffiliateLinkRow, rules: AffiliateRuleRow[]) => {
   if (!link.marketer_id) return null;
 
+  const linkProductIds = uniqueIds([...(link.product_ids || []), link.product_id]);
+  const linkStoreIds = uniqueIds([...(link.store_ids || []), link.store_id]);
+
   const candidates = rules.filter((rule) => {
     if (rule.marketer_id !== link.marketer_id) return false;
 
+    const ruleProductIds = uniqueIds([...(rule.product_ids || []), rule.product_id]);
+    const ruleStoreIds = uniqueIds([...(rule.store_ids || []), rule.store_id]);
+
     if (rule.scope_type === 'all' && link.apply_to === 'all') return true;
-    if (
-      rule.scope_type === 'product' &&
-      link.apply_to === 'product' &&
-      rule.product_id === link.product_id
-    ) {
-      return true;
+
+    if (rule.scope_type === 'product' && link.apply_to === 'product') {
+      return ruleProductIds.some((id) => linkProductIds.includes(id));
     }
-    if (
-      rule.scope_type === 'store' &&
-      link.apply_to === 'store' &&
-      rule.store_id === link.store_id
-    ) {
-      return true;
+
+    if (rule.scope_type === 'store' && link.apply_to === 'store') {
+      return ruleStoreIds.some((id) => linkStoreIds.includes(id));
     }
 
     return false;
@@ -291,10 +300,26 @@ const getCampaignObjectName = (campaign: UnifiedCampaignRow) => {
   const scope = getCampaignScopeValue(campaign);
 
   if (scope === 'product') {
+    const names = uniqueIds([
+      ...(campaign.link?.product_ids || []),
+      ...(campaign.rule?.product_ids || []),
+      campaign.link?.product_id,
+      campaign.rule?.product_id,
+    ]);
+
+    if (names.length > 1) return `${names.length} منتجات محددة`;
     return getDisplayName(campaign.link?.product || campaign.rule?.product);
   }
 
   if (scope === 'store') {
+    const names = uniqueIds([
+      ...(campaign.link?.store_ids || []),
+      ...(campaign.rule?.store_ids || []),
+      campaign.link?.store_id,
+      campaign.rule?.store_id,
+    ]);
+
+    if (names.length > 1) return `${names.length} متاجر محددة`;
     return getDisplayName(campaign.link?.store || campaign.rule?.store);
   }
 
@@ -375,6 +400,7 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       return;
     }
 
+    const linkIds = uniqueIds(linksRows.map((item) => item.id));
     const marketerIds = uniqueIds(linksRows.map((item) => item.marketer_id));
     const productIds = uniqueIds(linksRows.map((item) => item.product_id));
     const storeIds = uniqueIds(linksRows.map((item) => item.store_id));
@@ -382,6 +408,8 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     let marketerMap = new Map<string, AffiliateMarketerRow>();
     let productMap = new Map<string, ProductOption>();
     let storeMap = new Map<string, StoreOption>();
+    let linkProductIdsMap = new Map<string, string[]>();
+    let linkStoreIdsMap = new Map<string, string[]>();
 
     if (marketerIds.length > 0) {
       const { data: marketersData, error: marketersError } = await supabase
@@ -396,11 +424,53 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       }
     }
 
-    if (productIds.length > 0) {
+    if (linkIds.length > 0) {
+      const [
+        { data: linkProductsData, error: linkProductsError },
+        { data: linkStoresData, error: linkStoresError },
+      ] = await Promise.all([
+        supabase
+          .from('affiliate_link_products')
+          .select('affiliate_link_id, product_id')
+          .in('affiliate_link_id', linkIds),
+        supabase
+          .from('affiliate_link_stores')
+          .select('affiliate_link_id, store_id')
+          .in('affiliate_link_id', linkIds),
+      ]);
+
+      if (linkProductsError) {
+        console.error('Error fetching affiliate link products:', linkProductsError);
+      } else {
+        (linkProductsData || []).forEach((row: any) => {
+          const current = linkProductIdsMap.get(row.affiliate_link_id) || [];
+          current.push(row.product_id);
+          linkProductIdsMap.set(row.affiliate_link_id, current);
+        });
+      }
+
+      if (linkStoresError) {
+        console.error('Error fetching affiliate link stores:', linkStoresError);
+      } else {
+        (linkStoresData || []).forEach((row: any) => {
+          const current = linkStoreIdsMap.get(row.affiliate_link_id) || [];
+          current.push(row.store_id);
+          linkStoreIdsMap.set(row.affiliate_link_id, current);
+        });
+      }
+
+      linkProductIdsMap.forEach((ids) => ids.forEach((id) => productIds.push(id)));
+      linkStoreIdsMap.forEach((ids) => ids.forEach((id) => storeIds.push(id)));
+    }
+
+    const uniqueProductIds = uniqueIds(productIds);
+    const uniqueStoreIds = uniqueIds(storeIds);
+
+    if (uniqueProductIds.length > 0) {
       const { data: productsData, error: productsError } = await supabase
         .from('products')
-        .select('id, title, slug')
-        .in('id', productIds);
+        .select('id, title, name, slug')
+        .in('id', uniqueProductIds);
 
       if (productsError) {
         console.error('Error fetching link products:', productsError);
@@ -409,11 +479,11 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       }
     }
 
-    if (storeIds.length > 0) {
+    if (uniqueStoreIds.length > 0) {
       const { data: storesData, error: storesError } = await supabase
         .from('stores')
-        .select('id, title, slug')
-        .in('id', storeIds);
+        .select('id, title, name, slug')
+        .in('id', uniqueStoreIds);
 
       if (storesError) {
         console.error('Error fetching link stores:', storesError);
@@ -422,12 +492,25 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       }
     }
 
-    const normalizedLinks = linksRows.map((item) => ({
-      ...item,
-      marketer: item.marketer_id ? marketerMap.get(item.marketer_id) || null : null,
-      product: item.product_id ? productMap.get(item.product_id) || null : null,
-      store: item.store_id ? storeMap.get(item.store_id) || null : null,
-    })) as AffiliateLinkRow[];
+    const normalizedLinks = linksRows.map((item) => {
+      const mappedProductIds = uniqueIds([
+        ...(linkProductIdsMap.get(item.id) || []),
+        item.product_id,
+      ]);
+      const mappedStoreIds = uniqueIds([
+        ...(linkStoreIdsMap.get(item.id) || []),
+        item.store_id,
+      ]);
+
+      return {
+        ...item,
+        marketer: item.marketer_id ? marketerMap.get(item.marketer_id) || null : null,
+        product: item.product_id ? productMap.get(item.product_id) || null : null,
+        store: item.store_id ? storeMap.get(item.store_id) || null : null,
+        product_ids: mappedProductIds,
+        store_ids: mappedStoreIds,
+      };
+    }) as AffiliateLinkRow[];
 
     setLinks(normalizedLinks);
   };
@@ -463,13 +546,29 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     let marketerMap = new Map<string, AffiliateMarketerRow>();
     let productMap = new Map<string, ProductOption>();
     let storeMap = new Map<string, StoreOption>();
+    let ruleProductIdsMap = new Map<string, string[]>();
+    let ruleStoreIdsMap = new Map<string, string[]>();
 
     if (ruleIds.length > 0) {
-      const { data: tiersData, error: tiersError } = await supabase
-        .from('affiliate_rule_tiers')
-        .select('*')
-        .in('rule_id', ruleIds)
-        .order('day_from', { ascending: true });
+      const [
+        { data: tiersData, error: tiersError },
+        { data: ruleProductsData, error: ruleProductsError },
+        { data: ruleStoresData, error: ruleStoresError },
+      ] = await Promise.all([
+        supabase
+          .from('affiliate_rule_tiers')
+          .select('*')
+          .in('rule_id', ruleIds)
+          .order('day_from', { ascending: true }),
+        supabase
+          .from('affiliate_rule_products')
+          .select('affiliate_rule_id, product_id')
+          .in('affiliate_rule_id', ruleIds),
+        supabase
+          .from('affiliate_rule_stores')
+          .select('affiliate_rule_id, store_id')
+          .in('affiliate_rule_id', ruleIds),
+      ]);
 
       if (tiersError) {
         console.error('Error fetching rule tiers:', tiersError);
@@ -480,6 +579,29 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
           tiersMap.set(tier.rule_id, current);
         });
       }
+
+      if (ruleProductsError) {
+        console.error('Error fetching affiliate rule products:', ruleProductsError);
+      } else {
+        (ruleProductsData || []).forEach((row: any) => {
+          const current = ruleProductIdsMap.get(row.affiliate_rule_id) || [];
+          current.push(row.product_id);
+          ruleProductIdsMap.set(row.affiliate_rule_id, current);
+        });
+      }
+
+      if (ruleStoresError) {
+        console.error('Error fetching affiliate rule stores:', ruleStoresError);
+      } else {
+        (ruleStoresData || []).forEach((row: any) => {
+          const current = ruleStoreIdsMap.get(row.affiliate_rule_id) || [];
+          current.push(row.store_id);
+          ruleStoreIdsMap.set(row.affiliate_rule_id, current);
+        });
+      }
+
+      ruleProductIdsMap.forEach((ids) => ids.forEach((id) => productIds.push(id)));
+      ruleStoreIdsMap.forEach((ids) => ids.forEach((id) => storeIds.push(id)));
     }
 
     if (marketerIds.length > 0) {
@@ -495,11 +617,14 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       }
     }
 
-    if (productIds.length > 0) {
+    const uniqueProductIds = uniqueIds(productIds);
+    const uniqueStoreIds = uniqueIds(storeIds);
+
+    if (uniqueProductIds.length > 0) {
       const { data: productsData, error: productsError } = await supabase
         .from('products')
-        .select('id, title, slug')
-        .in('id', productIds);
+        .select('id, title, name, slug')
+        .in('id', uniqueProductIds);
 
       if (productsError) {
         console.error('Error fetching rule products:', productsError);
@@ -508,11 +633,11 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       }
     }
 
-    if (storeIds.length > 0) {
+    if (uniqueStoreIds.length > 0) {
       const { data: storesData, error: storesError } = await supabase
         .from('stores')
-        .select('id, title, slug')
-        .in('id', storeIds);
+        .select('id, title, name, slug')
+        .in('id', uniqueStoreIds);
 
       if (storesError) {
         console.error('Error fetching rule stores:', storesError);
@@ -521,13 +646,26 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       }
     }
 
-    const normalizedRules = rulesRows.map((item) => ({
-      ...item,
-      marketer: item.marketer_id ? marketerMap.get(item.marketer_id) || null : null,
-      product: item.product_id ? productMap.get(item.product_id) || null : null,
-      store: item.store_id ? storeMap.get(item.store_id) || null : null,
-      tiers: tiersMap.get(item.id) || [],
-    })) as AffiliateRuleRow[];
+    const normalizedRules = rulesRows.map((item) => {
+      const mappedProductIds = uniqueIds([
+        ...(ruleProductIdsMap.get(item.id) || []),
+        item.product_id,
+      ]);
+      const mappedStoreIds = uniqueIds([
+        ...(ruleStoreIdsMap.get(item.id) || []),
+        item.store_id,
+      ]);
+
+      return {
+        ...item,
+        marketer: item.marketer_id ? marketerMap.get(item.marketer_id) || null : null,
+        product: item.product_id ? productMap.get(item.product_id) || null : null,
+        store: item.store_id ? storeMap.get(item.store_id) || null : null,
+        tiers: tiersMap.get(item.id) || [],
+        product_ids: mappedProductIds,
+        store_ids: mappedStoreIds,
+      };
+    }) as AffiliateRuleRow[];
 
     setRules(normalizedRules);
   };
@@ -546,6 +684,20 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
 
         if (deleteTiersError) throw deleteTiersError;
 
+        const { error: deleteRuleProductsError } = await supabase
+          .from('affiliate_rule_products')
+          .delete()
+          .eq('affiliate_rule_id', campaign.rule.id);
+
+        if (deleteRuleProductsError) throw deleteRuleProductsError;
+
+        const { error: deleteRuleStoresError } = await supabase
+          .from('affiliate_rule_stores')
+          .delete()
+          .eq('affiliate_rule_id', campaign.rule.id);
+
+        if (deleteRuleStoresError) throw deleteRuleStoresError;
+
         const { error: deleteRuleError } = await supabase
           .from('affiliate_rules')
           .delete()
@@ -556,6 +708,20 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       }
 
       if (campaign.link?.id) {
+        const { error: deleteLinkProductsError } = await supabase
+          .from('affiliate_link_products')
+          .delete()
+          .eq('affiliate_link_id', campaign.link.id);
+
+        if (deleteLinkProductsError) throw deleteLinkProductsError;
+
+        const { error: deleteLinkStoresError } = await supabase
+          .from('affiliate_link_stores')
+          .delete()
+          .eq('affiliate_link_id', campaign.link.id);
+
+        if (deleteLinkStoresError) throw deleteLinkStoresError;
+
         const { error: deleteLinkError } = await supabase
           .from('affiliate_links')
           .delete()
@@ -1066,30 +1232,30 @@ const UnifiedCampaignsList: React.FC<{
                       )}
 
                       {campaign.link?.report_token && (
-  <>
-    <button
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(
-            `${window.location.origin}/affiliate-report/${campaign.link?.report_token}`
-          );
-          alert('تم نسخ رابط إحصائيات المسوق');
-        } catch (error) {
-          console.error('Error copying marketer stats link:', error);
-          alert('حدث خطأ أثناء نسخ رابط إحصائيات المسوق');
-        }
-      }}
-      className="w-full px-4 py-3 rounded-2xl border border-violet-200 text-violet-700 font-medium hover:bg-violet-50"
-    >
-      نسخ رابط إحصائيات المسوق
-    </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(
+                                  `${window.location.origin}/affiliate-report/${campaign.link?.report_token}`
+                                );
+                                alert('تم نسخ رابط إحصائيات المسوق');
+                              } catch (error) {
+                                console.error('Error copying marketer stats link:', error);
+                                alert('حدث خطأ أثناء نسخ رابط إحصائيات المسوق');
+                              }
+                            }}
+                            className="w-full px-4 py-3 rounded-2xl border border-violet-200 text-violet-700 font-medium hover:bg-violet-50"
+                          >
+                            نسخ رابط إحصائيات المسوق
+                          </button>
 
-    <p className="text-[11px] leading-5 text-gray-500 text-center px-2">
-      هذا الرابط تعطيه للمسوق ليشاهد إحصائياته لهذا العرض فقط بدون تسجيل دخول.
-    </p>
-  </>
-)}
+                          <p className="text-[11px] leading-5 text-gray-500 text-center px-2">
+                            هذا الرابط تعطيه للمسوق ليشاهد إحصائياته لهذا العرض فقط بدون تسجيل دخول.
+                          </p>
+                        </>
+                      )}
 
                       {campaign.marketer?.id && (
                         <button
@@ -1365,12 +1531,16 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
     link_apply_to: (campaign?.link?.apply_to as 'product' | 'store' | 'all') || 'all',
     link_product_id: campaign?.link?.product_id || '',
     link_store_id: campaign?.link?.store_id || '',
+    link_product_ids: uniqueIds([...(campaign?.link?.product_ids || []), campaign?.link?.product_id]),
+    link_store_ids: uniqueIds([...(campaign?.link?.store_ids || []), campaign?.link?.store_id]),
     link_description: campaign?.link?.description || '',
     link_is_active: campaign?.link?.is_active ?? true,
 
     rule_scope_type: (campaign?.rule?.scope_type as 'product' | 'store' | 'all') || 'all',
     rule_product_id: campaign?.rule?.product_id || '',
     rule_store_id: campaign?.rule?.store_id || '',
+    rule_product_ids: uniqueIds([...(campaign?.rule?.product_ids || []), campaign?.rule?.product_id]),
+    rule_store_ids: uniqueIds([...(campaign?.rule?.store_ids || []), campaign?.rule?.store_id]),
     rule_commission_type: (campaign?.rule?.commission_type as 'percentage' | 'fixed') || 'percentage',
     rule_commission_value:
       campaign?.rule?.commission_value !== null && campaign?.rule?.commission_value !== undefined
@@ -1390,27 +1560,152 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
     fetchOptions();
   }, [user?.id]);
 
+  useEffect(() => {
+    if (campaign?.link?.id || campaign?.rule?.id) {
+      fetchExistingMappings();
+    }
+  }, [campaign?.link?.id, campaign?.rule?.id]);
+
+  const fetchByOwnerFallback = async <T extends Record<string, any>>(
+    table: string,
+    selectClause: string,
+    ownerColumns: string[]
+  ): Promise<T[]> => {
+    if (!user?.id) return [];
+
+    for (const column of ownerColumns) {
+      try {
+        const { data, error } = await supabase
+          .from(table)
+          .select(selectClause)
+          .eq(column, user.id)
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          return data as T[];
+        }
+      } catch (err) {
+        console.error(`Error fetching ${table} with ${column}:`, err);
+      }
+    }
+
+    for (const column of ownerColumns) {
+      try {
+        const { data, error } = await supabase
+          .from(table)
+          .select(selectClause)
+          .eq(column, user.id);
+
+        if (!error && data && data.length > 0) {
+          return data as T[];
+        }
+      } catch (err) {
+        console.error(`Fallback error fetching ${table} with ${column}:`, err);
+      }
+    }
+
+    return [];
+  };
+
   const fetchOptions = async () => {
     if (!user?.id) return;
 
     try {
-      const [{ data: productsData }, { data: storesData }] = await Promise.all([
-        supabase
-          .from('products')
-          .select('id, name, title, slug')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('stores')
-          .select('id, name, title, slug')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false }),
+      const [productsData, storesData] = await Promise.all([
+        fetchByOwnerFallback<ProductOption>('products', 'id, name, title, slug', [
+          'user_id',
+          'seller_id',
+          'merchant_id',
+          'owner_id',
+        ]),
+        fetchByOwnerFallback<StoreOption>('stores', 'id, name, title, slug', [
+          'user_id',
+          'seller_id',
+          'merchant_id',
+          'owner_id',
+        ]),
       ]);
 
-      setProducts((productsData || []) as ProductOption[]);
-      setStores((storesData || []) as StoreOption[]);
+      setProducts(productsData || []);
+      setStores(storesData || []);
     } catch (fetchError) {
       console.error('Error fetching seller affiliate options:', fetchError);
+    }
+  };
+
+  const fetchExistingMappings = async () => {
+    try {
+      if (campaign?.link?.id) {
+        const [
+          { data: linkProductsData, error: linkProductsError },
+          { data: linkStoresData, error: linkStoresError },
+        ] = await Promise.all([
+          supabase
+            .from('affiliate_link_products')
+            .select('product_id')
+            .eq('affiliate_link_id', campaign.link.id),
+          supabase
+            .from('affiliate_link_stores')
+            .select('store_id')
+            .eq('affiliate_link_id', campaign.link.id),
+        ]);
+
+        if (!linkProductsError || !linkStoresError) {
+          const linkProductIds = uniqueIds([
+            ...((linkProductsData || []).map((row: any) => row.product_id)),
+            campaign.link.product_id,
+          ]);
+          const linkStoreIds = uniqueIds([
+            ...((linkStoresData || []).map((row: any) => row.store_id)),
+            campaign.link.store_id,
+          ]);
+
+          setFormData((prev) => ({
+            ...prev,
+            link_product_ids: linkProductIds,
+            link_store_ids: linkStoreIds,
+            link_product_id: linkProductIds[0] || '',
+            link_store_id: linkStoreIds[0] || '',
+          }));
+        }
+      }
+
+      if (campaign?.rule?.id) {
+        const [
+          { data: ruleProductsData, error: ruleProductsError },
+          { data: ruleStoresData, error: ruleStoresError },
+        ] = await Promise.all([
+          supabase
+            .from('affiliate_rule_products')
+            .select('product_id')
+            .eq('affiliate_rule_id', campaign.rule.id),
+          supabase
+            .from('affiliate_rule_stores')
+            .select('store_id')
+            .eq('affiliate_rule_id', campaign.rule.id),
+        ]);
+
+        if (!ruleProductsError || !ruleStoresError) {
+          const ruleProductIds = uniqueIds([
+            ...((ruleProductsData || []).map((row: any) => row.product_id)),
+            campaign.rule.product_id,
+          ]);
+          const ruleStoreIds = uniqueIds([
+            ...((ruleStoresData || []).map((row: any) => row.store_id)),
+            campaign.rule.store_id,
+          ]);
+
+          setFormData((prev) => ({
+            ...prev,
+            rule_product_ids: ruleProductIds,
+            rule_store_ids: ruleStoreIds,
+            rule_product_id: ruleProductIds[0] || '',
+            rule_store_id: ruleStoreIds[0] || '',
+          }));
+        }
+      }
+    } catch (fetchError) {
+      console.error('Error fetching existing affiliate mappings:', fetchError);
     }
   };
 
@@ -1436,6 +1731,12 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
 
   const removeTier = (localId: string) => {
     setTiers((prev) => prev.filter((tier) => tier.localId !== localId));
+  };
+
+  const toggleSelectedId = (currentIds: string[], value: string) => {
+    return currentIds.includes(value)
+      ? currentIds.filter((id) => id !== value)
+      : [...currentIds, value];
   };
 
   const validateTiers = () => {
@@ -1499,18 +1800,109 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
     return data.id as string;
   };
 
+  const syncLinkMappings = async (linkId: string) => {
+    const selectedProductIds =
+      formData.link_apply_to === 'product' ? uniqueIds(formData.link_product_ids) : [];
+    const selectedStoreIds =
+      formData.link_apply_to === 'store' ? uniqueIds(formData.link_store_ids) : [];
+
+    const { error: deleteProductsError } = await supabase
+      .from('affiliate_link_products')
+      .delete()
+      .eq('affiliate_link_id', linkId);
+
+    if (deleteProductsError) throw deleteProductsError;
+
+    const { error: deleteStoresError } = await supabase
+      .from('affiliate_link_stores')
+      .delete()
+      .eq('affiliate_link_id', linkId);
+
+    if (deleteStoresError) throw deleteStoresError;
+
+    if (selectedProductIds.length > 0) {
+      const { error } = await supabase.from('affiliate_link_products').insert(
+        selectedProductIds.map((productId) => ({
+          affiliate_link_id: linkId,
+          product_id: productId,
+        }))
+      );
+
+      if (error) throw error;
+    }
+
+    if (selectedStoreIds.length > 0) {
+      const { error } = await supabase.from('affiliate_link_stores').insert(
+        selectedStoreIds.map((storeId) => ({
+          affiliate_link_id: linkId,
+          store_id: storeId,
+        }))
+      );
+
+      if (error) throw error;
+    }
+  };
+
+  const syncRuleMappings = async (ruleId: string) => {
+    const selectedProductIds =
+      formData.rule_scope_type === 'product' ? uniqueIds(formData.rule_product_ids) : [];
+    const selectedStoreIds =
+      formData.rule_scope_type === 'store' ? uniqueIds(formData.rule_store_ids) : [];
+
+    const { error: deleteProductsError } = await supabase
+      .from('affiliate_rule_products')
+      .delete()
+      .eq('affiliate_rule_id', ruleId);
+
+    if (deleteProductsError) throw deleteProductsError;
+
+    const { error: deleteStoresError } = await supabase
+      .from('affiliate_rule_stores')
+      .delete()
+      .eq('affiliate_rule_id', ruleId);
+
+    if (deleteStoresError) throw deleteStoresError;
+
+    if (selectedProductIds.length > 0) {
+      const { error } = await supabase.from('affiliate_rule_products').insert(
+        selectedProductIds.map((productId) => ({
+          affiliate_rule_id: ruleId,
+          product_id: productId,
+        }))
+      );
+
+      if (error) throw error;
+    }
+
+    if (selectedStoreIds.length > 0) {
+      const { error } = await supabase.from('affiliate_rule_stores').insert(
+        selectedStoreIds.map((storeId) => ({
+          affiliate_rule_id: ruleId,
+          store_id: storeId,
+        }))
+      );
+
+      if (error) throw error;
+    }
+  };
+
   const createOrUpdateLink = async (marketerId: string) => {
     if (!user?.id) throw new Error('المستخدم غير موجود');
 
     const normalizedCode = formData.link_code.trim().toUpperCase();
     if (!normalizedCode) throw new Error('كود الرابط مطلوب');
 
-    if (formData.link_apply_to === 'product' && !formData.link_product_id) {
-      throw new Error('اختر المنتج للرابط');
+    const selectedLinkProductIds =
+      formData.link_apply_to === 'product' ? uniqueIds(formData.link_product_ids) : [];
+    const selectedLinkStoreIds =
+      formData.link_apply_to === 'store' ? uniqueIds(formData.link_store_ids) : [];
+
+    if (formData.link_apply_to === 'product' && selectedLinkProductIds.length === 0) {
+      throw new Error('اختر منتجًا واحدًا على الأقل للرابط');
     }
 
-    if (formData.link_apply_to === 'store' && !formData.link_store_id) {
-      throw new Error('اختر المتجر للرابط');
+    if (formData.link_apply_to === 'store' && selectedLinkStoreIds.length === 0) {
+      throw new Error('اختر متجرًا واحدًا على الأقل للرابط');
     }
 
     const { data: existingCodeRow, error: existingCodeError } = await supabase
@@ -1531,11 +1923,13 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
       marketer_id: marketerId || null,
       code: normalizedCode,
       apply_to: formData.link_apply_to,
-      product_id: formData.link_apply_to === 'product' ? formData.link_product_id : null,
-      store_id: formData.link_apply_to === 'store' ? formData.link_store_id : null,
+      product_id: formData.link_apply_to === 'product' ? selectedLinkProductIds[0] || null : null,
+      store_id: formData.link_apply_to === 'store' ? selectedLinkStoreIds[0] || null : null,
       description: formData.link_description.trim() || null,
       is_active: formData.link_is_active,
     };
+
+    let linkId = campaign?.link?.id || '';
 
     if (campaign?.link?.id) {
       const { error } = await supabase
@@ -1545,33 +1939,42 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
         .eq('seller_id', user.id);
 
       if (error) throw error;
-      return campaign.link.id;
+      linkId = campaign.link.id;
+    } else {
+      const { data, error } = await supabase
+        .from('affiliate_links')
+        .insert({
+          ...payload,
+          clicks: 0,
+          sales: 0,
+          earnings: 0,
+        })
+        .select('id')
+        .single();
+
+      if (error) throw error;
+      linkId = data.id as string;
     }
 
-    const { data, error } = await supabase
-      .from('affiliate_links')
-      .insert({
-        ...payload,
-        clicks: 0,
-        sales: 0,
-        earnings: 0,
-      })
-      .select('id')
-      .single();
+    await syncLinkMappings(linkId);
 
-    if (error) throw error;
-    return data.id as string;
+    return linkId;
   };
 
   const createOrUpdateRule = async (marketerId: string) => {
     if (!user?.id) throw new Error('المستخدم غير موجود');
 
-    if (formData.rule_scope_type === 'product' && !formData.rule_product_id) {
-      throw new Error('اختر المنتج للقاعدة');
+    const selectedRuleProductIds =
+      formData.rule_scope_type === 'product' ? uniqueIds(formData.rule_product_ids) : [];
+    const selectedRuleStoreIds =
+      formData.rule_scope_type === 'store' ? uniqueIds(formData.rule_store_ids) : [];
+
+    if (formData.rule_scope_type === 'product' && selectedRuleProductIds.length === 0) {
+      throw new Error('اختر منتجًا واحدًا على الأقل للقاعدة');
     }
 
-    if (formData.rule_scope_type === 'store' && !formData.rule_store_id) {
-      throw new Error('اختر المتجر للقاعدة');
+    if (formData.rule_scope_type === 'store' && selectedRuleStoreIds.length === 0) {
+      throw new Error('اختر متجرًا واحدًا على الأقل للقاعدة');
     }
 
     if (formData.rule_commission_value.trim() === '') {
@@ -1590,8 +1993,10 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
       marketer_id: marketerId,
       rule_name: buildRuleName(marketerName, formData.rule_scope_type),
       scope_type: formData.rule_scope_type,
-      product_id: formData.rule_scope_type === 'product' ? formData.rule_product_id : null,
-      store_id: formData.rule_scope_type === 'store' ? formData.rule_store_id : null,
+      product_id:
+        formData.rule_scope_type === 'product' ? selectedRuleProductIds[0] || null : null,
+      store_id:
+        formData.rule_scope_type === 'store' ? selectedRuleStoreIds[0] || null : null,
       commission_type: formData.rule_commission_type,
       commission_value: Number(formData.rule_commission_value),
       priority: Number(formData.rule_priority || 100),
@@ -1623,6 +2028,8 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
       if (error) throw error;
       ruleId = data.id;
     }
+
+    await syncRuleMappings(ruleId);
 
     const existingTierIds = new Set((campaign?.rule?.tiers || []).map((tier) => tier.id));
     const currentTierIds = new Set(
@@ -1687,6 +2094,14 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
       setLoading(false);
     }
   };
+
+  const selectedLinkProductNames = products
+    .filter((product) => formData.link_product_ids.includes(product.id))
+    .map((product) => getDisplayName(product));
+
+  const selectedLinkStoreNames = stores
+    .filter((store) => formData.link_store_ids.includes(store.id))
+    .map((store) => getDisplayName(store));
 
   return (
     <ModalShell
@@ -1854,76 +2269,76 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
               <select
                 value={formData.link_apply_to}
                 onChange={(e) =>
-                  setFormData({
-                    ...formData,
+                  setFormData((prev) => ({
+                    ...prev,
                     link_apply_to: e.target.value as 'product' | 'store' | 'all',
-                    link_product_id: e.target.value === 'product' ? formData.link_product_id : '',
-                    link_store_id: e.target.value === 'store' ? formData.link_store_id : '',
                     rule_scope_type: e.target.value as 'product' | 'store' | 'all',
-                    rule_product_id: e.target.value === 'product' ? formData.rule_product_id : '',
-                    rule_store_id: e.target.value === 'store' ? formData.rule_store_id : '',
-                  })
+                    link_product_id: '',
+                    link_store_id: '',
+                    link_product_ids: [],
+                    link_store_ids: [],
+                    rule_product_id: '',
+                    rule_store_id: '',
+                    rule_product_ids: [],
+                    rule_store_ids: [],
+                  }))
                 }
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
               >
-                <option value="product">منتج محدد</option>
-                <option value="store">متجر محدد</option>
+                <option value="product">منتجات محددة</option>
+                <option value="store">متاجر محددة</option>
                 <option value="all">جميع منتجاتي</option>
               </select>
             </div>
 
             {formData.link_apply_to === 'product' && (
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  اختر المنتج <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={formData.link_product_id}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      link_product_id: e.target.value,
-                      rule_product_id: e.target.value,
+                <MultiSelectCard
+                  title="اختر المنتجات"
+                  subtitle="يمكنك اختيار أكثر من منتج لهذا العرض"
+                  icon={<Package className="w-5 h-5" />}
+                  options={products}
+                  selectedIds={formData.link_product_ids}
+                  emptyText="لا توجد منتجات متاحة لعرضها"
+                  onToggle={(productId) =>
+                    setFormData((prev) => {
+                      const ids = toggleSelectedId(prev.link_product_ids, productId);
+                      return {
+                        ...prev,
+                        link_product_ids: ids,
+                        link_product_id: ids[0] || '',
+                        rule_product_ids: ids,
+                        rule_product_id: ids[0] || '',
+                      };
                     })
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  required
-                >
-                  <option value="">-- اختر منتج --</option>
-                  {products.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {getDisplayName(product)}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
             )}
 
             {formData.link_apply_to === 'store' && (
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  اختر المتجر <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={formData.link_store_id}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      link_store_id: e.target.value,
-                      rule_store_id: e.target.value,
+                <MultiSelectCard
+                  title="اختر المتاجر"
+                  subtitle="يمكنك اختيار أكثر من متجر لهذا العرض"
+                  icon={<StoreIcon className="w-5 h-5" />}
+                  options={stores}
+                  selectedIds={formData.link_store_ids}
+                  emptyText="لا توجد متاجر متاحة لعرضها"
+                  onToggle={(storeId) =>
+                    setFormData((prev) => {
+                      const ids = toggleSelectedId(prev.link_store_ids, storeId);
+                      return {
+                        ...prev,
+                        link_store_ids: ids,
+                        link_store_id: ids[0] || '',
+                        rule_store_ids: ids,
+                        rule_store_id: ids[0] || '',
+                      };
                     })
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  required
-                >
-                  <option value="">-- اختر متجر --</option>
-                  {stores.map((store) => (
-                    <option key={store.id} value={store.id}>
-                      {getDisplayName(store)}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
             )}
 
@@ -2208,7 +2623,13 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
                 <div className="rounded-2xl bg-white border border-gray-200 p-4">
                   <div className="font-semibold text-gray-900 mb-1">الرابط</div>
                   <div className="font-mono">{formData.link_code || '—'}</div>
-                  <div className="text-gray-500">{getApplyToLabel(formData.link_apply_to)}</div>
+                  <div className="text-gray-500">
+                    {getApplyToLabel(formData.link_apply_to)}
+                    {formData.link_apply_to === 'product' &&
+                      ` • ${formData.link_product_ids.length} منتج`}
+                    {formData.link_apply_to === 'store' &&
+                      ` • ${formData.link_store_ids.length} متجر`}
+                  </div>
                 </div>
 
                 <div className="rounded-2xl bg-white border border-gray-200 p-4">
@@ -2232,6 +2653,28 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
                   <div className="text-gray-500">أولوية {formData.rule_priority || '100'}</div>
                 </div>
               </div>
+
+              {formData.link_apply_to === 'product' && selectedLinkProductNames.length > 0 && (
+                <div className="mt-4 rounded-2xl bg-white border border-gray-200 p-4">
+                  <div className="font-semibold text-gray-900 mb-2">المنتجات المحددة</div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedLinkProductNames.map((name) => (
+                      <TagChip key={name} text={name} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {formData.link_apply_to === 'store' && selectedLinkStoreNames.length > 0 && (
+                <div className="mt-4 rounded-2xl bg-white border border-gray-200 p-4">
+                  <div className="font-semibold text-gray-900 mb-2">المتاجر المحددة</div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedLinkStoreNames.map((name) => (
+                      <TagChip key={name} text={name} />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2262,6 +2705,72 @@ const SelectableOptionCard: React.FC<{
     <div className="font-semibold text-gray-900 mb-1">{title}</div>
     <div className="text-sm text-gray-600 leading-7">{description}</div>
   </button>
+);
+
+const MultiSelectCard: React.FC<{
+  title: string;
+  subtitle?: string;
+  icon: React.ReactNode;
+  options: Array<ProductOption | StoreOption>;
+  selectedIds: string[];
+  emptyText: string;
+  onToggle: (id: string) => void;
+}> = ({ title, subtitle, icon, options, selectedIds, emptyText, onToggle }) => (
+  <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+    <div className="flex items-start gap-3 mb-4">
+      <div className="w-10 h-10 rounded-2xl bg-white border border-gray-200 text-blue-600 flex items-center justify-center shrink-0">
+        {icon}
+      </div>
+      <div>
+        <div className="font-semibold text-gray-900">{title}</div>
+        {subtitle && <div className="text-sm text-gray-500 mt-1">{subtitle}</div>}
+      </div>
+    </div>
+
+    {options.length === 0 ? (
+      <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-6 text-center text-gray-500">
+        {emptyText}
+      </div>
+    ) : (
+      <>
+        <div className="flex items-center gap-2 text-sm text-gray-500 mb-3">
+          <CheckSquare className="w-4 h-4" />
+          <span>المحدد حاليًا: {selectedIds.length}</span>
+        </div>
+
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {options.map((option) => {
+            const checked = selectedIds.includes(option.id);
+
+            return (
+              <label
+                key={option.id}
+                className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 cursor-pointer transition-colors ${
+                  checked
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 bg-white hover:border-blue-200'
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className="font-medium text-gray-900 truncate">{getDisplayName(option)}</div>
+                  <div className="text-xs text-gray-500 mt-1" dir="ltr">
+                    {option.slug ? `/${option.slug}` : option.id}
+                  </div>
+                </div>
+
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onToggle(option.id)}
+                  className="w-5 h-5 text-blue-600 rounded"
+                />
+              </label>
+            );
+          })}
+        </div>
+      </>
+    )}
+  </div>
 );
 
 const SectionCard: React.FC<{
