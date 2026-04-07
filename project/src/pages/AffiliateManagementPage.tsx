@@ -19,7 +19,8 @@ import {
   ChevronDown,
   ChevronUp,
   Megaphone,
-  CheckSquare,
+  Check,
+  X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -300,26 +301,24 @@ const getCampaignObjectName = (campaign: UnifiedCampaignRow) => {
   const scope = getCampaignScopeValue(campaign);
 
   if (scope === 'product') {
-    const names = uniqueIds([
+    const ids = uniqueIds([
       ...(campaign.link?.product_ids || []),
       ...(campaign.rule?.product_ids || []),
       campaign.link?.product_id,
       campaign.rule?.product_id,
     ]);
-
-    if (names.length > 1) return `${names.length} منتجات محددة`;
+    if (ids.length > 1) return `${ids.length} منتجات محددة`;
     return getDisplayName(campaign.link?.product || campaign.rule?.product);
   }
 
   if (scope === 'store') {
-    const names = uniqueIds([
+    const ids = uniqueIds([
       ...(campaign.link?.store_ids || []),
       ...(campaign.rule?.store_ids || []),
       campaign.link?.store_id,
       campaign.rule?.store_id,
     ]);
-
-    if (names.length > 1) return `${names.length} متاجر محددة`;
+    if (ids.length > 1) return `${ids.length} متاجر محددة`;
     return getDisplayName(campaign.link?.store || campaign.rule?.store);
   }
 
@@ -408,8 +407,8 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     let marketerMap = new Map<string, AffiliateMarketerRow>();
     let productMap = new Map<string, ProductOption>();
     let storeMap = new Map<string, StoreOption>();
-    let linkProductIdsMap = new Map<string, string[]>();
-    let linkStoreIdsMap = new Map<string, string[]>();
+    const linkProductIdsMap = new Map<string, string[]>();
+    const linkStoreIdsMap = new Map<string, string[]>();
 
     if (marketerIds.length > 0) {
       const { data: marketersData, error: marketersError } = await supabase
@@ -546,8 +545,8 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     let marketerMap = new Map<string, AffiliateMarketerRow>();
     let productMap = new Map<string, ProductOption>();
     let storeMap = new Map<string, StoreOption>();
-    let ruleProductIdsMap = new Map<string, string[]>();
-    let ruleStoreIdsMap = new Map<string, string[]>();
+    const ruleProductIdsMap = new Map<string, string[]>();
+    const ruleStoreIdsMap = new Map<string, string[]>();
 
     if (ruleIds.length > 0) {
       const [
@@ -1502,6 +1501,10 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
   const [error, setError] = useState('');
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [stores, setStores] = useState<StoreOption[]>([]);
+  const [showProductPicker, setShowProductPicker] = useState(false);
+  const [showStorePicker, setShowStorePicker] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
+  const [storeSearch, setStoreSearch] = useState('');
 
   const initialTiers: TierDraft[] =
     campaign?.rule?.tiers?.map((tier) => ({
@@ -2095,13 +2098,20 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
     }
   };
 
-  const selectedLinkProductNames = products
-    .filter((product) => formData.link_product_ids.includes(product.id))
-    .map((product) => getDisplayName(product));
+  const selectedLinkProducts = products.filter((product) =>
+    formData.link_product_ids.includes(product.id)
+  );
+  const selectedLinkStores = stores.filter((store) =>
+    formData.link_store_ids.includes(store.id)
+  );
 
-  const selectedLinkStoreNames = stores
-    .filter((store) => formData.link_store_ids.includes(store.id))
-    .map((store) => getDisplayName(store));
+  const filteredProducts = products.filter((product) =>
+    getDisplayName(product).toLowerCase().includes(productSearch.trim().toLowerCase())
+  );
+
+  const filteredStores = stores.filter((store) =>
+    getDisplayName(store).toLowerCase().includes(storeSearch.trim().toLowerCase())
+  );
 
   return (
     <ModalShell
@@ -2294,16 +2304,20 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
 
             {formData.link_apply_to === 'product' && (
               <div className="md:col-span-2">
-                <MultiSelectCard
-                  title="اختر المنتجات"
-                  subtitle="يمكنك اختيار أكثر من منتج لهذا العرض"
+                <PickerField
+                  title="اختيار المنتجات"
+                  subtitle="اضغط لفتح الخيارات ثم اختر ما تريد"
+                  count={formData.link_product_ids.length}
+                  isOpen={showProductPicker}
+                  onToggle={() => setShowProductPicker((prev) => !prev)}
                   icon={<Package className="w-5 h-5" />}
-                  options={products}
-                  selectedIds={formData.link_product_ids}
-                  emptyText="لا توجد منتجات متاحة لعرضها"
-                  onToggle={(productId) =>
+                />
+
+                <SelectedChips
+                  items={selectedLinkProducts}
+                  onRemove={(id) =>
                     setFormData((prev) => {
-                      const ids = toggleSelectedId(prev.link_product_ids, productId);
+                      const ids = prev.link_product_ids.filter((itemId) => itemId !== id);
                       return {
                         ...prev,
                         link_product_ids: ids,
@@ -2314,21 +2328,48 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
                     })
                   }
                 />
+
+                {showProductPicker && (
+                  <DropdownPicker
+                    searchValue={productSearch}
+                    onSearchChange={setProductSearch}
+                    searchPlaceholder="ابحث عن منتج..."
+                    emptyText="لا توجد منتجات متاحة لعرضها"
+                    options={filteredProducts}
+                    selectedIds={formData.link_product_ids}
+                    onToggle={(productId) =>
+                      setFormData((prev) => {
+                        const ids = toggleSelectedId(prev.link_product_ids, productId);
+                        return {
+                          ...prev,
+                          link_product_ids: ids,
+                          link_product_id: ids[0] || '',
+                          rule_product_ids: ids,
+                          rule_product_id: ids[0] || '',
+                        };
+                      })
+                    }
+                  />
+                )}
               </div>
             )}
 
             {formData.link_apply_to === 'store' && (
               <div className="md:col-span-2">
-                <MultiSelectCard
-                  title="اختر المتاجر"
-                  subtitle="يمكنك اختيار أكثر من متجر لهذا العرض"
+                <PickerField
+                  title="اختيار المتاجر"
+                  subtitle="اضغط لفتح الخيارات ثم اختر ما تريد"
+                  count={formData.link_store_ids.length}
+                  isOpen={showStorePicker}
+                  onToggle={() => setShowStorePicker((prev) => !prev)}
                   icon={<StoreIcon className="w-5 h-5" />}
-                  options={stores}
-                  selectedIds={formData.link_store_ids}
-                  emptyText="لا توجد متاجر متاحة لعرضها"
-                  onToggle={(storeId) =>
+                />
+
+                <SelectedChips
+                  items={selectedLinkStores}
+                  onRemove={(id) =>
                     setFormData((prev) => {
-                      const ids = toggleSelectedId(prev.link_store_ids, storeId);
+                      const ids = prev.link_store_ids.filter((itemId) => itemId !== id);
                       return {
                         ...prev,
                         link_store_ids: ids,
@@ -2339,6 +2380,29 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
                     })
                   }
                 />
+
+                {showStorePicker && (
+                  <DropdownPicker
+                    searchValue={storeSearch}
+                    onSearchChange={setStoreSearch}
+                    searchPlaceholder="ابحث عن متجر..."
+                    emptyText="لا توجد متاجر متاحة لعرضها"
+                    options={filteredStores}
+                    selectedIds={formData.link_store_ids}
+                    onToggle={(storeId) =>
+                      setFormData((prev) => {
+                        const ids = toggleSelectedId(prev.link_store_ids, storeId);
+                        return {
+                          ...prev,
+                          link_store_ids: ids,
+                          link_store_id: ids[0] || '',
+                          rule_store_ids: ids,
+                          rule_store_id: ids[0] || '',
+                        };
+                      })
+                    }
+                  />
+                )}
               </div>
             )}
 
@@ -2654,23 +2718,53 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
                 </div>
               </div>
 
-              {formData.link_apply_to === 'product' && selectedLinkProductNames.length > 0 && (
+              {formData.link_apply_to === 'product' && selectedLinkProducts.length > 0 && (
                 <div className="mt-4 rounded-2xl bg-white border border-gray-200 p-4">
                   <div className="font-semibold text-gray-900 mb-2">المنتجات المحددة</div>
                   <div className="flex flex-wrap gap-2">
-                    {selectedLinkProductNames.map((name) => (
-                      <TagChip key={name} text={name} />
+                    {selectedLinkProducts.map((item) => (
+                      <SelectedChip
+                        key={item.id}
+                        label={getDisplayName(item)}
+                        onRemove={() =>
+                          setFormData((prev) => {
+                            const ids = prev.link_product_ids.filter((id) => id !== item.id);
+                            return {
+                              ...prev,
+                              link_product_ids: ids,
+                              link_product_id: ids[0] || '',
+                              rule_product_ids: ids,
+                              rule_product_id: ids[0] || '',
+                            };
+                          })
+                        }
+                      />
                     ))}
                   </div>
                 </div>
               )}
 
-              {formData.link_apply_to === 'store' && selectedLinkStoreNames.length > 0 && (
+              {formData.link_apply_to === 'store' && selectedLinkStores.length > 0 && (
                 <div className="mt-4 rounded-2xl bg-white border border-gray-200 p-4">
                   <div className="font-semibold text-gray-900 mb-2">المتاجر المحددة</div>
                   <div className="flex flex-wrap gap-2">
-                    {selectedLinkStoreNames.map((name) => (
-                      <TagChip key={name} text={name} />
+                    {selectedLinkStores.map((item) => (
+                      <SelectedChip
+                        key={item.id}
+                        label={getDisplayName(item)}
+                        onRemove={() =>
+                          setFormData((prev) => {
+                            const ids = prev.link_store_ids.filter((id) => id !== item.id);
+                            return {
+                              ...prev,
+                              link_store_ids: ids,
+                              link_store_id: ids[0] || '',
+                              rule_store_ids: ids,
+                              rule_store_id: ids[0] || '',
+                            };
+                          })
+                        }
+                      />
                     ))}
                   </div>
                 </div>
@@ -2707,70 +2801,147 @@ const SelectableOptionCard: React.FC<{
   </button>
 );
 
-const MultiSelectCard: React.FC<{
+const PickerField: React.FC<{
   title: string;
   subtitle?: string;
+  count: number;
+  isOpen: boolean;
+  onToggle: () => void;
   icon: React.ReactNode;
+}> = ({ title, subtitle, count, isOpen, onToggle, icon }) => (
+  <div className="rounded-2xl border border-gray-200 bg-white">
+    <button
+      type="button"
+      onClick={onToggle}
+      className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-gray-50 rounded-2xl"
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-2xl border border-gray-200 bg-gray-50 flex items-center justify-center text-blue-600 shrink-0">
+          {icon}
+        </div>
+        <div className="text-right">
+          <div className="font-semibold text-gray-900">{title}</div>
+          <div className="text-sm text-gray-500">
+            {subtitle || 'اضغط للاختيار'}{count > 0 ? ` • المحدد ${count}` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 text-gray-500">
+        {count > 0 && (
+          <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold">
+            {count}
+          </span>
+        )}
+        {isOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+      </div>
+    </button>
+  </div>
+);
+
+const DropdownPicker: React.FC<{
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+  searchPlaceholder: string;
+  emptyText: string;
   options: Array<ProductOption | StoreOption>;
   selectedIds: string[];
-  emptyText: string;
   onToggle: (id: string) => void;
-}> = ({ title, subtitle, icon, options, selectedIds, emptyText, onToggle }) => (
-  <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
-    <div className="flex items-start gap-3 mb-4">
-      <div className="w-10 h-10 rounded-2xl bg-white border border-gray-200 text-blue-600 flex items-center justify-center shrink-0">
-        {icon}
-      </div>
-      <div>
-        <div className="font-semibold text-gray-900">{title}</div>
-        {subtitle && <div className="text-sm text-gray-500 mt-1">{subtitle}</div>}
-      </div>
-    </div>
+}> = ({
+  searchValue,
+  onSearchChange,
+  searchPlaceholder,
+  emptyText,
+  options,
+  selectedIds,
+  onToggle,
+}) => (
+  <div className="mt-3 rounded-2xl border border-gray-200 bg-white p-3">
+    <input
+      type="text"
+      value={searchValue}
+      onChange={(e) => onSearchChange(e.target.value)}
+      placeholder={searchPlaceholder}
+      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-3"
+    />
 
     {options.length === 0 ? (
-      <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-6 text-center text-gray-500">
+      <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-6 text-center text-gray-500">
         {emptyText}
       </div>
     ) : (
-      <>
-        <div className="flex items-center gap-2 text-sm text-gray-500 mb-3">
-          <CheckSquare className="w-4 h-4" />
-          <span>المحدد حاليًا: {selectedIds.length}</span>
-        </div>
+      <div className="space-y-2 max-h-64 overflow-y-auto">
+        {options.map((option) => {
+          const checked = selectedIds.includes(option.id);
 
-        <div className="space-y-2 max-h-72 overflow-y-auto">
-          {options.map((option) => {
-            const checked = selectedIds.includes(option.id);
+          return (
+            <button
+              type="button"
+              key={option.id}
+              onClick={() => onToggle(option.id)}
+              className={`w-full text-right px-4 py-3 rounded-2xl border flex items-center justify-between gap-3 transition-colors ${
+                checked
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-gray-50'
+              }`}
+            >
+              <div className="min-w-0">
+                <div className="font-medium text-gray-900 truncate">{getDisplayName(option)}</div>
+                <div className="text-xs text-gray-500 mt-1" dir="ltr">
+                  {option.slug ? `/${option.slug}` : option.id}
+                </div>
+              </div>
 
-            return (
-              <label
-                key={option.id}
-                className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 cursor-pointer transition-colors ${
+              <div
+                className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
                   checked
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 bg-white hover:border-blue-200'
+                    ? 'border-blue-600 bg-blue-600 text-white'
+                    : 'border-gray-300 bg-white text-transparent'
                 }`}
               >
-                <div className="min-w-0">
-                  <div className="font-medium text-gray-900 truncate">{getDisplayName(option)}</div>
-                  <div className="text-xs text-gray-500 mt-1" dir="ltr">
-                    {option.slug ? `/${option.slug}` : option.id}
-                  </div>
-                </div>
-
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onToggle(option.id)}
-                  className="w-5 h-5 text-blue-600 rounded"
-                />
-              </label>
-            );
-          })}
-        </div>
-      </>
+                <Check className="w-4 h-4" />
+              </div>
+            </button>
+          );
+        })}
+      </div>
     )}
   </div>
+);
+
+const SelectedChips: React.FC<{
+  items: Array<ProductOption | StoreOption>;
+  onRemove: (id: string) => void;
+}> = ({ items, onRemove }) => {
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {items.map((item) => (
+        <SelectedChip
+          key={item.id}
+          label={getDisplayName(item)}
+          onRemove={() => onRemove(item.id)}
+        />
+      ))}
+    </div>
+  );
+};
+
+const SelectedChip: React.FC<{
+  label: string;
+  onRemove: () => void;
+}> = ({ label, onRemove }) => (
+  <span className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-blue-50 text-blue-700 text-sm font-medium border border-blue-200">
+    <span>{label}</span>
+    <button
+      type="button"
+      onClick={onRemove}
+      className="w-5 h-5 rounded-full bg-white/80 hover:bg-white flex items-center justify-center"
+    >
+      <X className="w-3.5 h-3.5" />
+    </button>
+  </span>
 );
 
 const SectionCard: React.FC<{
