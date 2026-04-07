@@ -50,7 +50,11 @@ const getStoreContextSlug = (): string | null => {
   try {
     const source = sessionStorage.getItem('store_mode_source');
     const slug = sessionStorage.getItem('active_store_slug');
+    const pendingSource = localStorage.getItem('pending_payment_store_source');
+    const pendingSlug = localStorage.getItem('pending_payment_store_slug');
+
     if (source === 'storefront' && slug) return slug;
+    if (pendingSource === 'storefront' && pendingSlug) return pendingSlug;
   } catch (error) {
     console.error('Error reading store product context:', error);
   }
@@ -159,12 +163,27 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     }
   }, [product?.store?.slug, isStoreContext]);
 
+  const clearStoreContext = () => {
+    try {
+      sessionStorage.removeItem('active_store_slug');
+      sessionStorage.removeItem('store_mode_source');
+      localStorage.removeItem('pending_payment_store_slug');
+      localStorage.removeItem('pending_payment_store_source');
+    } catch (error) {
+      console.error('Error clearing store context:', error);
+    }
+  };
+
   const persistStoreContext = () => {
-    const targetStoreSlug = product?.store?.slug || storeContextSlug;
-    if (!targetStoreSlug) return;
+    const explicitStoreSlug = new URLSearchParams(window.location.search).get('store');
+
+    if (!isStoreContext || !explicitStoreSlug) {
+      clearStoreContext();
+      return;
+    }
 
     try {
-      sessionStorage.setItem('active_store_slug', targetStoreSlug);
+      sessionStorage.setItem('active_store_slug', explicitStoreSlug);
       sessionStorage.setItem('store_mode_source', 'storefront');
     } catch (error) {
       console.error('Error persisting store context:', error);
@@ -199,44 +218,20 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setLoading(true);
 
     try {
-      let data = null;
-      let error = null;
+      let query = supabase.from('products').select('*');
 
       if (productSlug) {
-        const slugResult = await supabase
-          .from('products')
-          .select('*')
-          .eq('slug', productSlug)
-          .maybeSingle();
-
-        data = slugResult.data;
-        error = slugResult.error;
-
-        if (!data) {
-          const idFallbackResult = await supabase
-            .from('products')
-            .select('*')
-            .eq('id', productSlug)
-            .maybeSingle();
-
-          data = idFallbackResult.data;
-          error = idFallbackResult.error;
-        }
+        query = query.eq('slug', productSlug);
       } else if (productId) {
-        const idResult = await supabase
-          .from('products')
-          .select('*')
-          .eq('id', productId)
-          .maybeSingle();
-
-        data = idResult.data;
-        error = idResult.error;
+        query = query.eq('id', productId);
       } else {
         setProduct(null);
         setResolvedProductId(null);
         setLoading(false);
         return;
       }
+
+      const { data, error } = await query.maybeSingle();
 
       if (error) {
         console.error('Error fetching product:', error);
