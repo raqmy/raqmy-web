@@ -10,8 +10,6 @@ import {
   DollarSign,
   Search,
   Settings2,
-  Package,
-  Store as StoreIcon,
   CalendarRange,
   Target,
   AlertCircle,
@@ -399,7 +397,7 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     if (productIds.length > 0) {
       const { data: productsData, error: productsError } = await supabase
         .from('products')
-        .select('id, title, name, slug')
+        .select('id, title, slug')
         .in('id', productIds);
 
       if (productsError) {
@@ -412,7 +410,7 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     if (storeIds.length > 0) {
       const { data: storesData, error: storesError } = await supabase
         .from('stores')
-        .select('id, title, name, slug')
+        .select('id, name, slug')
         .in('id', storeIds);
 
       if (storesError) {
@@ -498,7 +496,7 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     if (productIds.length > 0) {
       const { data: productsData, error: productsError } = await supabase
         .from('products')
-        .select('id, title, name, slug')
+        .select('id, title, slug')
         .in('id', productIds);
 
       if (productsError) {
@@ -511,7 +509,7 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     if (storeIds.length > 0) {
       const { data: storesData, error: storesError } = await supabase
         .from('stores')
-        .select('id, title, name, slug')
+        .select('id, name, slug')
         .in('id', storeIds);
 
       if (storesError) {
@@ -1066,30 +1064,30 @@ const UnifiedCampaignsList: React.FC<{
                       )}
 
                       {campaign.link?.report_token && (
-  <>
-    <button
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(
-            `${window.location.origin}/affiliate-report/${campaign.link?.report_token}`
-          );
-          alert('تم نسخ رابط إحصائيات المسوق');
-        } catch (error) {
-          console.error('Error copying marketer stats link:', error);
-          alert('حدث خطأ أثناء نسخ رابط إحصائيات المسوق');
-        }
-      }}
-      className="w-full px-4 py-3 rounded-2xl border border-violet-200 text-violet-700 font-medium hover:bg-violet-50"
-    >
-      نسخ رابط إحصائيات المسوق
-    </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(
+                                  `${window.location.origin}/affiliate-report/${campaign.link?.report_token}`
+                                );
+                                alert('تم نسخ رابط إحصائيات المسوق');
+                              } catch (error) {
+                                console.error('Error copying marketer stats link:', error);
+                                alert('حدث خطأ أثناء نسخ رابط إحصائيات المسوق');
+                              }
+                            }}
+                            className="w-full px-4 py-3 rounded-2xl border border-violet-200 text-violet-700 font-medium hover:bg-violet-50"
+                          >
+                            نسخ رابط إحصائيات المسوق
+                          </button>
 
-    <p className="text-[11px] leading-5 text-gray-500 text-center px-2">
-      هذا الرابط تعطيه للمسوق ليشاهد إحصائياته لهذا العرض فقط بدون تسجيل دخول.
-    </p>
-  </>
-)}
+                          <p className="text-[11px] leading-5 text-gray-500 text-center px-2">
+                            هذا الرابط تعطيه للمسوق ليشاهد إحصائياته لهذا العرض فقط بدون تسجيل دخول.
+                          </p>
+                        </>
+                      )}
 
                       {campaign.marketer?.id && (
                         <button
@@ -1390,62 +1388,34 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
     fetchOptions();
   }, [user?.id]);
 
-  const fetchOwnedRows = async <T extends Record<string, any>>(
-    table: string,
-    selectClause: string,
-    ownerColumns: string[]
-  ): Promise<T[]> => {
-    if (!user?.id) return [];
-
-    for (const ownerColumn of ownerColumns) {
-      try {
-        const { data, error } = await supabase
-          .from(table)
-          .select(selectClause)
-          .eq(ownerColumn, user.id)
-          .order('created_at', { ascending: false });
-
-        if (!error && data) {
-          if (data.length > 0) return data as T[];
-        } else if (error) {
-          console.error(`Error fetching ${table} by ${ownerColumn}:`, error);
-        }
-      } catch (err) {
-        console.error(`Unexpected error fetching ${table} by ${ownerColumn}:`, err);
-      }
-    }
-
-    return [];
-  };
-
   const fetchOptions = async () => {
     if (!user?.id) return;
 
     try {
-      const [productsData, storesData] = await Promise.all([
-        fetchOwnedRows<ProductOption>('products', 'id, name, title, slug', [
-          'user_id',
-          'seller_id',
-          'merchant_id',
-          'owner_id',
-        ]),
-        fetchOwnedRows<StoreOption>('stores', 'id, name, title, slug', [
-          'user_id',
-          'seller_id',
-          'merchant_id',
-          'owner_id',
-        ]),
-      ]);
+      const [{ data: productsData, error: productsError }, { data: storesData, error: storesError }] =
+        await Promise.all([
+          supabase
+            .from('products')
+            .select('id, title, slug, merchant_id, user_id')
+            .or(`merchant_id.eq.${user.id},user_id.eq.${user.id}`)
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('stores')
+            .select('id, name, slug, user_id')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false }),
+        ]);
 
-      setProducts(productsData || []);
-      setStores(storesData || []);
-
-      if ((productsData || []).length === 0) {
-        console.warn('No products found for affiliate options. Check owner column / RLS.');
+      if (productsError) {
+        console.error('Error fetching seller products for affiliate options:', productsError);
+      } else {
+        setProducts((productsData || []) as ProductOption[]);
       }
 
-      if ((storesData || []).length === 0) {
-        console.warn('No stores found for affiliate options. Check owner column / RLS.');
+      if (storesError) {
+        console.error('Error fetching seller stores for affiliate options:', storesError);
+      } else {
+        setStores((storesData || []) as StoreOption[]);
       }
     } catch (fetchError) {
       console.error('Error fetching seller affiliate options:', fetchError);
