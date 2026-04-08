@@ -299,6 +299,54 @@ const getCampaignObjectName = (campaign: UnifiedCampaignRow) => {
   return 'جميع منتجاتي';
 };
 
+const buildInitialTierDrafts = (campaign?: UnifiedCampaignRow | null): TierDraft[] =>
+  campaign?.rule?.tiers?.map((tier) => ({
+    id: tier.id,
+    localId: tier.id || createLocalTierId(),
+    day_from: tier.day_from?.toString() ?? '0',
+    day_to: tier.day_to?.toString() ?? '',
+    commission_type: (tier.commission_type as 'percentage' | 'fixed') || 'percentage',
+    commission_value: tier.commission_value?.toString() ?? '',
+    is_active: tier.is_active ?? true,
+  })) || [];
+
+const buildInitialFormData = (campaign?: UnifiedCampaignRow | null): UnifiedAffiliateForm => ({
+  marketer_mode: campaign?.marketer ? 'existing' : 'new',
+  existing_marketer_id:
+    campaign?.marketer?.id || campaign?.rule?.marketer_id || campaign?.link?.marketer_id || '',
+
+  marketer_name: campaign?.marketer?.name || '',
+  marketer_email: campaign?.marketer?.email || '',
+  marketer_phone: campaign?.marketer?.phone || '',
+  marketer_notes: campaign?.marketer?.notes || '',
+  marketer_is_active: campaign?.marketer?.is_active ?? true,
+
+  link_code: campaign?.link?.code || '',
+  link_apply_to: (campaign?.link?.apply_to as 'product' | 'store' | 'all') || 'all',
+  link_product_id: campaign?.link?.product_id || '',
+  link_store_id: campaign?.link?.store_id || '',
+  link_description: campaign?.link?.description || '',
+  link_is_active: campaign?.link?.is_active ?? true,
+
+  rule_scope_type: (campaign?.rule?.scope_type as 'product' | 'store' | 'all') || 'all',
+  rule_product_id: campaign?.rule?.product_id || '',
+  rule_store_id: campaign?.rule?.store_id || '',
+  rule_commission_type:
+    (campaign?.rule?.commission_type as 'percentage' | 'fixed') || 'percentage',
+  rule_commission_value:
+    campaign?.rule?.commission_value !== null && campaign?.rule?.commission_value !== undefined
+      ? String(campaign.rule.commission_value)
+      : '',
+  rule_priority:
+    campaign?.rule?.priority !== null && campaign?.rule?.priority !== undefined
+      ? String(campaign.rule.priority)
+      : '100',
+  rule_is_active: campaign?.rule?.is_active ?? true,
+
+  expiry_mode: campaign?.rule?.expires_at ? 'date' : 'none',
+  expiry_date: campaign?.rule?.expires_at ? campaign.rule.expires_at.slice(0, 10) : '',
+});
+
 export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = ({
   onNavigate,
 }) => {
@@ -384,7 +432,9 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     if (marketerIds.length > 0) {
       const { data: marketersData, error: marketersError } = await supabase
         .from('affiliate_marketers')
-        .select('id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings')
+        .select(
+          'id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings'
+        )
         .in('id', marketerIds);
 
       if (marketersError) {
@@ -483,7 +533,9 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     if (marketerIds.length > 0) {
       const { data: marketersData, error: marketersError } = await supabase
         .from('affiliate_marketers')
-        .select('id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings')
+        .select(
+          'id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings'
+        )
         .in('id', marketerIds);
 
       if (marketersError) {
@@ -1231,7 +1283,11 @@ const UnifiedCampaignsList: React.FC<{
                           <MiniInfo label="من اليوم" value={String(tier.day_from ?? 0)} />
                           <MiniInfo
                             label="إلى اليوم"
-                            value={tier.day_to !== null && tier.day_to !== undefined ? String(tier.day_to) : 'مفتوح'}
+                            value={
+                              tier.day_to !== null && tier.day_to !== undefined
+                                ? String(tier.day_to)
+                                : 'مفتوح'
+                            }
                           />
                           <MiniInfo
                             label="العمولة"
@@ -1335,54 +1391,14 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [stores, setStores] = useState<StoreOption[]>([]);
 
-  const initialTiers: TierDraft[] =
-    campaign?.rule?.tiers?.map((tier) => ({
-      id: tier.id,
-      localId: tier.id || createLocalTierId(),
-      day_from: tier.day_from?.toString() ?? '0',
-      day_to: tier.day_to?.toString() ?? '',
-      commission_type: (tier.commission_type as 'percentage' | 'fixed') || 'percentage',
-      commission_value: tier.commission_value?.toString() ?? '',
-      is_active: tier.is_active ?? true,
-    })) || [];
+  const [tiers, setTiers] = useState<TierDraft[]>(() => buildInitialTierDrafts(campaign));
+  const [formData, setFormData] = useState<UnifiedAffiliateForm>(() => buildInitialFormData(campaign));
 
-  const [tiers, setTiers] = useState<TierDraft[]>(initialTiers);
-
-  const [formData, setFormData] = useState<UnifiedAffiliateForm>({
-    marketer_mode: campaign?.marketer ? 'existing' : 'new',
-    existing_marketer_id:
-      campaign?.marketer?.id || campaign?.rule?.marketer_id || campaign?.link?.marketer_id || '',
-
-    marketer_name: campaign?.marketer?.name || '',
-    marketer_email: campaign?.marketer?.email || '',
-    marketer_phone: campaign?.marketer?.phone || '',
-    marketer_notes: campaign?.marketer?.notes || '',
-    marketer_is_active: campaign?.marketer?.is_active ?? true,
-
-    link_code: campaign?.link?.code || '',
-    link_apply_to: (campaign?.link?.apply_to as 'product' | 'store' | 'all') || 'all',
-    link_product_id: campaign?.link?.product_id || '',
-    link_store_id: campaign?.link?.store_id || '',
-    link_description: campaign?.link?.description || '',
-    link_is_active: campaign?.link?.is_active ?? true,
-
-    rule_scope_type: (campaign?.rule?.scope_type as 'product' | 'store' | 'all') || 'all',
-    rule_product_id: campaign?.rule?.product_id || '',
-    rule_store_id: campaign?.rule?.store_id || '',
-    rule_commission_type: (campaign?.rule?.commission_type as 'percentage' | 'fixed') || 'percentage',
-    rule_commission_value:
-      campaign?.rule?.commission_value !== null && campaign?.rule?.commission_value !== undefined
-        ? String(campaign.rule.commission_value)
-        : '',
-    rule_priority:
-      campaign?.rule?.priority !== null && campaign?.rule?.priority !== undefined
-        ? String(campaign.rule.priority)
-        : '100',
-    rule_is_active: campaign?.rule?.is_active ?? true,
-
-    expiry_mode: campaign?.rule?.expires_at ? 'date' : 'none',
-    expiry_date: campaign?.rule?.expires_at ? campaign.rule.expires_at.slice(0, 10) : '',
-  });
+  useEffect(() => {
+    setTiers(buildInitialTierDrafts(campaign));
+    setFormData(buildInitialFormData(campaign));
+    setError('');
+  }, [campaign?.id]);
 
   useEffect(() => {
     fetchOptions();
@@ -1447,17 +1463,43 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
   };
 
   const validateTiers = () => {
-    for (const tier of tiers) {
+    const normalized = tiers
+      .map((tier) => ({
+        ...tier,
+        dayFromNum: Number(tier.day_from || 0),
+        dayToNum: tier.day_to.trim() === '' ? null : Number(tier.day_to),
+        commissionValueNum: Number(tier.commission_value),
+      }))
+      .sort((a, b) => a.dayFromNum - b.dayFromNum);
+
+    for (const tier of normalized) {
       if (tier.commission_value.trim() === '') {
         throw new Error('كل شريحة يجب أن تحتوي على قيمة عمولة');
       }
 
-      if (Number(tier.day_from) < 0) {
+      if (Number.isNaN(tier.commissionValueNum) || tier.commissionValueNum < 0) {
+        throw new Error('قيمة العمولة في الشرائح غير صحيحة');
+      }
+
+      if (tier.dayFromNum < 0) {
         throw new Error('يوم البداية في الشرائح لا يمكن أن يكون أقل من 0');
       }
 
-      if (tier.day_to.trim() !== '' && Number(tier.day_to) < Number(tier.day_from)) {
+      if (tier.dayToNum !== null && tier.dayToNum < tier.dayFromNum) {
         throw new Error('يوم النهاية يجب أن يكون أكبر من أو يساوي يوم البداية');
+      }
+    }
+
+    for (let i = 0; i < normalized.length - 1; i++) {
+      const current = normalized[i];
+      const next = normalized[i + 1];
+
+      if (current.dayToNum === null) {
+        throw new Error('لا يمكن إضافة شريحة بعد شريحة مفتوحة النهاية');
+      }
+
+      if (next.dayFromNum <= current.dayToNum) {
+        throw new Error('يوجد تداخل بين شرائح العمولة، عدّل الأيام بحيث لا تتقاطع');
       }
     }
   };
@@ -1632,11 +1674,15 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
       ruleId = data.id;
     }
 
-    const existingTierIds = new Set((campaign?.rule?.tiers || []).map((tier) => tier.id));
-    const currentTierIds = new Set(
-      tiers.filter((tier) => tier.id).map((tier) => tier.id as string)
-    );
-    const tierIdsToDelete = [...existingTierIds].filter((id) => !currentTierIds.has(id));
+    const existingTierIds = (campaign?.rule?.tiers || [])
+      .map((tier) => tier.id)
+      .filter(Boolean) as string[];
+
+    const currentTierIds = tiers
+      .map((tier) => tier.id)
+      .filter(Boolean) as string[];
+
+    const tierIdsToDelete = existingTierIds.filter((id) => !currentTierIds.includes(id));
 
     if (tierIdsToDelete.length > 0) {
       const { error } = await supabase
@@ -1644,32 +1690,45 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
         .delete()
         .in('id', tierIdsToDelete);
 
-      if (error) throw error;
+      if (error) throw new Error(`فشل حذف بعض الشرائح: ${error.message}`);
     }
 
-    for (const tier of tiers) {
-      const tierPayload = {
-        rule_id: ruleId,
-        day_from: Number(tier.day_from || 0),
-        day_to: tier.day_to.trim() === '' ? null : Number(tier.day_to),
-        commission_type: tier.commission_type,
-        commission_value: Number(tier.commission_value),
-        is_active: tier.is_active,
-      };
+    const tiersToUpdate = tiers.filter((tier) => Boolean(tier.id));
+    const tiersToInsert = tiers.filter((tier) => !tier.id);
 
-      if (tier.id) {
-        const { error } = await supabase
-          .from('affiliate_rule_tiers')
-          .update(tierPayload)
-          .eq('id', tier.id);
+    for (const tier of tiersToUpdate) {
+      const { error } = await supabase
+        .from('affiliate_rule_tiers')
+        .update({
+          rule_id: ruleId,
+          day_from: Number(tier.day_from || 0),
+          day_to: tier.day_to.trim() === '' ? null : Number(tier.day_to),
+          commission_type: tier.commission_type,
+          commission_value: Number(tier.commission_value),
+          is_active: tier.is_active,
+        })
+        .eq('id', tier.id as string)
+        .eq('rule_id', ruleId);
 
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('affiliate_rule_tiers')
-          .insert(tierPayload);
+      if (error) {
+        throw new Error(`فشل تحديث شريحة عمولة: ${error.message}`);
+      }
+    }
 
-        if (error) throw error;
+    if (tiersToInsert.length > 0) {
+      const { error } = await supabase.from('affiliate_rule_tiers').insert(
+        tiersToInsert.map((tier) => ({
+          rule_id: ruleId,
+          day_from: Number(tier.day_from || 0),
+          day_to: tier.day_to.trim() === '' ? null : Number(tier.day_to),
+          commission_type: tier.commission_type,
+          commission_value: Number(tier.commission_value),
+          is_active: tier.is_active,
+        }))
+      );
+
+      if (error) {
+        throw new Error(`فشل حفظ شرائح العمولة: ${error.message}`);
       }
     }
 
