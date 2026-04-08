@@ -59,12 +59,14 @@ type ProductOption = {
   id: string;
   name?: string | null;
   title?: string | null;
+  slug?: string | null;
 };
 
 type StoreOption = {
   id: string;
   name?: string | null;
   title?: string | null;
+  slug?: string | null;
 };
 
 type AffiliateMarketerOption = {
@@ -138,8 +140,12 @@ export const CouponsManagementPage: React.FC<CouponsManagementPageProps> = ({ on
         return;
       }
 
-      const marketerIds = [...new Set(couponsRows.map((item) => item.affiliate_marketer_id).filter(Boolean))] as string[];
-      const linkIds = [...new Set(couponsRows.map((item) => item.affiliate_link_id).filter(Boolean))] as string[];
+      const marketerIds = [
+        ...new Set(couponsRows.map((item) => item.affiliate_marketer_id).filter(Boolean)),
+      ] as string[];
+      const linkIds = [
+        ...new Set(couponsRows.map((item) => item.affiliate_link_id).filter(Boolean)),
+      ] as string[];
 
       const marketerMap = new Map<string, AffiliateMarketerOption>();
       const linkMap = new Map<string, AffiliateLinkOption>();
@@ -267,7 +273,9 @@ export const CouponsManagementPage: React.FC<CouponsManagementPageProps> = ({ on
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">إدارة أكواد الخصم</h1>
-          <p className="text-gray-600">أنشئ وأدر أكواد الخصم لمنتجاتك مع إمكانية ربطها بالمسوقين وروابط الأفلييت</p>
+          <p className="text-gray-600">
+            أنشئ وأدر أكواد الخصم لمنتجاتك مع إمكانية ربطها بالمسوقين وروابط الأفلييت
+          </p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
@@ -460,9 +468,9 @@ export const CouponsManagementPage: React.FC<CouponsManagementPageProps> = ({ on
                   </div>
                 </div>
 
-                {(coupon.min_purchase_amount > 0 || coupon.max_discount_amount) && (
+                {(coupon.min_purchase_amount! > 0 || coupon.max_discount_amount) && (
                   <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-gray-200">
-                    {coupon.min_purchase_amount > 0 && (
+                    {coupon.min_purchase_amount! > 0 && (
                       <div className="text-sm text-gray-600">
                         حد أدنى: {coupon.min_purchase_amount} ريال
                       </div>
@@ -478,7 +486,8 @@ export const CouponsManagementPage: React.FC<CouponsManagementPageProps> = ({ on
                 {(coupon.affiliate_marketer || coupon.affiliate_link) && (
                   <div className="mt-4 pt-4 border-t border-gray-200">
                     <div className="rounded-xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-800">
-                      هذا الكوبون مربوط بالأفلييت، ويمكن استخدامه داخل حملات المسوق أو الرابط المحدد لقياس الأداء بشكل أوضح.
+                      هذا الكوبون مربوط بالأفلييت، ويمكن استخدامه داخل حملات المسوق أو الرابط المحدد
+                      لقياس الأداء بشكل أوضح.
                     </div>
                   </div>
                 )}
@@ -561,18 +570,54 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
     }
   }, [coupon, user?.id]);
 
+  const fetchOwnedRows = async <T extends Record<string, any>>(
+    table: 'products' | 'stores',
+    selectClause: string,
+    ownerColumns: string[]
+  ): Promise<T[]> => {
+    if (!user?.id) return [];
+
+    const allRows: T[] = [];
+    const seenIds = new Set<string>();
+
+    for (const ownerColumn of ownerColumns) {
+      try {
+        const { data, error } = await supabase
+          .from(table)
+          .select(selectClause)
+          .eq(ownerColumn, user.id)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error(`Error fetching ${table} by ${ownerColumn}:`, error);
+          continue;
+        }
+
+        (data || []).forEach((item: any) => {
+          if (item?.id && !seenIds.has(item.id)) {
+            seenIds.add(item.id);
+            allRows.push(item as T);
+          }
+        });
+      } catch (err) {
+        console.error(`Unexpected error fetching ${table} by ${ownerColumn}:`, err);
+      }
+    }
+
+    return allRows;
+  };
+
   const fetchUserData = async () => {
     if (!user?.id) return;
 
     try {
-      const [
-        { data: productsData, error: productsError },
-        { data: storesData, error: storesError },
-        { data: marketersData, error: marketersError },
-        { data: linksData, error: linksError },
-      ] = await Promise.all([
-        supabase.from('products').select('id, name, title').eq('user_id', user.id),
-        supabase.from('stores').select('id, name, title').eq('user_id', user.id),
+      const [productsData, storesData, marketersResponse, linksResponse] = await Promise.all([
+        fetchOwnedRows<ProductOption>('products', 'id, title, slug', [
+          'user_id',
+          'seller_id',
+          'merchant_id',
+        ]),
+        fetchOwnedRows<StoreOption>('stores', 'id, name, slug', ['user_id']),
         supabase
           .from('affiliate_marketers')
           .select('id, name, email, phone, is_active')
@@ -585,15 +630,26 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
           .order('created_at', { ascending: false }),
       ]);
 
-      if (productsError) console.error('Error fetching products:', productsError);
-      if (storesError) console.error('Error fetching stores:', storesError);
-      if (marketersError) console.error('Error fetching marketers:', marketersError);
-      if (linksError) console.error('Error fetching affiliate links:', linksError);
+      if (marketersResponse.error) {
+        console.error('Error fetching marketers:', marketersResponse.error);
+      }
 
-      setProducts((productsData || []) as ProductOption[]);
-      setStores((storesData || []) as StoreOption[]);
-      setMarketers((marketersData || []) as AffiliateMarketerOption[]);
-      setAffiliateLinks((linksData || []) as AffiliateLinkOption[]);
+      if (linksResponse.error) {
+        console.error('Error fetching affiliate links:', linksResponse.error);
+      }
+
+      setProducts(productsData || []);
+      setStores(storesData || []);
+      setMarketers((marketersResponse.data || []) as AffiliateMarketerOption[]);
+      setAffiliateLinks((linksResponse.data || []) as AffiliateLinkOption[]);
+
+      if ((productsData || []).length === 0) {
+        console.warn('No products found for coupon options. Check owner columns / RLS.');
+      }
+
+      if ((storesData || []).length === 0) {
+        console.warn('No stores found for coupon options. Check owner columns / RLS.');
+      }
     } catch (error) {
       console.error('Error fetching user data:', error);
     }
@@ -697,6 +753,7 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
         start_date: formData.start_date,
         end_date: formData.end_date || null,
         is_active: formData.is_active,
+        apply_to: formData.apply_to,
         affiliate_marketer_id: formData.affiliate_marketer_id || null,
         affiliate_link_id: formData.affiliate_link_id || null,
       };
@@ -769,7 +826,10 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
           <h2 className="text-2xl font-bold text-gray-900">
             {coupon ? 'تعديل كوبون الخصم' : 'إنشاء كوبون جديد'}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+          >
             ×
           </button>
         </div>
@@ -782,7 +842,8 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
           )}
 
           <div className="rounded-xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-800">
-            تقدر تستخدم الكوبون بشكل مستقل، أو تربطه بمسوق معيّن أو رابط أفلييت معيّن حتى يكون النظام أكثر احترافية وترابطًا.
+            تقدر تستخدم الكوبون بشكل مستقل، أو تربطه بمسوق معيّن أو رابط أفلييت معيّن حتى يكون
+            النظام أكثر احترافية وترابطًا.
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -793,9 +854,7 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
               <input
                 type="text"
                 value={formData.code}
-                onChange={(e) =>
-                  setFormData({ ...formData, code: e.target.value.toUpperCase() })
-                }
+                onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
                 placeholder="SUMMER2024"
                 required
@@ -911,7 +970,8 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
               <div>
                 <h3 className="font-bold text-gray-900">ربط اختياري مع التسويق بالعمولة</h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  هذا الربط اختياري. استخدمه إذا كنت تريد أن يكون الكوبون جزءًا من حملة أفلييت احترافية.
+                  هذا الربط اختياري. استخدمه إذا كنت تريد أن يكون الكوبون جزءًا من حملة أفلييت
+                  احترافية.
                 </p>
               </div>
             </div>
@@ -930,7 +990,8 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
                       affiliate_link_id:
                         e.target.value &&
                         prev.affiliate_link_id &&
-                        affiliateLinks.find((link) => link.id === prev.affiliate_link_id)?.marketer_id !== e.target.value
+                        affiliateLinks.find((link) => link.id === prev.affiliate_link_id)
+                          ?.marketer_id !== e.target.value
                           ? ''
                           : prev.affiliate_link_id,
                     }))
@@ -992,7 +1053,12 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
             </label>
             <select
               value={formData.apply_to}
-              onChange={(e) => setFormData({ ...formData, apply_to: e.target.value })}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  apply_to: e.target.value,
+                })
+              }
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               required
             >
@@ -1004,9 +1070,7 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
 
           {formData.apply_to === 'specific_products' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                اختر المنتجات
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">اختر المنتجات</label>
               <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-lg p-4">
                 {products.length === 0 ? (
                   <div className="text-sm text-gray-500">لا توجد منتجات متاحة</div>
@@ -1021,9 +1085,11 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
                         checked={selectedProducts.includes(product.id)}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            setSelectedProducts([...selectedProducts, product.id]);
+                            setSelectedProducts((prev) => [...prev, product.id]);
                           } else {
-                            setSelectedProducts(selectedProducts.filter((id) => id !== product.id));
+                            setSelectedProducts((prev) =>
+                              prev.filter((id) => id !== product.id)
+                            );
                           }
                         }}
                         className="w-4 h-4 text-blue-600 rounded"
@@ -1038,9 +1104,7 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
 
           {formData.apply_to === 'specific_stores' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                اختر المتاجر
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">اختر المتاجر</label>
               <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-lg p-4">
                 {stores.length === 0 ? (
                   <div className="text-sm text-gray-500">لا توجد متاجر متاحة</div>
@@ -1055,9 +1119,11 @@ const CouponFormModal: React.FC<CouponFormModalProps> = ({ coupon, onClose, onSu
                         checked={selectedStores.includes(store.id)}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            setSelectedStores([...selectedStores, store.id]);
+                            setSelectedStores((prev) => [...prev, store.id]);
                           } else {
-                            setSelectedStores(selectedStores.filter((id) => id !== store.id));
+                            setSelectedStores((prev) =>
+                              prev.filter((id) => id !== store.id)
+                            );
                           }
                         }}
                         className="w-4 h-4 text-blue-600 rounded"
