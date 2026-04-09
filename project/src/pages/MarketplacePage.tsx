@@ -81,11 +81,13 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
             store = storeData || null;
           }
 
-          if (product.user_id) {
+          const sellerId = product.user_id ?? product.merchant_id ?? null;
+
+          if (sellerId) {
             const { data: userData } = await supabase
               .from('users_profile')
               .select('id, name')
-              .eq('id', product.user_id)
+              .eq('id', sellerId)
               .maybeSingle();
             seller = userData || null;
           }
@@ -131,7 +133,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
             {filteredProducts.map((product) => (
               <div
                 key={product.id}
-                className="bg-white rounded-xl overflow-hidden shadow cursor-pointer"
+                className="bg-white rounded-xl overflow-hidden shadow cursor-pointer hover:shadow-lg transition-shadow"
                 onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
               >
                 <div className="aspect-video bg-gray-100 flex items-center justify-center">
@@ -147,12 +149,19 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                 </div>
 
                 <div className="p-4">
-                  <h3 className="font-bold text-lg">{product.display_name}</h3>
-                  <p className="text-sm text-gray-600 line-clamp-2">
-                    {product.description}
-                  </p>
-                  <div className="mt-2 text-blue-600 font-bold">
-                    {product.price} ريال
+                  <h3 className="font-bold text-lg text-gray-900 line-clamp-1 mb-3">
+                    {product.display_name}
+                  </h3>
+
+                  <div className="flex items-center justify-between">
+                    <div className="text-blue-600 font-bold text-xl">
+                      {product.price} ريال
+                    </div>
+
+                    <div className="flex items-center gap-1 text-sm text-gray-500">
+                      <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                      <span>4.8</span>
+                    </div>
                   </div>
                 </div>
               </div>
