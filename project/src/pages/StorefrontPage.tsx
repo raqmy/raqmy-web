@@ -73,7 +73,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
       query = query.eq('store_id', storeRecord.id);
     } else {
       const merchantUserId = storeRecord.user_id || storeRecord.id;
-      query = query.eq('user_id', merchantUserId);
+      query = query.or(`user_id.eq.${merchantUserId},merchant_id.eq.${merchantUserId}`);
     }
 
     if (sortBy === 'newest') {
@@ -151,7 +151,42 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
         return;
       }
 
-      setProducts(productsData || []);
+      const rawProducts = productsData || [];
+
+      if (rawProducts.length === 0) {
+        setProducts([]);
+        return;
+      }
+
+      const productIds = rawProducts.map((product: any) => product.id);
+
+      const { data: imagesData, error: imagesError } = await supabase
+        .from('product_images')
+        .select('product_id, image_url, is_primary, display_order')
+        .in('product_id', productIds)
+        .order('is_primary', { ascending: false })
+        .order('display_order', { ascending: true });
+
+      if (imagesError) {
+        console.error('Error fetching storefront product images:', imagesError);
+      }
+
+      const imageMap = new Map<string, string>();
+      (imagesData || []).forEach((img: any) => {
+        if (!imageMap.has(img.product_id) && img.image_url) {
+          imageMap.set(img.product_id, img.image_url);
+        }
+      });
+
+      const enrichedProducts = rawProducts.map((product: any) => ({
+        ...product,
+        thumbnail_url:
+          product.thumbnail_url && String(product.thumbnail_url).trim() !== ''
+            ? product.thumbnail_url
+            : imageMap.get(product.id) ?? null,
+      }));
+
+      setProducts(enrichedProducts);
     } catch (error) {
       console.error('Error fetching store:', error);
       setStore(null);
