@@ -696,6 +696,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   }
 
   const canAccessAttachments = isOwner || hasPurchased;
+  const productTitle = product.name || (product as any).title || 'منتج رقمي';
+  const productDescription =
+    product.description?.trim() || 'لا يوجد وصف لهذا المنتج حالياً.';
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -715,13 +718,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                 {images.length > 0 ? (
                   <img
                     src={images[selectedImageIndex]?.image_url}
-                    alt={product.name}
+                    alt={productTitle}
                     className="w-full h-full object-cover"
                   />
                 ) : product.thumbnail_url ? (
                   <img
                     src={product.thumbnail_url}
-                    alt={product.name}
+                    alt={productTitle}
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -744,7 +747,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   >
                     <img
                       src={image.image_url}
-                      alt={`${product.name} - ${index + 1}`}
+                      alt={`${productTitle} - ${index + 1}`}
                       className="w-full h-full object-cover"
                     />
                   </button>
@@ -791,7 +794,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </button>
             </div>
 
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">{product.name}</h1>
+            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 leading-tight mb-4">
+              {productTitle}
+            </h1>
 
             <div className="flex items-center gap-4 mb-6 flex-wrap">
               <div className="flex items-center gap-1">
@@ -821,9 +826,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </div>
 
-            <p className="text-gray-700 leading-8 mb-6 whitespace-pre-line">
-              {product.description || 'لا يوجد وصف لهذا المنتج حالياً.'}
-            </p>
+            <div className="mb-8 rounded-2xl border border-gray-200 bg-gray-50 p-6">
+              <h2 className="text-lg font-bold text-gray-900 mb-3">وصف المنتج</h2>
+              <p className="text-gray-700 leading-8 whitespace-pre-line">
+                {productDescription}
+              </p>
+            </div>
 
             {hasPurchased && !isOwner && (
               <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
