@@ -1061,8 +1061,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       setWithdrawalSubmitting(true);
 
       const { error } = await supabase.rpc('create_withdrawal_request', {
-        p_amount: amount,
-      });
+  p_amount: amount,
+  p_notes: withdrawalNotes.trim() || null,
+});
 
       if (error) {
         console.error('create_withdrawal_request rpc error:', error);
