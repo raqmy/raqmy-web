@@ -104,6 +104,7 @@ interface WalletLedgerRow {
   reference: string | null;
   notes: string | null;
   created_at: string | null;
+  available_at?: string | null;
 }
 
 interface WithdrawalRequestRow {
@@ -530,9 +531,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       setProducts(productsWithThumbs);
       setAffiliateLinks(linksWithStats);
 
-      const revenue = Number(statsData?.total_revenue || 0);
-      const sales = Number(statsData?.total_sales || 0);
-      
+      const revenue =
+        safeArray(ordersData)?.reduce((sum: number, order: any) => sum + Number(order.seller_amount || 0), 0) || 0;
+
+      const sales = safeArray(ordersData)?.length || 0;
       const views = productsWithThumbs.reduce((sum, p) => sum + (p.views_count || 0), 0);
       const active = productsWithThumbs.filter((p) => p.is_active).length || 0;
 
@@ -1238,6 +1240,34 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     };
   };
 
+  const ledgerStatusMeta = (status: string | null | undefined) => {
+    if (status === 'completed') {
+      return {
+        label: 'مكتمل',
+        className: 'bg-green-100 text-green-700',
+      };
+    }
+
+    if (status === 'pending') {
+      return {
+        label: 'معلق',
+        className: 'bg-yellow-100 text-yellow-700',
+      };
+    }
+
+    if (status === 'rejected') {
+      return {
+        label: 'مرفوض',
+        className: 'bg-red-100 text-red-700',
+      };
+    }
+
+    return {
+      label: status || '—',
+      className: 'bg-gray-100 text-gray-700',
+    };
+  };
+
   const ledgerEntryMeta = (entryType: string | null | undefined) => {
     if (entryType === 'sale_credit') {
       return {
@@ -1290,6 +1320,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   const availableBalance = Number(walletData?.balance_available || 0);
   const pendingBalance = Number(walletData?.balance_pending || 0);
+  const totalTrackedEarnings = availableBalance + pendingBalance + withdrawalRequests
+    .filter((row) => row.status === 'approved')
+    .reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const approvedWithdrawalsTotal = withdrawalRequests
     .filter((row) => row.status === 'approved')
     .reduce((sum, row) => sum + Number(row.amount || 0), 0);
@@ -1481,9 +1514,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <TrendingUp className="w-5 h-5 text-green-600" />
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">
-                  {stats.totalRevenue.toFixed(2)} ريال
+                  {formatCurrency(totalTrackedEarnings)}
                 </div>
-                <p className="text-sm text-gray-600">إجمالي الأرباح</p>
+                <p className="text-sm text-gray-600">إجمالي الأرباح (متاح + معلق + مسحوب)</p>
               </div>
 
               <div className="bg-white rounded-xl p-6 shadow-sm">
@@ -1883,7 +1916,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 mb-2">الأرباح والسحب</h2>
                   <p className="text-gray-600">
-                    من هنا يمكنك متابعة رصيدك، مراجعة سجل المحفظة، وإرسال طلبات سحب الأرباح.
+                    من هنا يمكنك متابعة الرصيد المتاح والمعلق، مراجعة سجل المحفظة، وإرسال طلبات سحب الأرباح.
                   </p>
                 </div>
 
@@ -1965,6 +1998,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(approvedWithdrawalsTotal)}</div>
                 <p className="text-sm text-gray-500">إجمالي السحوبات المعتمدة</p>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center">
+                    <DollarSign className="w-6 h-6 text-indigo-600" />
+                  </div>
+                  <span className="text-xs font-semibold text-indigo-700 bg-indigo-100 px-3 py-1 rounded-full">
+                    إجمالي الأرباح
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(totalTrackedEarnings)}</div>
+                <p className="text-sm text-gray-500">المتاح + المعلق + السحوبات المعتمدة</p>
               </div>
 
               <div className="bg-white rounded-2xl shadow-sm p-6">
@@ -2259,6 +2305,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <div className="space-y-4">
                   {latestLedgerEntries.map((entry) => {
                     const meta = ledgerEntryMeta(entry.entry_type);
+                    const statusMeta = ledgerStatusMeta(entry.status);
                     const EntryIcon = meta.icon;
                     return (
                       <div
@@ -2273,13 +2320,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                           <div>
                             <div className="font-bold text-gray-900">{meta.label}</div>
                             <div className="text-sm text-gray-500">{formatDate(entry.created_at)}</div>
+                            {entry.available_at && entry.status === 'pending' && (
+                              <div className="text-xs text-amber-700 mt-1">
+                                يصبح متاحاً في: {formatDate(entry.available_at)}
+                              </div>
+                            )}
                             {entry.notes && <div className="text-sm text-gray-500 mt-1">{entry.notes}</div>}
                           </div>
                         </div>
 
                         <div className="text-right">
                           <div className="text-lg font-bold text-gray-900">{formatCurrency(entry.amount)}</div>
-                          <div className="text-sm text-gray-500">{entry.status || '—'}</div>
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold mt-2 ${statusMeta.className}`}>
+                            {statusMeta.label}
+                          </span>
                         </div>
                       </div>
                     );
