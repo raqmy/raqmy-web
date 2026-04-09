@@ -218,12 +218,61 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     setLoading(true);
 
     try {
-      let query = supabase.from('products').select('*');
+      let data: Product | null = null;
+      let fetchError: any = null;
 
       if (productSlug) {
-        query = query.eq('slug', productSlug);
+        const { data: slugData, error: slugError } = await supabase
+          .from('products')
+          .select('*')
+          .eq('slug', productSlug)
+          .maybeSingle();
+
+        if (slugError) {
+          console.error('Error fetching product by slug:', slugError);
+          fetchError = slugError;
+        } else if (slugData) {
+          data = slugData as Product;
+        } else {
+          const { data: idFallbackData, error: idFallbackError } = await supabase
+            .from('products')
+            .select('*')
+            .eq('id', productSlug)
+            .maybeSingle();
+
+          if (idFallbackError) {
+            console.error('Error fetching product by slug fallback id:', idFallbackError);
+            fetchError = idFallbackError;
+          } else if (idFallbackData) {
+            data = idFallbackData as Product;
+          }
+        }
       } else if (productId) {
-        query = query.eq('id', productId);
+        const { data: idData, error: idError } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', productId)
+          .maybeSingle();
+
+        if (idError) {
+          console.error('Error fetching product by id:', idError);
+          fetchError = idError;
+        } else if (idData) {
+          data = idData as Product;
+        } else {
+          const { data: slugFallbackData, error: slugFallbackError } = await supabase
+            .from('products')
+            .select('*')
+            .eq('slug', productId)
+            .maybeSingle();
+
+          if (slugFallbackError) {
+            console.error('Error fetching product by id fallback slug:', slugFallbackError);
+            fetchError = slugFallbackError;
+          } else if (slugFallbackData) {
+            data = slugFallbackData as Product;
+          }
+        }
       } else {
         setProduct(null);
         setResolvedProductId(null);
@@ -231,12 +280,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         return;
       }
 
-      const { data, error } = await query.maybeSingle();
-
-      if (error) {
-        console.error('Error fetching product:', error);
+      if (fetchError && !data) {
         setProduct(null);
         setResolvedProductId(null);
+        setIsOwner(false);
         setLoading(false);
         return;
       }
@@ -244,6 +291,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       if (!data) {
         setProduct(null);
         setResolvedProductId(null);
+        setIsOwner(false);
         setLoading(false);
         return;
       }
@@ -255,23 +303,33 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       let seller = null;
 
       if (data.store_id) {
-        const { data: storeData } = await supabase
+        const { data: storeData, error: storeError } = await supabase
           .from('stores')
           .select('id, name, slug, category')
           .eq('id', data.store_id)
           .maybeSingle();
 
-        store = storeData;
+        if (storeError) {
+          console.error('Error fetching store:', storeError);
+        } else {
+          store = storeData;
+        }
       }
 
-      if (data.user_id) {
-        const { data: userData } = await supabase
+      const sellerId = (data as any).user_id ?? (data as any).merchant_id ?? null;
+
+      if (sellerId) {
+        const { data: userData, error: userError } = await supabase
           .from('users_profile')
           .select('id, name')
-          .eq('id', data.user_id)
+          .eq('id', sellerId)
           .maybeSingle();
 
-        seller = userData;
+        if (userError) {
+          console.error('Error fetching seller profile:', userError);
+        } else {
+          seller = userData;
+        }
       }
 
       const enrichedProduct = {
@@ -281,16 +339,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       };
 
       setProduct(enrichedProduct as ProductWithDetails);
-
-      if (user && data.user_id === user.id) {
-        setIsOwner(true);
-      } else {
-        setIsOwner(false);
-      }
+      setIsOwner(!!user && !!sellerId && sellerId === user.id);
     } catch (error) {
       console.error('Error fetching product:', error);
       setProduct(null);
       setResolvedProductId(null);
+      setIsOwner(false);
     } finally {
       setLoading(false);
     }
