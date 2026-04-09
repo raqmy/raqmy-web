@@ -400,57 +400,62 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   const fetchDashboardData = async () => {
-    if (!profile) return;
+  if (!profile) return;
 
-    try {
-      setLoading(true);
+  try {
+    setLoading(true);
 
-      const { data: storesData, error: storesErr } = await supabase
-        .from('stores')
-        .select('*')
-        .eq('user_id', profile.id);
+    // ✅ المتاجر
+    const { data: storesData, error: storesErr } = await supabase
+      .from('stores')
+      .select('*')
+      .eq('user_id', profile.id);
 
-      if (storesErr) console.error('stores fetch error:', storesErr);
+    if (storesErr) console.error('stores fetch error:', storesErr);
 
-      const { data: rawProductsData, error: productsErr } = await supabase
-        .from('products')
-        .select('*')
-        .or(`user_id.eq.${profile.id},merchant_id.eq.${profile.id}`);
+    // ✅ المنتجات
+    const { data: rawProductsData, error: productsErr } = await supabase
+      .from('products')
+      .select('*')
+      .or(`user_id.eq.${profile.id},merchant_id.eq.${profile.id}`);
 
-      if (productsErr) console.error('products fetch error:', productsErr);
+    if (productsErr) console.error('products fetch error:', productsErr);
 
-      const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
+    const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
 
-      const { data: ordersData, error: ordersErr } = await supabase
-        .from('orders')
-        .select('seller_amount, status')
-        .eq('seller_id', profile.id)
-        .eq('status', 'completed');
+    // ✅ 🔥 الإحصائيات (RPC)
+    const { data: statsData, error: statsError } = await supabase
+      .rpc('get_seller_stats', { p_seller_id: profile.id });
 
-      if (ordersErr) console.error('orders fetch error:', ordersErr);
+    if (statsError) {
+      console.error('get_seller_stats error:', statsError);
+    }
 
-      const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
-      const thumbMap: Record<string, string> = {};
+    // الصور
+    const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
+    const thumbMap: Record<string, string> = {};
 
-      if (productIds.length > 0) {
-        const { data: imgs, error: imgsErr } = await supabase
-          .from('product_images')
-          .select('product_id, image_url, is_primary, display_order, created_at')
-          .in('product_id', productIds)
-          .order('is_primary', { ascending: false })
-          .order('display_order', { ascending: true })
-          .order('created_at', { ascending: true });
+    if (productIds.length > 0) {
+      const { data: imgs, error: imgsErr } = await supabase
+        .from('product_images')
+        .select('product_id, image_url, is_primary, display_order, created_at')
+        .in('product_id', productIds)
+        .order('is_primary', { ascending: false })
+        .order('display_order', { ascending: true })
+        .order('created_at', { ascending: true });
 
-        if (imgsErr) {
-          console.error('product_images fetch error:', imgsErr);
-        } else {
-          for (const row of safeArray(imgs) as any[]) {
-            if (!thumbMap[row.product_id] && row.image_url) {
-              thumbMap[row.product_id] = row.image_url;
-            }
+      if (imgsErr) {
+        console.error('product_images fetch error:', imgsErr);
+      } else {
+        for (const row of safeArray(imgs) as any[]) {
+          if (!thumbMap[row.product_id] && row.image_url) {
+            thumbMap[row.product_id] = row.image_url;
           }
         }
       }
+    }
+
+    
 
       const productsWithThumbs = normalizedProducts.map((p) => ({
         ...p,
@@ -525,10 +530,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       setProducts(productsWithThumbs);
       setAffiliateLinks(linksWithStats);
 
-      const revenue =
-        safeArray(ordersData)?.reduce((sum: number, order: any) => sum + Number(order.seller_amount || 0), 0) || 0;
-
-      const sales = safeArray(ordersData)?.length || 0;
+      const revenue = Number(statsData?.total_revenue || 0);
+      const sales = Number(statsData?.total_sales || 0);
+      
       const views = productsWithThumbs.reduce((sum, p) => sum + (p.views_count || 0), 0);
       const active = productsWithThumbs.filter((p) => p.is_active).length || 0;
 
