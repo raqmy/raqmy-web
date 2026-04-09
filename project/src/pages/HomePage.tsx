@@ -6,8 +6,14 @@ interface HomePageProps {
   onNavigate: (page: string) => void;
 }
 
+interface FeaturedProduct extends Product {
+  thumbnail_url?: string | null;
+  store?: any;
+  seller?: any;
+}
+
 export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
-  const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
+  const [featuredProducts, setFeaturedProducts] = useState<FeaturedProduct[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -37,6 +43,26 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
         return;
       }
 
+      const productIds = data.map((product: any) => product.id);
+
+      const { data: imagesData, error: imagesError } = await supabase
+        .from('product_images')
+        .select('product_id, image_url, is_primary, display_order')
+        .in('product_id', productIds)
+        .order('is_primary', { ascending: false })
+        .order('display_order', { ascending: true });
+
+      if (imagesError) {
+        console.error('Error fetching featured product images:', imagesError);
+      }
+
+      const imageMap = new Map<string, string>();
+      (imagesData || []).forEach((img: any) => {
+        if (!imageMap.has(img.product_id) && img.image_url) {
+          imageMap.set(img.product_id, img.image_url);
+        }
+      });
+
       const enrichedProducts = await Promise.all(
         data.map(async (product: any) => {
           let store = null;
@@ -62,15 +88,21 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             seller = userData;
           }
 
+          const finalThumbnail =
+            product.thumbnail_url && String(product.thumbnail_url).trim() !== ''
+              ? product.thumbnail_url
+              : imageMap.get(product.id) ?? null;
+
           return {
             ...product,
+            thumbnail_url: finalThumbnail,
             store,
             seller,
           };
         })
       );
 
-      setFeaturedProducts(enrichedProducts as any);
+      setFeaturedProducts(enrichedProducts as FeaturedProduct[]);
     } catch (error) {
       console.error('Error fetching featured products:', error);
       setFeaturedProducts([]);
