@@ -51,11 +51,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             store = storeData;
           }
 
-          if (product.user_id) {
+          const sellerId = product.user_id ?? product.merchant_id ?? null;
+
+          if (sellerId) {
             const { data: userData } = await supabase
               .from('users_profile')
               .select('id, name')
-              .eq('id', product.user_id)
+              .eq('id', sellerId)
               .maybeSingle();
             seller = userData;
           }
@@ -130,42 +132,44 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {featuredProducts.map((product: any) => (
-              <div
-                key={product.id}
-                className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow cursor-pointer"
-                onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
-              >
-                <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                  {product.thumbnail_url ? (
-                    <img
-                      src={product.thumbnail_url}
-                      alt={product.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <Download className="w-16 h-16 text-blue-600" />
-                  )}
-                </div>
-                <div className="p-6">
-                  <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-1">
-                    {product.name}
-                  </h3>
-                  <p className="text-gray-600 mb-4 line-clamp-2">
-                    {product.description || 'منتج رقمي عالي الجودة'}
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <div className="text-2xl font-bold text-blue-600">
-                      {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
-                    </div>
-                    <div className="flex items-center gap-1 text-sm text-gray-500">
-                      <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                      <span>4.8</span>
+            {featuredProducts.map((product: any) => {
+              const displayName = product.title ?? product.name ?? 'منتج رقمي';
+
+              return (
+                <div
+                  key={product.id}
+                  className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow cursor-pointer"
+                  onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
+                >
+                  <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+                    {product.thumbnail_url ? (
+                      <img
+                        src={product.thumbnail_url}
+                        alt={displayName}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <Download className="w-16 h-16 text-blue-600" />
+                    )}
+                  </div>
+                  <div className="p-6">
+                    <h3 className="text-xl font-bold text-gray-900 mb-4 line-clamp-1">
+                      {displayName}
+                    </h3>
+
+                    <div className="flex items-center justify-between">
+                      <div className="text-2xl font-bold text-blue-600">
+                        {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
+                      </div>
+                      <div className="flex items-center gap-1 text-sm text-gray-500">
+                        <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                        <span>4.8</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="text-center mt-12 md:hidden">
