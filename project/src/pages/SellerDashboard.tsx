@@ -104,7 +104,6 @@ interface WalletLedgerRow {
   reference: string | null;
   notes: string | null;
   created_at: string | null;
-  available_at?: string | null;
 }
 
 interface WithdrawalRequestRow {
@@ -141,6 +140,13 @@ interface WithdrawalLimitSettingsRow {
 interface WithdrawalLimitStatusRow extends WithdrawalLimitSettingsRow {
   used_requests: number;
   remaining_requests: number;
+}
+
+interface EarningsOrderMeta {
+  affiliateLabel?: string | null;
+  affiliateAmount?: number;
+  couponLabel?: string | null;
+  couponAmount?: number;
 }
 
 type NormalizedProduct = Product & {
@@ -226,6 +232,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [withdrawalLimitLoading, setWithdrawalLimitLoading] = useState(false);
   const [withdrawalLimitStatus, setWithdrawalLimitStatus] = useState<WithdrawalLimitStatusRow | null>(null);
   const [withdrawalLimitSettings, setWithdrawalLimitSettings] = useState<WithdrawalLimitSettingsRow | null>(null);
+
+  const [earningsOrderMeta, setEarningsOrderMeta] = useState<Record<string, EarningsOrderMeta>>({});
 
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequestRow | null>(null);
   const [showWithdrawalDetails, setShowWithdrawalDetails] = useState(false);
@@ -401,62 +409,57 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   const fetchDashboardData = async () => {
-  if (!profile) return;
+    if (!profile) return;
 
-  try {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    // ✅ المتاجر
-    const { data: storesData, error: storesErr } = await supabase
-      .from('stores')
-      .select('*')
-      .eq('user_id', profile.id);
+      const { data: storesData, error: storesErr } = await supabase
+        .from('stores')
+        .select('*')
+        .eq('user_id', profile.id);
 
-    if (storesErr) console.error('stores fetch error:', storesErr);
+      if (storesErr) console.error('stores fetch error:', storesErr);
 
-    // ✅ المنتجات
-    const { data: rawProductsData, error: productsErr } = await supabase
-      .from('products')
-      .select('*')
-      .or(`user_id.eq.${profile.id},merchant_id.eq.${profile.id}`);
+      const { data: rawProductsData, error: productsErr } = await supabase
+        .from('products')
+        .select('*')
+        .or(`user_id.eq.${profile.id},merchant_id.eq.${profile.id}`);
 
-    if (productsErr) console.error('products fetch error:', productsErr);
+      if (productsErr) console.error('products fetch error:', productsErr);
 
-    const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
+      const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
 
-    // ✅ 🔥 الإحصائيات (RPC)
-    const { data: statsData, error: statsError } = await supabase
-      .rpc('get_seller_stats', { p_seller_id: profile.id });
+      const { data: ordersData, error: ordersErr } = await supabase
+        .from('orders')
+        .select('seller_amount, status')
+        .eq('seller_id', profile.id)
+        .eq('status', 'completed');
 
-    if (statsError) {
-      console.error('get_seller_stats error:', statsError);
-    }
+      if (ordersErr) console.error('orders fetch error:', ordersErr);
 
-    // الصور
-    const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
-    const thumbMap: Record<string, string> = {};
+      const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
+      const thumbMap: Record<string, string> = {};
 
-    if (productIds.length > 0) {
-      const { data: imgs, error: imgsErr } = await supabase
-        .from('product_images')
-        .select('product_id, image_url, is_primary, display_order, created_at')
-        .in('product_id', productIds)
-        .order('is_primary', { ascending: false })
-        .order('display_order', { ascending: true })
-        .order('created_at', { ascending: true });
+      if (productIds.length > 0) {
+        const { data: imgs, error: imgsErr } = await supabase
+          .from('product_images')
+          .select('product_id, image_url, is_primary, display_order, created_at')
+          .in('product_id', productIds)
+          .order('is_primary', { ascending: false })
+          .order('display_order', { ascending: true })
+          .order('created_at', { ascending: true });
 
-      if (imgsErr) {
-        console.error('product_images fetch error:', imgsErr);
-      } else {
-        for (const row of safeArray(imgs) as any[]) {
-          if (!thumbMap[row.product_id] && row.image_url) {
-            thumbMap[row.product_id] = row.image_url;
+        if (imgsErr) {
+          console.error('product_images fetch error:', imgsErr);
+        } else {
+          for (const row of safeArray(imgs) as any[]) {
+            if (!thumbMap[row.product_id] && row.image_url) {
+              thumbMap[row.product_id] = row.image_url;
+            }
           }
         }
       }
-    }
-
-    
 
       const productsWithThumbs = normalizedProducts.map((p) => ({
         ...p,
@@ -652,7 +655,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           .select('*')
           .eq('merchant_id', profile.id)
           .order('created_at', { ascending: false })
-          .limit(10),
+          .limit(20),
         supabase
           .from('withdrawal_requests')
           .select('*')
@@ -672,9 +675,97 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         console.error('withdrawal_requests fetch error:', requestsRes.error);
       }
 
+      const ledgerRows = (safeArray(ledgerRes.data) as any[]) ?? [];
+      const orderIds = Array.from(
+        new Set(
+          ledgerRows
+            .map((row) => row?.order_id)
+            .filter(Boolean)
+        )
+      ) as string[];
+
+      const nextMeta: Record<string, EarningsOrderMeta> = {};
+
+      if (orderIds.length > 0) {
+        const { data: commissionsData, error: commissionsError } = await supabase
+          .from('affiliate_commissions')
+          .select('order_id, marketer_id, commission_amount')
+          .in('order_id', orderIds);
+
+        if (commissionsError) {
+          console.error('affiliate_commissions fetch error:', commissionsError);
+        } else {
+          const commissions = safeArray(commissionsData) as Array<{
+            order_id: string;
+            marketer_id: string | null;
+            commission_amount: number | null;
+          }>;
+
+          const marketerIds = Array.from(
+            new Set(
+              commissions
+                .map((row) => row.marketer_id)
+                .filter(Boolean)
+            )
+          ) as string[];
+
+          const marketerUserMap: Record<string, string> = {};
+          if (marketerIds.length > 0) {
+            const { data: marketersData, error: marketersError } = await supabase
+              .from('affiliate_marketers')
+              .select('id, user_id')
+              .in('id', marketerIds);
+
+            if (marketersError) {
+              console.error('affiliate_marketers fetch error:', marketersError);
+            } else {
+              for (const row of safeArray(marketersData) as any[]) {
+                if (row?.id && row?.user_id) {
+                  marketerUserMap[row.id] = row.user_id;
+                }
+              }
+            }
+          }
+
+          const marketerUserIds = Array.from(new Set(Object.values(marketerUserMap).filter(Boolean)));
+          const marketerNameMap: Record<string, string> = {};
+
+          if (marketerUserIds.length > 0) {
+            const { data: usersData, error: usersError } = await supabase
+              .from('users_profile')
+              .select('id, name')
+              .in('id', marketerUserIds);
+
+            if (usersError) {
+              console.error('affiliate marketers users_profile fetch error:', usersError);
+            } else {
+              for (const row of safeArray(usersData) as any[]) {
+                if (row?.id) {
+                  marketerNameMap[row.id] = row.name || 'مسوق';
+                }
+              }
+            }
+          }
+
+          for (const row of commissions) {
+            if (!row?.order_id) continue;
+
+            const marketerUserId = row.marketer_id ? marketerUserMap[row.marketer_id] : undefined;
+            const marketerName = marketerUserId ? marketerNameMap[marketerUserId] : undefined;
+
+            nextMeta[row.order_id] = {
+              ...nextMeta[row.order_id],
+              affiliateLabel: marketerName || 'المسوق',
+              affiliateAmount: Number(row.commission_amount || 0),
+            };
+          }
+        }
+      }
+
       setWalletData((walletRes.data as WalletRow | null) ?? null);
-      setWalletLedger((safeArray(ledgerRes.data) as any[]) ?? []);
+      setWalletLedger(ledgerRows);
       setWithdrawalRequests((safeArray(requestsRes.data) as any[]) ?? []);
+      setEarningsOrderMeta(nextMeta);
     } catch (error) {
       console.error('Error fetching earnings data:', error);
     } finally {
@@ -1240,32 +1331,42 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     };
   };
 
-  const ledgerStatusMeta = (status: string | null | undefined) => {
-    if (status === 'completed') {
-      return {
-        label: 'مكتمل',
-        className: 'bg-green-100 text-green-700',
-      };
+  const formatLedgerStatus = (status: string | null | undefined) => {
+    if (status === 'pending') return 'معلق';
+    if (status === 'completed') return 'مكتمل';
+    if (status === 'approved') return 'معتمد';
+    if (status === 'rejected') return 'مرفوض';
+    return status || '—';
+  };
+
+  const buildLedgerDescription = (entry: WalletLedgerRow) => {
+    const parts: string[] = [];
+
+    if (entry.notes) {
+      parts.push(entry.notes);
     }
 
-    if (status === 'pending') {
-      return {
-        label: 'معلق',
-        className: 'bg-yellow-100 text-yellow-700',
-      };
+    const meta = entry.order_id ? earningsOrderMeta[entry.order_id] : null;
+
+    if (meta?.affiliateLabel) {
+      const affiliateText = meta.affiliateAmount
+        ? `هذه العملية تشمل عمولة تسويق مستحقة ${formatCurrency(meta.affiliateAmount)} لصالح ${meta.affiliateLabel}، لكن كامل مبلغ البيع بعد عمولة الموقع دخل إلى رصيد التاجر.`
+        : `هذه العملية مرتبطة بتسويق بالعمولة لصالح ${meta.affiliateLabel}، وعمولة المسوق مسجلة داخل النظام كمستحقة فقط دون تحويل تلقائي.`;
+      parts.push(affiliateText);
     }
 
-    if (status === 'rejected') {
-      return {
-        label: 'مرفوض',
-        className: 'bg-red-100 text-red-700',
-      };
+    if (meta?.couponLabel) {
+      const couponText = meta.couponAmount
+        ? `تم تطبيق كوبون ${meta.couponLabel} بقيمة ${formatCurrency(meta.couponAmount)} على هذا الطلب.`
+        : `تم تطبيق كوبون ${meta.couponLabel} على هذا الطلب.`;
+      parts.push(couponText);
     }
 
-    return {
-      label: status || '—',
-      className: 'bg-gray-100 text-gray-700',
-    };
+    if (entry.entry_type === 'sale_credit' && !meta?.affiliateLabel) {
+      parts.push('تم إضافة صافي البيع بعد عمولة الموقع إلى محفظة التاجر، وأي عمولات تسويق أو كوبونات يتم تتبعها بشكل منفصل ولا تُحوّل تلقائيًا من المنصة.');
+    }
+
+    return parts.join(' ');
   };
 
   const ledgerEntryMeta = (entryType: string | null | undefined) => {
@@ -1320,9 +1421,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   const availableBalance = Number(walletData?.balance_available || 0);
   const pendingBalance = Number(walletData?.balance_pending || 0);
-  const totalTrackedEarnings = availableBalance + pendingBalance + withdrawalRequests
-    .filter((row) => row.status === 'approved')
-    .reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const approvedWithdrawalsTotal = withdrawalRequests
     .filter((row) => row.status === 'approved')
     .reduce((sum, row) => sum + Number(row.amount || 0), 0);
@@ -1514,9 +1612,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <TrendingUp className="w-5 h-5 text-green-600" />
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">
-                  {formatCurrency(totalTrackedEarnings)}
+                  {stats.totalRevenue.toFixed(2)} ريال
                 </div>
-                <p className="text-sm text-gray-600">إجمالي الأرباح (متاح + معلق + مسحوب)</p>
+                <p className="text-sm text-gray-600">إجمالي الأرباح</p>
               </div>
 
               <div className="bg-white rounded-xl p-6 shadow-sm">
@@ -1550,7 +1648,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6">
               <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 text-white">
                 <h2 className="text-2xl font-bold mb-4">ابدأ البيع الآن!</h2>
                 <p className="text-blue-100 mb-6">
@@ -1576,38 +1674,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     </button>
                   )}
                 </div>
-              </div>
-
-              <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-100">
-                <div className="flex items-start justify-between gap-4 mb-4">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">الحساب البنكي</h2>
-                    <p className="text-gray-600">اربط حسابك البنكي واعرف حالة مراجعته قبل طلب السحب.</p>
-                  </div>
-                  <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center">
-                    <Landmark className="w-7 h-7 text-purple-600" />
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 mb-4">
-                  <span className={`px-3 py-1 rounded-full text-sm font-semibold ${bankAccountStatusMeta.className}`}>
-                    {bankAccountStatusMeta.label}
-                  </span>
-                  <span className="text-sm text-gray-500">{bankAccountStatusMeta.description}</span>
-                </div>
-
-                {bankAccountData?.rejection_reason && bankAccountData.status === 'rejected' && (
-                  <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                    سبب الرفض: {bankAccountData.rejection_reason}
-                  </div>
-                )}
-
-                <button
-                  onClick={() => setActiveTab('bankAccount')}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-                >
-                  إدارة الحساب البنكي
-                </button>
               </div>
             </div>
           </div>
@@ -1916,7 +1982,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 mb-2">الأرباح والسحب</h2>
                   <p className="text-gray-600">
-                    من هنا يمكنك متابعة الرصيد المتاح والمعلق، مراجعة سجل المحفظة، وإرسال طلبات سحب الأرباح.
+                    من هنا يمكنك متابعة رصيدك، مراجعة سجل المحفظة، وإرسال طلبات سحب الأرباح.
                   </p>
                 </div>
 
@@ -1960,7 +2026,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               <div className="bg-white rounded-2xl shadow-sm p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
@@ -1984,7 +2050,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   </span>
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(pendingBalance)}</div>
-                <p className="text-sm text-gray-500">أرباح لم تصبح متاحة بعد</p>
+                <p className="text-sm text-gray-500">أرباح دخلت للتاجر وتصبح متاحة بعد انتهاء فترة التعليق</p>
               </div>
 
               <div className="bg-white rounded-2xl shadow-sm p-6">
@@ -1998,32 +2064,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(approvedWithdrawalsTotal)}</div>
                 <p className="text-sm text-gray-500">إجمالي السحوبات المعتمدة</p>
-              </div>
-
-              <div className="bg-white rounded-2xl shadow-sm p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center">
-                    <DollarSign className="w-6 h-6 text-indigo-600" />
-                  </div>
-                  <span className="text-xs font-semibold text-indigo-700 bg-indigo-100 px-3 py-1 rounded-full">
-                    إجمالي الأرباح
-                  </span>
-                </div>
-                <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(totalTrackedEarnings)}</div>
-                <p className="text-sm text-gray-500">المتاح + المعلق + السحوبات المعتمدة</p>
-              </div>
-
-              <div className="bg-white rounded-2xl shadow-sm p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
-                    <Landmark className="w-6 h-6 text-purple-600" />
-                  </div>
-                  <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-3 py-1 rounded-full">
-                    الحساب البنكي
-                  </span>
-                </div>
-                <div className="text-lg font-bold text-gray-900 mb-1">{bankAccountStatusMeta.label}</div>
-                <p className="text-sm text-gray-500">حالة الحساب البنكي المرتبط بالسحب</p>
               </div>
             </div>
 
@@ -2305,40 +2345,70 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <div className="space-y-4">
                   {latestLedgerEntries.map((entry) => {
                     const meta = ledgerEntryMeta(entry.entry_type);
-                    const statusMeta = ledgerStatusMeta(entry.status);
                     const EntryIcon = meta.icon;
+                    const entryDescription = buildLedgerDescription(entry);
+                    const hasAffiliateInfo = Boolean(entry.order_id && earningsOrderMeta[entry.order_id]?.affiliateLabel);
+
                     return (
                       <div
                         key={entry.id}
-                        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border border-gray-200 rounded-2xl p-5"
+                        className="border border-gray-200 rounded-2xl p-5"
                       >
-                        <div className="flex items-center gap-4">
-                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${meta.bgClass}`}>
-                            <EntryIcon className={`w-6 h-6 ${meta.iconClass}`} />
-                          </div>
+                        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                          <div className="flex items-start gap-4">
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${meta.bgClass}`}>
+                              <EntryIcon className={`w-6 h-6 ${meta.iconClass}`} />
+                            </div>
 
-                          <div>
-                            <div className="font-bold text-gray-900">{meta.label}</div>
-                            <div className="text-sm text-gray-500">{formatDate(entry.created_at)}</div>
-                            {entry.available_at && entry.status === 'pending' && (
-                              <div className="text-xs text-amber-700 mt-1">
-                                يصبح متاحاً في: {formatDate(entry.available_at)}
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-bold text-gray-900">{meta.label}</div>
+                                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                  entry.status === 'pending'
+                                    ? 'bg-yellow-100 text-yellow-700'
+                                    : entry.status === 'completed' || entry.status === 'approved'
+                                    ? 'bg-green-100 text-green-700'
+                                    : entry.status === 'rejected'
+                                    ? 'bg-red-100 text-red-700'
+                                    : 'bg-gray-100 text-gray-700'
+                                }`}>
+                                  {formatLedgerStatus(entry.status)}
+                                </span>
+                                {hasAffiliateInfo && (
+                                  <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                                    عمولة مسوق مسجلة فقط
+                                  </span>
+                                )}
                               </div>
-                            )}
-                            {entry.notes && <div className="text-sm text-gray-500 mt-1">{entry.notes}</div>}
-                          </div>
-                        </div>
 
-                        <div className="text-right">
-                          <div className="text-lg font-bold text-gray-900">{formatCurrency(entry.amount)}</div>
-                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold mt-2 ${statusMeta.className}`}>
-                            {statusMeta.label}
-                          </span>
+                              <div className="text-sm text-gray-500">{formatDate(entry.created_at)}</div>
+
+                              {entryDescription && (
+                                <div className="text-sm text-gray-600 leading-7 max-w-3xl">{entryDescription}</div>
+                              )}
+
+                              {entry.available_at && entry.status === 'pending' && (
+                                <div className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 inline-flex items-center gap-2">
+                                  <Clock3 className="w-4 h-4" />
+                                  <span>يتحول هذا المبلغ إلى الرصيد المتاح في: {formatDate(entry.available_at)}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="text-right lg:min-w-[170px]">
+                            <div className="text-lg font-bold text-gray-900">{formatCurrency(entry.amount)}</div>
+                            {entry.reference && (
+                              <div className="text-xs text-gray-400 mt-1 break-all">{entry.reference}</div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
                   })}
                 </div>
+              )}
+            </div>                </div>
               )}
             </div>
           </div>
