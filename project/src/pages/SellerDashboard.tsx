@@ -104,6 +104,7 @@ interface WalletLedgerRow {
   reference: string | null;
   notes: string | null;
   created_at: string | null;
+  available_at: string | null;
 }
 
 interface WithdrawalRequestRow {
@@ -2407,8 +2408,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     );
                   })}
                 </div>
-              )}
-            </div>                </div>
               )}
             </div>
           </div>
