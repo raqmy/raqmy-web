@@ -440,7 +440,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       const { data: fallbackOrdersData, error: fallbackOrdersErr } = await supabase
         .from('orders')
-        .select('seller_amount, status')
+        .select('id, seller_amount, status')
         .or(`seller_id.eq.${profile.id},merchant_id.eq.${profile.id}`)
         .in('status', ['paid', 'completed']);
 
@@ -471,16 +471,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
         const { data: soldItemsData, error: soldItemsErr } = await supabase
           .from('order_items')
-          .select('product_id, quantity, status, seller_id')
-          .eq('seller_id', profile.id)
-          .in('status', ['paid', 'completed']);
+          .select('order_id, product_id, quantity, seller_id')
+          .eq('seller_id', profile.id);
 
         if (soldItemsErr) {
           console.error('order_items sales fetch error:', soldItemsErr);
         } else {
-          for (const row of safeArray(soldItemsData) as any[]) {
+          const soldItemsRows = safeArray(soldItemsData) as any[];
+          const paidOrderIds = new Set(
+            safeArray(fallbackOrdersData)
+              .filter((order: any) => ['paid', 'completed'].includes(String(order?.status || '').toLowerCase()))
+              .map((order: any) => order?.id)
+              .filter(Boolean)
+          );
+
+          for (const row of soldItemsRows) {
             const productId = row?.product_id;
-            if (!productId) continue;
+            const orderId = row?.order_id;
+
+            if (!productId || !orderId || !paidOrderIds.has(orderId)) continue;
+
             productSalesMap[productId] = (productSalesMap[productId] || 0) + Number(row?.quantity || 1);
           }
         }
