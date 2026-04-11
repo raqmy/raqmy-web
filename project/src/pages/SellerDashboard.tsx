@@ -430,6 +430,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       if (productsErr) console.error('products fetch error:', productsErr);
 
       const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
+      const storeIds = safeArray(storesData).map((store: any) => store?.id).filter(Boolean);
 
       const { data: sellerStatsData, error: sellerStatsErr } = await supabase.rpc('get_seller_stats', {
         seller_id: profile.id,
@@ -447,6 +448,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
       const thumbMap: Record<string, string> = {};
+      const productSalesMap: Record<string, number> = {};
 
       if (productIds.length > 0) {
         const { data: imgs, error: imgsErr } = await supabase
@@ -466,27 +468,74 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             }
           }
         }
+
+        const { data: soldItemsData, error: soldItemsErr } = await supabase
+          .from('order_items')
+          .select('product_id, quantity, status, seller_id')
+          .eq('seller_id', profile.id)
+          .in('status', ['paid', 'completed']);
+
+        if (soldItemsErr) {
+          console.error('order_items sales fetch error:', soldItemsErr);
+        } else {
+          for (const row of safeArray(soldItemsData) as any[]) {
+            const productId = row?.product_id;
+            if (!productId) continue;
+            productSalesMap[productId] = (productSalesMap[productId] || 0) + Number(row?.quantity || 1);
+          }
+        }
       }
 
       const productsWithThumbs = normalizedProducts.map((p) => ({
         ...p,
         thumbnail_url: p.thumbnail_url || thumbMap[p.id] || null,
+        sales_count: productSalesMap[p.id] ?? Number(p.sales_count || 0) ?? 0,
       }));
 
       let affiliateRows: AffiliateLinkRow[] = [];
-      if (productIds.length > 0) {
-        const { data: links, error: linksErr } = await supabase
+      const affiliateRowsMap = new Map<string, AffiliateLinkRow>();
+
+      const affiliateQueries = [
+        supabase
           .from('affiliate_links')
           .select('id, user_id, product_id, code, created_at')
-          .in('product_id', productIds);
+          .eq('seller_id', profile.id),
+      ];
 
-        if (linksErr) {
-          console.error('affiliate_links fetch error:', linksErr);
-          affiliateRows = [];
-        } else {
-          affiliateRows = safeArray(links) as any[];
+      if (productIds.length > 0) {
+        affiliateQueries.push(
+          supabase
+            .from('affiliate_links')
+            .select('id, user_id, product_id, code, created_at')
+            .in('product_id', productIds)
+        );
+      }
+
+      if (storeIds.length > 0) {
+        affiliateQueries.push(
+          supabase
+            .from('affiliate_links')
+            .select('id, user_id, product_id, code, created_at')
+            .in('store_id', storeIds)
+        );
+      }
+
+      const affiliateResponses = await Promise.all(affiliateQueries);
+
+      for (const response of affiliateResponses) {
+        if (response.error) {
+          console.error('affiliate_links fetch error:', response.error);
+          continue;
+        }
+
+        for (const row of safeArray(response.data) as any[]) {
+          if (row?.id) {
+            affiliateRowsMap.set(row.id, row as AffiliateLinkRow);
+          }
         }
       }
+
+      affiliateRows = Array.from(affiliateRowsMap.values());
 
       const affiliateUserIds = Array.from(new Set(affiliateRows.map((l) => l.user_id).filter(Boolean)));
       const userMap: Record<string, { id: string; name: string }> = {};
