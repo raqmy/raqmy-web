@@ -1477,6 +1477,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     !hasReachedWithdrawalLimit &&
     !withdrawalSubmitting;
 
+  const totalProductsCount = products.length;
+  const averageViewsPerProduct = totalProductsCount > 0 ? stats.totalViews / totalProductsCount : 0;
+  const averageRevenuePerSale = stats.totalSales > 0 ? stats.totalRevenue / stats.totalSales : 0;
+  const totalAffiliateLinks = affiliateLinks.length;
+  const soldProductsCount = products.filter((product) => Number(product.sales_count || 0) > 0).length;
+  const topProducts = [...products]
+    .sort((a, b) => {
+      const salesDiff = Number(b.sales_count || 0) - Number(a.sales_count || 0);
+      if (salesDiff !== 0) return salesDiff;
+      return Number(b.views_count || 0) - Number(a.views_count || 0);
+    })
+    .slice(0, 5);
+  const latestOverviewLedgerEntries = latestLedgerEntries.slice(0, 4);
+
   const openProduct = (product: NormalizedProduct) => {
     onNavigate(`product-slug-${product.slug || product.id}`);
   };
@@ -1667,30 +1681,264 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-6">
-              <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 text-white">
-                <h2 className="text-2xl font-bold mb-4">ابدأ البيع الآن!</h2>
-                <p className="text-blue-100 mb-6">
-                  {stores.length === 0 ? 'أنشئ متجرك الأول وابدأ بإضافة المنتجات' : 'أضف منتجات جديدة لزيادة مبيعاتك'}
-                </p>
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <div className="xl:col-span-2 space-y-6">
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <div className="flex items-center justify-between gap-4 mb-6">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900 mb-1">ملخص الأداء السريع</h2>
+                      <p className="text-sm text-gray-600">نظرة مختصرة على أهم المؤشرات التي تساعدك على متابعة نشاط متجرك بسرعة.</p>
+                    </div>
+                    <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center">
+                      <BarChart3 className="w-6 h-6 text-blue-600" />
+                    </div>
+                  </div>
 
-                <div className="flex flex-wrap gap-4">
-                  {stores.length === 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-medium text-blue-700">متوسط الربح لكل عملية</span>
+                        <DollarSign className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900">{formatCurrency(averageRevenuePerSale)}</div>
+                      <p className="text-xs text-gray-600 mt-2">محسوب من إجمالي الأرباح ÷ عدد المبيعات.</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-purple-100 bg-purple-50/70 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-medium text-purple-700">متوسط المشاهدات</span>
+                        <Eye className="w-5 h-5 text-purple-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900">{averageViewsPerProduct.toFixed(1)}</div>
+                      <p className="text-xs text-gray-600 mt-2">متوسط المشاهدات لكل منتج نشط داخل متجرك.</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-medium text-emerald-700">الروابط التسويقية</span>
+                        <Share2 className="w-5 h-5 text-emerald-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900">{totalAffiliateLinks}</div>
+                      <p className="text-xs text-gray-600 mt-2">عدد الروابط التابعة لمنتجاتك والمسوقين لديك.</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-orange-100 bg-orange-50/70 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-medium text-orange-700">منتجات حققت مبيعات</span>
+                        <Package className="w-5 h-5 text-orange-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900">{soldProductsCount}</div>
+                      <p className="text-xs text-gray-600 mt-2">عدد المنتجات التي سجلت عملية بيع واحدة على الأقل.</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div className="rounded-2xl border border-green-100 p-4 bg-green-50/60">
+                      <div className="flex items-center gap-2 mb-2 text-green-700 font-semibold text-sm">
+                        <Wallet className="w-4 h-4" />
+                        <span>الرصيد المتاح</span>
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900 mb-2">{formatCurrency(availableBalance)}</div>
+                      <div className="w-full bg-white/80 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="bg-green-500 h-2 rounded-full"
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              stats.totalRevenue > 0 ? (availableBalance / stats.totalRevenue) * 100 : 0
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-yellow-100 p-4 bg-yellow-50/60">
+                      <div className="flex items-center gap-2 mb-2 text-yellow-700 font-semibold text-sm">
+                        <Clock3 className="w-4 h-4" />
+                        <span>الرصيد المعلق</span>
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900 mb-2">{formatCurrency(pendingBalance)}</div>
+                      <div className="w-full bg-white/80 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="bg-yellow-500 h-2 rounded-full"
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              stats.totalRevenue > 0 ? (pendingBalance / stats.totalRevenue) * 100 : 0
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-blue-100 p-4 bg-blue-50/60">
+                      <div className="flex items-center gap-2 mb-2 text-blue-700 font-semibold text-sm">
+                        <ArrowUpLeft className="w-4 h-4" />
+                        <span>إجمالي السحوبات المعتمدة</span>
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900 mb-2">{formatCurrency(approvedWithdrawalsTotal)}</div>
+                      <p className="text-xs text-gray-600">طلبات سحب مكتملة الاعتماد من الإدارة حتى الآن.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <div className="flex items-center justify-between gap-4 mb-6">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900 mb-1">أفضل المنتجات أداءً</h2>
+                      <p className="text-sm text-gray-600">ترتيب سريع لأكثر المنتجات نشاطاً بحسب المبيعات ثم المشاهدات.</p>
+                    </div>
                     <button
-                      onClick={() => setShowCreateStoreModal(true)}
-                      className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
+                      onClick={() => setActiveTab('products')}
+                      className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors"
                     >
-                      <Plus className="w-5 h-5" />
-                      <span>إنشاء متجر</span>
+                      عرض كل المنتجات
                     </button>
+                  </div>
+
+                  {topProducts.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-gray-200 p-8 text-center text-gray-500">
+                      لا توجد منتجات كافية لعرض لوحة الأداء بعد.
+                    </div>
                   ) : (
-                    <button
-                      onClick={() => setShowCreateProductModal(true)}
-                      className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
-                    >
-                      <Plus className="w-5 h-5" />
-                      <span>إضافة منتج</span>
-                    </button>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="text-right text-gray-500 border-b border-gray-100">
+                            <th className="pb-3 font-medium">المنتج</th>
+                            <th className="pb-3 font-medium">الحالة</th>
+                            <th className="pb-3 font-medium">المشاهدات</th>
+                            <th className="pb-3 font-medium">المبيعات</th>
+                            <th className="pb-3 font-medium">السعر</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {topProducts.map((product) => (
+                            <tr key={product.id} className="border-b border-gray-50 last:border-b-0">
+                              <td className="py-4">
+                                <button
+                                  onClick={() => openProduct(product)}
+                                  className="text-right hover:text-blue-600 transition-colors"
+                                >
+                                  <div className="font-semibold text-gray-900">{product.name || 'منتج بدون اسم'}</div>
+                                  <div className="text-xs text-gray-500 mt-1">{product.slug || product.id}</div>
+                                </button>
+                              </td>
+                              <td className="py-4">
+                                <span
+                                  className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                                    product.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                                  }`}
+                                >
+                                  {product.is_active ? 'نشط' : 'غير نشط'}
+                                </span>
+                              </td>
+                              <td className="py-4 font-medium text-gray-700">{Number(product.views_count || 0)}</td>
+                              <td className="py-4 font-medium text-gray-700">{Number(product.sales_count || 0)}</td>
+                              <td className="py-4 font-semibold text-gray-900">{formatCurrency(Number(product.price || 0))}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-8 text-white">
+                  <h2 className="text-2xl font-bold mb-4">ابدأ البيع الآن!</h2>
+                  <p className="text-blue-100 mb-6">
+                    {stores.length === 0 ? 'أنشئ متجرك الأول وابدأ بإضافة المنتجات' : 'أضف منتجات جديدة لزيادة مبيعاتك'}
+                  </p>
+
+                  <div className="flex flex-wrap gap-4 mb-6">
+                    {stores.length === 0 ? (
+                      <button
+                        onClick={() => setShowCreateStoreModal(true)}
+                        className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
+                      >
+                        <Plus className="w-5 h-5" />
+                        <span>إنشاء متجر</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setShowCreateProductModal(true)}
+                        className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                      >
+                        <Plus className="w-5 h-5" />
+                        <span>إضافة منتج</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+                      <div className="text-xs text-blue-100 mb-1">عدد المتاجر</div>
+                      <div className="text-xl font-bold">{stores.length}</div>
+                    </div>
+                    <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+                      <div className="text-xs text-blue-100 mb-1">طلبات السحب المعلقة</div>
+                      <div className="text-xl font-bold">{pendingWithdrawalsCount}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <div className="flex items-center justify-between gap-4 mb-6">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900 mb-1">آخر الحركات المالية</h2>
+                      <p className="text-sm text-gray-600">آخر التحديثات القادمة من المحفظة وسجل الأرباح والسحب.</p>
+                    </div>
+                    <Wallet className="w-6 h-6 text-gray-400" />
+                  </div>
+
+                  {latestOverviewLedgerEntries.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-gray-200 p-8 text-center text-gray-500">
+                      لا توجد حركات مالية حديثة حتى الآن.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {latestOverviewLedgerEntries.map((entry) => {
+                        const meta = ledgerEntryMeta(entry.entry_type);
+                        const EntryIcon = meta.icon;
+                        return (
+                          <div key={entry.id} className="rounded-2xl border border-gray-100 p-4">
+                            <div className="flex items-start justify-between gap-4 mb-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${meta.bgClass}`}>
+                                  <EntryIcon className={`w-5 h-5 ${meta.iconClass}`} />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-gray-900">{meta.label}</div>
+                                  <div className="text-xs text-gray-500 mt-1">{formatDate(entry.created_at)}</div>
+                                </div>
+                              </div>
+                              <div className="text-left shrink-0">
+                                <div className="text-lg font-bold text-gray-900">{formatCurrency(entry.amount)}</div>
+                                <span
+                                  className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold mt-2 ${
+                                    entry.status === 'pending'
+                                      ? 'bg-yellow-100 text-yellow-700'
+                                      : entry.status === 'completed' || entry.status === 'approved'
+                                      ? 'bg-green-100 text-green-700'
+                                      : entry.status === 'rejected'
+                                      ? 'bg-red-100 text-red-700'
+                                      : 'bg-gray-100 text-gray-700'
+                                  }`}
+                                >
+                                  {formatLedgerStatus(entry.status)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {buildLedgerDescription(entry) && (
+                              <p className="text-sm text-gray-600 leading-7">{buildLedgerDescription(entry)}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               </div>
