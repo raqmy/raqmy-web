@@ -11,7 +11,6 @@ import {
   Store as StoreIcon,
   Target,
   TrendingUp,
-  Users,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -32,6 +31,10 @@ type PublicRule = {
   priority?: number | null;
   is_active?: boolean | null;
   expires_at?: string | null;
+  seller_id?: string | null;
+  marketer_id?: string | null;
+  product_id?: string | null;
+  store_id?: string | null;
 } | null;
 
 type PublicStatsData = {
@@ -43,7 +46,11 @@ type PublicStatsData = {
     id?: string | null;
     code?: string | null;
     report_token?: string | null;
+    seller_id?: string | null;
+    marketer_id?: string | null;
     apply_to?: 'product' | 'store' | 'all' | string | null;
+    product_id?: string | null;
+    store_id?: string | null;
     description?: string | null;
     is_active?: boolean | null;
     clicks?: number | null;
@@ -56,6 +63,46 @@ type PublicStatsData = {
   };
   rule: PublicRule;
   tiers: PublicTier[];
+};
+
+type AffiliateLinkRow = {
+  id: string;
+  code?: string | null;
+  report_token?: string | null;
+  seller_id?: string | null;
+  marketer_id?: string | null;
+  apply_to?: 'product' | 'store' | 'all' | string | null;
+  product_id?: string | null;
+  store_id?: string | null;
+  description?: string | null;
+  is_active?: boolean | null;
+  clicks?: number | null;
+  sales?: number | null;
+  earnings?: number | null;
+};
+
+type AffiliateRuleRow = {
+  id: string;
+  seller_id?: string | null;
+  marketer_id?: string | null;
+  scope_type?: 'product' | 'store' | 'all' | string | null;
+  product_id?: string | null;
+  store_id?: string | null;
+  commission_type?: 'percentage' | 'fixed' | string | null;
+  commission_value?: number | null;
+  priority?: number | null;
+  is_active?: boolean | null;
+  expires_at?: string | null;
+};
+
+type AffiliateTierRow = {
+  id: string;
+  rule_id: string;
+  day_from?: number | null;
+  day_to?: number | null;
+  commission_type?: 'percentage' | 'fixed' | string | null;
+  commission_value?: number | null;
+  is_active?: boolean | null;
 };
 
 const getApplyToLabel = (value?: string | null) => {
@@ -110,6 +157,96 @@ const getReportTokenFromPath = () => {
   return parts.length >= 2 && parts[0] === 'affiliate-report' ? parts[1] : '';
 };
 
+const normalizeRule = (rule: any): PublicRule => {
+  if (!rule) return null;
+
+  return {
+    id: String(rule.id),
+    scope_type: rule.scope_type ?? null,
+    commission_type: rule.commission_type ?? null,
+    commission_value:
+      rule.commission_value !== null && rule.commission_value !== undefined
+        ? Number(rule.commission_value)
+        : null,
+    priority: rule.priority !== null && rule.priority !== undefined ? Number(rule.priority) : null,
+    is_active: rule.is_active ?? null,
+    expires_at: rule.expires_at ?? null,
+    seller_id: rule.seller_id ?? null,
+    marketer_id: rule.marketer_id ?? null,
+    product_id: rule.product_id ?? null,
+    store_id: rule.store_id ?? null,
+  };
+};
+
+const normalizeTier = (tier: any): PublicTier => ({
+  id: String(tier.id),
+  day_from: tier.day_from !== null && tier.day_from !== undefined ? Number(tier.day_from) : null,
+  day_to: tier.day_to !== null && tier.day_to !== undefined ? Number(tier.day_to) : null,
+  commission_type: tier.commission_type ?? null,
+  commission_value:
+    tier.commission_value !== null && tier.commission_value !== undefined
+      ? Number(tier.commission_value)
+      : null,
+  is_active: tier.is_active ?? null,
+});
+
+const sortTiers = (tiers: PublicTier[]) =>
+  [...tiers].sort((a, b) => {
+    const aFrom = Number(a.day_from ?? 0);
+    const bFrom = Number(b.day_from ?? 0);
+    if (aFrom !== bFrom) return aFrom - bFrom;
+
+    const aTo = a.day_to === null || a.day_to === undefined ? 999999 : Number(a.day_to);
+    const bTo = b.day_to === null || b.day_to === undefined ? 999999 : Number(b.day_to);
+    return aTo - bTo;
+  });
+
+const selectBestRuleForLink = (
+  link: Pick<AffiliateLinkRow, 'apply_to' | 'product_id' | 'store_id'>,
+  rules: AffiliateRuleRow[]
+): AffiliateRuleRow | null => {
+  if (!rules.length) return null;
+
+  const activeRules = rules.filter((rule) => rule.is_active !== false);
+  const candidates = activeRules.length > 0 ? activeRules : rules;
+
+  const normalizePriority = (value?: number | null) =>
+    value !== null && value !== undefined ? Number(value) : 999999;
+
+  const sorted = [...candidates].sort((a, b) => {
+    const pa = normalizePriority(a.priority);
+    const pb = normalizePriority(b.priority);
+    if (pa !== pb) return pa - pb;
+    return String(a.id).localeCompare(String(b.id));
+  });
+
+  if (link.apply_to === 'product') {
+    const exactProduct = sorted.find(
+      (rule) =>
+        String(rule.scope_type ?? '').toLowerCase() === 'product' &&
+        String(rule.product_id ?? '') === String(link.product_id ?? '')
+    );
+    if (exactProduct) return exactProduct;
+  }
+
+  if (link.apply_to === 'store') {
+    const exactStore = sorted.find(
+      (rule) =>
+        String(rule.scope_type ?? '').toLowerCase() === 'store' &&
+        String(rule.store_id ?? '') === String(link.store_id ?? '')
+    );
+    if (exactStore) return exactStore;
+  }
+
+  const allRule =
+    sorted.find((rule) => String(rule.scope_type ?? '').toLowerCase() === 'all') ||
+    sorted.find((rule) => !rule.scope_type);
+
+  if (allRule) return allRule;
+
+  return sorted[0] ?? null;
+};
+
 export const MarketerAffiliateStatsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -121,6 +258,143 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
   useEffect(() => {
     fetchStats();
   }, [reportToken]);
+
+  const hydrateRuleAndTiersFallback = async (baseData: PublicStatsData): Promise<PublicStatsData> => {
+    const existingRule = normalizeRule(baseData.rule);
+    const existingTiers = sortTiers((baseData.tiers || []).map(normalizeTier));
+
+    if (
+      existingRule &&
+      existingTiers.length > 0
+    ) {
+      return {
+        ...baseData,
+        rule: existingRule,
+        tiers: existingTiers,
+      };
+    }
+
+    const linkId = baseData.link?.id ? String(baseData.link.id) : '';
+    if (!linkId) {
+      return {
+        ...baseData,
+        rule: existingRule,
+        tiers: existingTiers,
+      };
+    }
+
+    const { data: linkRow, error: linkError } = await supabase
+      .from('affiliate_links')
+      .select(
+        'id, code, report_token, seller_id, marketer_id, apply_to, product_id, store_id, description, is_active, clicks, sales, earnings'
+      )
+      .eq('id', linkId)
+      .maybeSingle();
+
+    if (linkError || !linkRow) {
+      console.error('Fallback link fetch error:', linkError);
+      return {
+        ...baseData,
+        rule: existingRule,
+        tiers: existingTiers,
+      };
+    }
+
+    const fullLink = linkRow as AffiliateLinkRow;
+
+    const mergedLink = {
+      ...baseData.link,
+      id: fullLink.id ?? baseData.link.id ?? null,
+      code: fullLink.code ?? baseData.link.code ?? null,
+      report_token: fullLink.report_token ?? baseData.link.report_token ?? null,
+      seller_id: fullLink.seller_id ?? baseData.link.seller_id ?? null,
+      marketer_id: fullLink.marketer_id ?? baseData.link.marketer_id ?? null,
+      apply_to: fullLink.apply_to ?? baseData.link.apply_to ?? null,
+      product_id: fullLink.product_id ?? baseData.link.product_id ?? null,
+      store_id: fullLink.store_id ?? baseData.link.store_id ?? null,
+      description: fullLink.description ?? baseData.link.description ?? null,
+      is_active: fullLink.is_active ?? baseData.link.is_active ?? null,
+      clicks:
+        fullLink.clicks !== null && fullLink.clicks !== undefined
+          ? Number(fullLink.clicks)
+          : baseData.link.clicks ?? 0,
+      sales:
+        fullLink.sales !== null && fullLink.sales !== undefined
+          ? Number(fullLink.sales)
+          : baseData.link.sales ?? 0,
+      earnings:
+        fullLink.earnings !== null && fullLink.earnings !== undefined
+          ? Number(fullLink.earnings)
+          : baseData.link.earnings ?? 0,
+    };
+
+    if (!mergedLink.seller_id || !mergedLink.marketer_id) {
+      return {
+        ...baseData,
+        link: mergedLink,
+        rule: existingRule,
+        tiers: existingTiers,
+      };
+    }
+
+    const { data: rulesData, error: rulesError } = await supabase
+      .from('affiliate_rules')
+      .select(
+        'id, seller_id, marketer_id, scope_type, product_id, store_id, commission_type, commission_value, priority, is_active, expires_at'
+      )
+      .eq('seller_id', mergedLink.seller_id)
+      .eq('marketer_id', mergedLink.marketer_id)
+      .order('priority', { ascending: true })
+      .order('created_at', { ascending: false });
+
+    if (rulesError) {
+      console.error('Fallback rules fetch error:', rulesError);
+      return {
+        ...baseData,
+        link: mergedLink,
+        rule: existingRule,
+        tiers: existingTiers,
+      };
+    }
+
+    const rules = (rulesData || []) as AffiliateRuleRow[];
+    const selectedRule = existingRule || normalizeRule(selectBestRuleForLink(mergedLink, rules));
+
+    if (!selectedRule?.id) {
+      return {
+        ...baseData,
+        link: mergedLink,
+        rule: selectedRule,
+        tiers: existingTiers,
+      };
+    }
+
+    const { data: tiersData, error: tiersError } = await supabase
+      .from('affiliate_rule_tiers')
+      .select('id, rule_id, day_from, day_to, commission_type, commission_value, is_active')
+      .eq('rule_id', selectedRule.id)
+      .order('day_from', { ascending: true })
+      .order('day_to', { ascending: true });
+
+    if (tiersError) {
+      console.error('Fallback tiers fetch error:', tiersError);
+      return {
+        ...baseData,
+        link: mergedLink,
+        rule: selectedRule,
+        tiers: existingTiers,
+      };
+    }
+
+    const normalizedTiers = sortTiers((tiersData || []).map(normalizeTier));
+
+    return {
+      ...baseData,
+      link: mergedLink,
+      rule: selectedRule,
+      tiers: normalizedTiers,
+    };
+  };
 
   const fetchStats = async () => {
     setLoading(true);
@@ -149,7 +423,47 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
         throw new Error('تعذر العثور على صفحة الإحصائيات');
       }
 
-      setData(rpcData.data as PublicStatsData);
+      const rawData = (rpcData.data || {}) as PublicStatsData;
+
+      const normalizedData: PublicStatsData = {
+        marketer: {
+          id: rawData.marketer?.id ?? null,
+          name: rawData.marketer?.name ?? null,
+        },
+        link: {
+          id: rawData.link?.id ?? null,
+          code: rawData.link?.code ?? null,
+          report_token: rawData.link?.report_token ?? null,
+          seller_id: rawData.link?.seller_id ?? null,
+          marketer_id: rawData.link?.marketer_id ?? null,
+          apply_to: rawData.link?.apply_to ?? null,
+          product_id: rawData.link?.product_id ?? null,
+          store_id: rawData.link?.store_id ?? null,
+          description: rawData.link?.description ?? null,
+          is_active: rawData.link?.is_active ?? null,
+          clicks:
+            rawData.link?.clicks !== null && rawData.link?.clicks !== undefined
+              ? Number(rawData.link.clicks)
+              : 0,
+          sales:
+            rawData.link?.sales !== null && rawData.link?.sales !== undefined
+              ? Number(rawData.link.sales)
+              : 0,
+          earnings:
+            rawData.link?.earnings !== null && rawData.link?.earnings !== undefined
+              ? Number(rawData.link.earnings)
+              : 0,
+        },
+        target: {
+          product_title: rawData.target?.product_title ?? null,
+          store_title: rawData.target?.store_title ?? null,
+        },
+        rule: normalizeRule(rawData.rule),
+        tiers: sortTiers((rawData.tiers || []).map(normalizeTier)),
+      };
+
+      const hydratedData = await hydrateRuleAndTiersFallback(normalizedData);
+      setData(hydratedData);
     } catch (err: any) {
       console.error('Error fetching marketer affiliate stats:', err);
       setError(err.message || 'حدث خطأ أثناء جلب الإحصائيات');
