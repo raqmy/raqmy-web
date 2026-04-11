@@ -431,13 +431,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
 
-      const { data: ordersData, error: ordersErr } = await supabase
+      const { data: sellerStatsData, error: sellerStatsErr } = await supabase.rpc('get_seller_stats', {
+        seller_id: profile.id,
+      });
+
+      if (sellerStatsErr) console.error('get_seller_stats rpc error:', sellerStatsErr);
+
+      const { data: fallbackOrdersData, error: fallbackOrdersErr } = await supabase
         .from('orders')
         .select('seller_amount, status')
-        .eq('seller_id', profile.id)
-        .eq('status', 'completed');
+        .or(`seller_id.eq.${profile.id},merchant_id.eq.${profile.id}`)
+        .in('status', ['paid', 'completed']);
 
-      if (ordersErr) console.error('orders fetch error:', ordersErr);
+      if (fallbackOrdersErr) console.error('fallback orders fetch error:', fallbackOrdersErr);
 
       const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
       const thumbMap: Record<string, string> = {};
@@ -535,10 +541,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       setProducts(productsWithThumbs);
       setAffiliateLinks(linksWithStats);
 
-      const revenue =
-        safeArray(ordersData)?.reduce((sum: number, order: any) => sum + Number(order.seller_amount || 0), 0) || 0;
+      const rpcStats =
+        sellerStatsData && typeof sellerStatsData === 'object' && !Array.isArray(sellerStatsData)
+          ? (sellerStatsData as { total_revenue?: number | string; total_sales?: number | string })
+          : null;
 
-      const sales = safeArray(ordersData)?.length || 0;
+      const fallbackRevenue =
+        safeArray(fallbackOrdersData)?.reduce(
+          (sum: number, order: any) => sum + Number(order?.seller_amount || 0),
+          0
+        ) || 0;
+
+      const fallbackSales = safeArray(fallbackOrdersData)?.length || 0;
+
+      const revenue = Number(rpcStats?.total_revenue ?? fallbackRevenue ?? 0) || 0;
+      const sales = Number(rpcStats?.total_sales ?? fallbackSales ?? 0) || 0;
       const views = productsWithThumbs.reduce((sum, p) => sum + (p.views_count || 0), 0);
       const active = productsWithThumbs.filter((p) => p.is_active).length || 0;
 
