@@ -94,7 +94,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       incrementViewCount();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedProductId]);
+  }, [resolvedProductId, user?.id]);
 
   useEffect(() => {
     if (user && resolvedProductId) {
@@ -497,19 +497,59 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     if (!resolvedProductId) return;
 
     try {
-      const { error } = await supabase.rpc('increment_product_view', {
+      const nowIso = new Date().toISOString();
+
+      const { error: rpcError } = await supabase.rpc('increment_product_view', {
         p_product_id: resolvedProductId,
       });
 
-      if (error) {
-        console.error('Error incrementing view:', error);
-        return;
+      if (rpcError) {
+        console.error('Error incrementing product public view count:', rpcError);
+      }
+
+      if (user?.id) {
+        const { data: existingView, error: existingViewError } = await supabase
+          .from('viewed_products')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('product_id', resolvedProductId)
+          .maybeSingle();
+
+        if (existingViewError) {
+          console.error('Error checking existing viewed product row:', existingViewError);
+        } else if (existingView?.id) {
+          const { error: updateViewError } = await supabase
+            .from('viewed_products')
+            .update({
+              viewed_at: nowIso,
+            })
+            .eq('id', existingView.id);
+
+          if (updateViewError) {
+            console.error('Error updating viewed product row:', updateViewError);
+          }
+        } else {
+          const { error: insertViewError } = await supabase
+            .from('viewed_products')
+            .insert({
+              user_id: user.id,
+              product_id: resolvedProductId,
+              viewed_at: nowIso,
+            });
+
+          if (insertViewError) {
+            console.error('Error inserting viewed product row:', insertViewError);
+          }
+        }
       }
 
       setProduct((prev) => {
         if (!prev) return prev;
         const current = Number((prev as any).views_count ?? 0) || 0;
-        return { ...prev, views_count: current + 1 } as ProductWithDetails;
+        return {
+          ...prev,
+          views_count: current + 1,
+        } as ProductWithDetails;
       });
     } catch (error) {
       console.error('Error incrementing view:', error);
