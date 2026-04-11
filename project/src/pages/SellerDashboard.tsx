@@ -543,28 +543,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       const rpcStats =
         sellerStatsData && typeof sellerStatsData === 'object' && !Array.isArray(sellerStatsData)
-          ? (sellerStatsData as { total_revenue?: number | string; total_sales?: number | string })
+          ? (sellerStatsData as { total_sales?: number | string })
           : null;
-
-      const fallbackRevenue =
-        safeArray(fallbackOrdersData)?.reduce(
-          (sum: number, order: any) => sum + Number(order?.seller_amount || 0),
-          0
-        ) || 0;
 
       const fallbackSales = safeArray(fallbackOrdersData)?.length || 0;
 
-      const revenue = Number(rpcStats?.total_revenue ?? fallbackRevenue ?? 0) || 0;
       const sales = Number(rpcStats?.total_sales ?? fallbackSales ?? 0) || 0;
       const views = productsWithThumbs.reduce((sum, p) => sum + (p.views_count || 0), 0);
       const active = productsWithThumbs.filter((p) => p.is_active).length || 0;
 
-      setStats({
-        totalRevenue: revenue,
+      setStats((prev) => ({
+        ...prev,
         totalSales: sales,
         totalViews: views,
         activeProducts: active,
-      });
+      }));
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
@@ -780,10 +773,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         }
       }
 
-      setWalletData((walletRes.data as WalletRow | null) ?? null);
+      const wallet = (walletRes.data as WalletRow | null) ?? null;
+      const totalRevenueFromWallet =
+        Number(wallet?.balance_available || 0) + Number(wallet?.balance_pending || 0);
+
+      setWalletData(wallet);
       setWalletLedger(ledgerRows);
       setWithdrawalRequests((safeArray(requestsRes.data) as any[]) ?? []);
       setEarningsOrderMeta(nextMeta);
+      setStats((prev) => ({
+        ...prev,
+        totalRevenue: totalRevenueFromWallet,
+      }));
     } catch (error) {
       console.error('Error fetching earnings data:', error);
     } finally {
