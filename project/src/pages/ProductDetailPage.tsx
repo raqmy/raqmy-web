@@ -79,6 +79,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [attachments, setAttachments] = useState<ProductAttachment[]>([]);
   const [hasPurchased, setHasPurchased] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
+  const [realViewsCount, setRealViewsCount] = useState<number | null>(null);
 
   const storeContextSlug = useMemo(() => getStoreContextSlug(), [productId, productSlug]);
   const isStoreContext = !!storeContextSlug;
@@ -91,6 +92,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   useEffect(() => {
     if (resolvedProductId) {
       fetchProductImages();
+      fetchRealViewsCount(resolvedProductId);
       incrementViewCount();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -214,6 +216,24 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     element.setAttribute('href', href);
   };
 
+  const fetchRealViewsCount = async (targetProductId: string) => {
+    try {
+      const { count, error } = await supabase
+        .from('viewed_products')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', targetProductId);
+
+      if (error) {
+        console.error('Error fetching real viewed products count:', error);
+        return;
+      }
+
+      setRealViewsCount(count ?? 0);
+    } catch (error) {
+      console.error('Error fetching real views count:', error);
+    }
+  };
+
   const fetchProduct = async () => {
     setLoading(true);
 
@@ -276,6 +296,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       } else {
         setProduct(null);
         setResolvedProductId(null);
+        setIsOwner(false);
         setLoading(false);
         return;
       }
@@ -494,63 +515,53 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   };
 
   const incrementViewCount = async () => {
-    if (!resolvedProductId) return;
+    if (!resolvedProductId || !user?.id) {
+      return;
+    }
 
     try {
       const nowIso = new Date().toISOString();
 
-      const { error: rpcError } = await supabase.rpc('increment_product_view', {
-        p_product_id: resolvedProductId,
-      });
+      const { data: existingView, error: existingViewError } = await supabase
+        .from('viewed_products')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('product_id', resolvedProductId)
+        .maybeSingle();
 
-      if (rpcError) {
-        console.error('Error incrementing product public view count:', rpcError);
+      if (existingViewError) {
+        console.error('Error checking existing viewed product row:', existingViewError);
+        return;
       }
 
-      if (user?.id) {
-        const { data: existingView, error: existingViewError } = await supabase
+      if (existingView?.id) {
+        const { error: updateViewError } = await supabase
           .from('viewed_products')
-          .select('id')
-          .eq('user_id', user.id)
-          .eq('product_id', resolvedProductId)
-          .maybeSingle();
+          .update({
+            viewed_at: nowIso,
+          })
+          .eq('id', existingView.id);
 
-        if (existingViewError) {
-          console.error('Error checking existing viewed product row:', existingViewError);
-        } else if (existingView?.id) {
-          const { error: updateViewError } = await supabase
-            .from('viewed_products')
-            .update({
-              viewed_at: nowIso,
-            })
-            .eq('id', existingView.id);
+        if (updateViewError) {
+          console.error('Error updating viewed product row:', updateViewError);
+          return;
+        }
+      } else {
+        const { error: insertViewError } = await supabase
+          .from('viewed_products')
+          .insert({
+            user_id: user.id,
+            product_id: resolvedProductId,
+            viewed_at: nowIso,
+          });
 
-          if (updateViewError) {
-            console.error('Error updating viewed product row:', updateViewError);
-          }
-        } else {
-          const { error: insertViewError } = await supabase
-            .from('viewed_products')
-            .insert({
-              user_id: user.id,
-              product_id: resolvedProductId,
-              viewed_at: nowIso,
-            });
-
-          if (insertViewError) {
-            console.error('Error inserting viewed product row:', insertViewError);
-          }
+        if (insertViewError) {
+          console.error('Error inserting viewed product row:', insertViewError);
+          return;
         }
       }
 
-      setProduct((prev) => {
-        if (!prev) return prev;
-        const current = Number((prev as any).views_count ?? 0) || 0;
-        return {
-          ...prev,
-          views_count: current + 1,
-        } as ProductWithDetails;
-      });
+      await fetchRealViewsCount(resolvedProductId);
     } catch (error) {
       console.error('Error incrementing view:', error);
     }
@@ -739,6 +750,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const productTitle = product.name || (product as any).title || 'منتج رقمي';
   const productDescription =
     product.description?.trim() || 'لا يوجد وصف لهذا المنتج حالياً.';
+  const displayedViewsCount =
+    realViewsCount !== null ? realViewsCount : Number((product as any).views_count ?? 0);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -847,7 +860,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <div className="text-gray-500">|</div>
               <div className="text-gray-600">{product.sales_count} مبيعات</div>
               <div className="text-gray-500">|</div>
-              <div className="text-gray-600">{(product as any).views_count ?? 0} مشاهدة</div>
+              <div className="text-gray-600">{displayedViewsCount} مشاهدة</div>
             </div>
 
             <div className="mb-6">
