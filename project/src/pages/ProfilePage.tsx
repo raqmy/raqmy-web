@@ -270,12 +270,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     setOrdersError('');
 
     try {
-      const ownerFilter = `user_id.eq.${user.id},customer_id.eq.${user.id}`;
+      const normalizedEmail = String(user.email || '').trim().toLowerCase();
+      const ownershipConditions = [`user_id.eq.${user.id}`, `customer_id.eq.${user.id}`];
+
+      if (normalizedEmail) {
+        ownershipConditions.push(`customer_email.eq.${normalizedEmail}`);
+      }
 
       const { data: ordersData, error: ordersDbError } = await supabase
         .from('orders')
-        .select('id, order_number, total_amount, status, created_at, currency')
-        .or(ownerFilter)
+        .select('id, order_number, total_amount, status, created_at, currency, user_id, customer_id, customer_email')
+        .or(ownershipConditions.join(','))
         .order('created_at', { ascending: false });
 
       if (ordersDbError) throw ordersDbError;
@@ -377,7 +382,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       fetchOrders();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, profile?.role, scopeLoading, scopeInfo?.slug]);
+  }, [user?.id, user?.email, profile?.role, scopeLoading, scopeInfo?.slug]);
 
   const handleUpdateProfile = async () => {
     setLoading(true);
