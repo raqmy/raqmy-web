@@ -51,6 +51,7 @@ type ProfileOrderItem = {
   thumbnail_url?: string | null;
   store_id?: string | null;
   user_id?: string | null;
+  seller_id?: string | null;
 };
 
 type ProfileOrder = {
@@ -71,7 +72,8 @@ const getActiveStoreScopeSlug = () => {
   }
 };
 
-const normalizeProductName = (product: any) => product?.name || product?.title || 'منتج';
+const normalizeProductName = (product: any, fallback?: string) =>
+  product?.name || product?.title || fallback || 'منتج';
 
 const productMatchesScope = (product: any, scope: ScopeInfo | null) => {
   if (!scope) return true;
@@ -279,7 +281,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const { data: ordersData, error: ordersDbError } = await supabase
         .from('orders')
-        .select('id, order_number, total_amount, status, created_at, currency, user_id, customer_id, customer_email')
+        .select(
+          'id, order_number, total_amount, status, created_at, currency, user_id, customer_id, customer_email'
+        )
         .or(ownershipConditions.join(','))
         .order('created_at', { ascending: false });
 
@@ -294,7 +298,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const { data: rawItems, error: itemsError } = await supabase
         .from('order_items')
-        .select('id, order_id, product_id, quantity, price, subtotal')
+        .select('id, order_id, product_id, quantity, price, product_price, subtotal, seller_id')
         .in('order_id', orderIds);
 
       if (itemsError) {
@@ -304,7 +308,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       const safeItems = rawItems || [];
       const productIds = [...new Set(safeItems.map((item: any) => item.product_id).filter(Boolean))];
 
-      let productsMap = new Map<string, any>();
+      const productsMap = new Map<string, any>();
 
       if (productIds.length > 0) {
         const { data: productsData, error: productsError } = await supabase
@@ -315,30 +319,47 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         if (productsError) {
           console.error('Error fetching products for orders:', productsError);
         } else {
-          productsMap = new Map((productsData || []).map((product: any) => [product.id, product]));
+          for (const product of productsData || []) {
+            productsMap.set(product.id, product);
+          }
         }
       }
 
       const itemsByOrderId = new Map<string, ProfileOrderItem[]>();
 
       for (const item of safeItems as any[]) {
-        const product = productsMap.get(item.product_id);
-        if (!product || !productMatchesScope(product, scopeInfo)) continue;
+        const product = item.product_id ? productsMap.get(item.product_id) : null;
 
-        const resolvedPrice = Number(item.price ?? product?.price ?? 0);
+        if (scopeInfo) {
+          if (product) {
+            if (!productMatchesScope(product, scopeInfo)) continue;
+          } else if (scopeInfo.source === 'merchants') {
+            if (
+              scopeInfo.merchantUserId &&
+              item.seller_id &&
+              String(item.seller_id) !== String(scopeInfo.merchantUserId)
+            ) {
+              continue;
+            }
+          }
+        }
+
         const resolvedQuantity = Number(item.quantity ?? 1);
+        const resolvedUnitPrice = Number(item.product_price ?? item.price ?? product?.price ?? 0);
+        const resolvedSubtotal = Number(item.subtotal ?? resolvedUnitPrice * resolvedQuantity);
 
         const normalizedItem: ProfileOrderItem = {
           id: item.id,
-          product_id: item.product_id,
+          product_id: item.product_id || '',
           quantity: resolvedQuantity,
           product_name: normalizeProductName(product),
-          product_price: resolvedPrice,
-          subtotal: Number(item.subtotal ?? resolvedPrice * resolvedQuantity),
+          product_price: resolvedUnitPrice,
+          subtotal: resolvedSubtotal,
           product_slug: product?.slug || null,
           thumbnail_url: product?.thumbnail_url || null,
           store_id: product?.store_id || null,
           user_id: product?.user_id || null,
+          seller_id: item.seller_id || null,
         };
 
         if (!itemsByOrderId.has(item.order_id)) {
@@ -564,7 +585,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       onNavigate(`product-slug-${item.product_slug}`);
       return;
     }
-    onNavigate(`product-${item.product_id}`);
+
+    if (item.product_id) {
+      onNavigate(`product-${item.product_id}`);
+      return;
+    }
+
+    onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace');
   };
 
   const scopeBadgeText = useMemo(() => {
