@@ -838,6 +838,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     }
   };
 
+  const handleOpenStorefront = (store: Store) => {
+    if (store.slug) {
+      onNavigate(`storefront-${store.slug}`);
+      return;
+    }
+
+    alert('لا يمكن فتح المتجر لأن رابط المتجر غير موجود');
+  };
+
   const handleToggleProductStatus = async (productId: string, currentStatus: boolean) => {
     try {
       const { error } = await supabase.from('products').update({ is_active: !currentStatus }).eq('id', productId);
@@ -1568,22 +1577,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                       <p className="text-sm text-gray-500">{store.slug || ''}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleToggleStoreStatus(store.id, store.is_active)}
+                        className={`flex-1 px-4 py-2 rounded-lg font-medium ${
+                          store.is_active
+                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        {store.is_active ? 'نشط' : 'معطل'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteStore(store.id)}
+                        className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
+
                     <button
-                      onClick={() => handleToggleStoreStatus(store.id, store.is_active)}
-                      className={`flex-1 px-4 py-2 rounded-lg font-medium ${
-                        store.is_active
-                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
+                      onClick={() => handleOpenStorefront(store)}
+                      disabled={!store.slug}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {store.is_active ? 'نشط' : 'معطل'}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteStore(store.id)}
-                      className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
-                    >
-                      <Trash2 className="w-5 h-5" />
+                      <Eye className="w-4 h-4" />
+                      <span>دخول متجر التاجر</span>
                     </button>
                   </div>
                 </div>
