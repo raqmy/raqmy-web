@@ -83,7 +83,7 @@ const getActiveStoreScopeSlug = () => {
   }
 };
 
-const normalizeProductName = (product: any) => product?.name || product?.title || 'منتج';
+const normalizeProductName = (product: any) => product?.title || product?.name || 'منتج';
 
 const productMatchesScope = (product: any, scope: ScopeInfo | null) => {
   if (!scope) return true;
@@ -92,7 +92,7 @@ const productMatchesScope = (product: any, scope: ScopeInfo | null) => {
     return product?.store_id === scope.storeId;
   }
 
-  return (product?.user_id || product?.merchant_id) === scope.merchantUserId;
+  return (product?.merchant_id || product?.user_id) === scope.merchantUserId;
 };
 
 const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
@@ -224,32 +224,71 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     loadScope();
   }, []);
 
-  const mapProductCard = (product: any, extra?: Partial<ProfileListedProduct>): ProfileListedProduct => ({
+  const fetchProductImageMapByIds = async (productIds: string[]) => {
+    const cleanIds = [...new Set(productIds.filter(Boolean))];
+    if (cleanIds.length === 0) return new Map<string, string | null>();
+
+    const { data, error } = await supabase
+      .from('product_images')
+      .select('product_id, image_url, is_primary, display_order')
+      .in('product_id', cleanIds)
+      .order('is_primary', { ascending: false })
+      .order('display_order', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching product images:', error);
+      return new Map<string, string | null>();
+    }
+
+    const imageMap = new Map<string, string | null>();
+
+    for (const row of data || []) {
+      if (!imageMap.has(row.product_id)) {
+        imageMap.set(row.product_id, row.image_url || null);
+      }
+    }
+
+    return imageMap;
+  };
+
+  const mapProductCard = (
+    product: any,
+    extra?: Partial<ProfileListedProduct>,
+    thumbnailUrl?: string | null
+  ): ProfileListedProduct => ({
     id: extra?.id || product?.id,
     product_id: product?.id,
     title: normalizeProductName(product),
     description: product?.description || '',
     price: Number(product?.price || 0),
     slug: product?.slug || null,
-    thumbnail_url: product?.thumbnail_url || null,
+    thumbnail_url: thumbnailUrl || null,
     store_id: product?.store_id || null,
-    user_id: product?.user_id || product?.merchant_id || null,
+    user_id: product?.merchant_id || product?.user_id || null,
     viewed_at: extra?.viewed_at || null,
     created_at: extra?.created_at || null,
   });
 
   const fetchProductsMapByIds = async (productIds: string[]) => {
     const cleanIds = [...new Set(productIds.filter(Boolean))];
-    if (cleanIds.length === 0) return new Map<string, any>();
+    if (cleanIds.length === 0) {
+      return {
+        productsMap: new Map<string, any>(),
+        imageMap: new Map<string, string | null>(),
+      };
+    }
 
     const { data, error } = await supabase
       .from('products')
-      .select('id, title, description, price, thumbnail_url, slug, store_id, user_id, merchant_id')
+      .select('id, title, description, price, slug, store_id, merchant_id')
       .in('id', cleanIds);
 
     if (error) throw error;
 
-    return new Map((data || []).map((product: any) => [product.id, product]));
+    const productsMap = new Map((data || []).map((product: any) => [product.id, product]));
+    const imageMap = await fetchProductImageMapByIds(cleanIds);
+
+    return { productsMap, imageMap };
   };
 
   const fetchProfileStats = async () => {
@@ -257,13 +296,18 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     setStatsLoading(true);
     try {
-      const [favoritesRes, viewedRes] = await Promise.all([
+      const [favoritesRes, viewedRes, ordersRes] = await Promise.all([
         supabase.from('favorites').select('id, product_id').eq('user_id', user.id),
         supabase.from('viewed_products').select('id, product_id').eq('user_id', user.id),
+        supabase
+          .from('orders')
+          .select('id')
+          .or(`user_id.eq.${user.id},customer_id.eq.${user.id}`),
       ]);
 
       const favoriteRows = favoritesRes.data || [];
       const viewedRows = viewedRes.data || [];
+      const orderRows = ordersRes.data || [];
 
       const productIds = [
         ...new Set([
@@ -272,7 +316,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         ]),
       ];
 
-      const productsMap = await fetchProductsMapByIds(productIds);
+      const { productsMap } = await fetchProductsMapByIds(productIds);
 
       const favoritesCount = favoriteRows.filter((row: any) => {
         const product = productsMap.get(row.product_id);
@@ -284,10 +328,41 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         return product ? productMatchesScope(product, scopeInfo) : false;
       }).length;
 
+      let ordersCount = orderRows.length;
+
+      if (scopeInfo && orderRows.length > 0) {
+        const orderIds = orderRows.map((o: any) => o.id);
+        const { data: rawItems } = await supabase
+          .from('order_items')
+          .select('*')
+          .in('order_id', orderIds);
+
+        const items = rawItems || [];
+        const orderItemProductIds = [...new Set(items.map((i: any) => i.product_id).filter(Boolean))];
+        const { productsMap: orderProductsMap } = await fetchProductsMapByIds(orderItemProductIds);
+
+        const validOrderIds = new Set<string>();
+        for (const item of items) {
+          const product = orderProductsMap.get(item.product_id);
+          if (product && productMatchesScope(product, scopeInfo)) {
+            validOrderIds.add(item.order_id);
+          }
+        }
+
+        ordersCount = validOrderIds.size;
+      }
+
       setStats({
         favorites_count: favoritesCount,
         viewed_products_count: viewedCount,
       });
+
+      if (activeTab === 'overview') {
+        setOrders((prev) => {
+          if (prev.length === ordersCount) return prev;
+          return prev;
+        });
+      }
     } catch (e) {
       console.error('Error fetching profile stats:', e);
     } finally {
@@ -300,9 +375,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     try {
       const { data, error } = await supabase
-        .from('merchant_payout_accounts')
+        .from('bank_accounts')
         .select('*')
-        .eq('merchant_id', user.id)
+        .eq('user_id', user.id)
         .maybeSingle();
 
       if (error) {
@@ -328,54 +403,42 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     setOrdersError('');
 
     try {
-      const orderQuery = supabase
+      const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
-        .select('id, order_number, total_amount, status, created_at, user_id, customer_id, customer_email')
+        .select('id, order_number, total_amount, status, created_at, user_id, customer_id')
+        .or(`user_id.eq.${user.id},customer_id.eq.${user.id}`)
         .order('created_at', { ascending: false });
 
-      let ordersData: any[] = [];
-      let primaryError: any = null;
-
-      const primaryFilters = [`user_id.eq.${user.id}`, `customer_id.eq.${user.id}`];
-      if (user.email) {
-        primaryFilters.push(`customer_email.eq.${user.email}`);
-      }
-
-      const primaryRes = await orderQuery.or(primaryFilters.join(','));
-      ordersData = primaryRes.data || [];
-      primaryError = primaryRes.error;
-
-      if (primaryError) {
-        throw primaryError;
-      }
+      if (ordersError) throw ordersError;
 
       if (!ordersData || ordersData.length === 0) {
         setOrders([]);
         return;
       }
 
-      const orderIds = ordersData.map((order) => order.id);
+      const orderIds = ordersData.map((order: any) => order.id);
 
       const { data: rawItems, error: itemsError } = await supabase
         .from('order_items')
-        .select('id, order_id, product_id, quantity, price, subtotal')
+        .select('*')
         .in('order_id', orderIds);
 
-      if (itemsError) {
-        console.error('Error fetching order items:', itemsError);
-      }
+      if (itemsError) throw itemsError;
 
       const safeItems = rawItems || [];
       const productIds = [...new Set(safeItems.map((item: any) => item.product_id).filter(Boolean))];
-      const productsMap = await fetchProductsMapByIds(productIds);
+      const { productsMap, imageMap } = await fetchProductsMapByIds(productIds);
 
       const itemsByOrderId = new Map<string, ProfileOrderItem[]>();
 
       for (const item of safeItems as any[]) {
         const product = productsMap.get(item.product_id);
-        if (!product || !productMatchesScope(product, scopeInfo)) continue;
+        if (!product) continue;
+        if (!productMatchesScope(product, scopeInfo)) continue;
 
-        const resolvedPrice = Number(item.price ?? product?.price ?? 0);
+        const resolvedPrice = Number(
+          item.price ?? item.product_price ?? item.unit_price ?? product?.price ?? 0
+        );
         const resolvedQuantity = Number(item.quantity ?? 1);
 
         const normalizedItem: ProfileOrderItem = {
@@ -386,9 +449,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
           product_price: resolvedPrice,
           subtotal: Number(item.subtotal ?? resolvedPrice * resolvedQuantity),
           product_slug: product?.slug || null,
-          thumbnail_url: product?.thumbnail_url || null,
+          thumbnail_url: imageMap.get(item.product_id) || null,
           store_id: product?.store_id || null,
-          user_id: product?.user_id || null,
+          user_id: product?.merchant_id || null,
         };
 
         if (!itemsByOrderId.has(item.order_id)) {
@@ -442,17 +505,21 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const rows = data || [];
       const productIds = rows.map((row: any) => row.product_id).filter(Boolean);
-      const productsMap = await fetchProductsMapByIds(productIds);
+      const { productsMap, imageMap } = await fetchProductsMapByIds(productIds);
 
       const normalized = rows
         .map((row: any) => {
           const product = productsMap.get(row.product_id);
           if (!product || !productMatchesScope(product, scopeInfo)) return null;
 
-          return mapProductCard(product, {
-            id: row.id,
-            created_at: row.created_at,
-          });
+          return mapProductCard(
+            product,
+            {
+              id: row.id,
+              created_at: row.created_at,
+            },
+            imageMap.get(row.product_id) || null
+          );
         })
         .filter(Boolean) as ProfileListedProduct[];
 
@@ -483,18 +550,22 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const rows = data || [];
       const productIds = rows.map((row: any) => row.product_id).filter(Boolean);
-      const productsMap = await fetchProductsMapByIds(productIds);
+      const { productsMap, imageMap } = await fetchProductsMapByIds(productIds);
 
       const normalized = rows
         .map((row: any) => {
           const product = productsMap.get(row.product_id);
           if (!product || !productMatchesScope(product, scopeInfo)) return null;
 
-          return mapProductCard(product, {
-            id: row.id,
-            created_at: row.created_at,
-            viewed_at: row.viewed_at,
-          });
+          return mapProductCard(
+            product,
+            {
+              id: row.id,
+              created_at: row.created_at,
+              viewed_at: row.viewed_at,
+            },
+            imageMap.get(row.product_id) || null
+          );
         })
         .filter(Boolean) as ProfileListedProduct[];
 
@@ -517,7 +588,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       fetchViewedProducts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.email, profile?.role, scopeLoading, scopeInfo?.slug]);
+  }, [user?.id, profile?.role, scopeLoading, scopeInfo?.slug]);
+
+  useEffect(() => {
+    if (activeTab === 'orders') fetchOrders();
+    if (activeTab === 'favorites') fetchFavorites();
+    if (activeTab === 'viewed') fetchViewedProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const handleUpdateProfile = async () => {
     setLoading(true);
@@ -547,18 +625,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         return;
       }
 
-      const { error } = await supabase
-        .from('merchant_payout_accounts')
-        .upsert({
-          merchant_id: user.id,
-          account_holder_name: bankAccountHolderName.trim(),
-          iban: normalizedIBAN,
-          bank_name: bankName || null,
-          country_code: 'SA',
-          currency: 'SAR',
-          payout_method: 'bank_transfer',
-          is_default: true,
-        });
+      const { error } = await supabase.from('bank_accounts').upsert({
+        user_id: user.id,
+        account_holder_name: bankAccountHolderName.trim(),
+        iban: normalizedIBAN,
+        bank_name: bankName || null,
+      });
 
       if (error) {
         console.error('Error updating bank details:', error);
@@ -874,7 +946,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
                   <div className="flex flex-wrap gap-3 mt-4">
                     <button
-                      onClick={() => openScopedProduct({ product_id: item.product_id, product_slug: item.slug })}
+                      onClick={() =>
+                        openScopedProduct({ product_id: item.product_id, product_slug: item.slug })
+                      }
                       className="px-5 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50"
                     >
                       عرض المنتج
