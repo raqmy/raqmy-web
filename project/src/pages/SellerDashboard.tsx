@@ -1951,7 +1951,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       <p className="text-sm text-gray-600">نظرة مختصرة على أهم المؤشرات التي تساعدك على متابعة نشاط متجرك بسرعة.</p>
                     </div>
                     <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center">
-                      <BarChart3 className="w-6 h-6 text-blue-600" />
+                      <TrendingUp className="w-6 h-6 text-blue-600" />
                     </div>
                   </div>
 
