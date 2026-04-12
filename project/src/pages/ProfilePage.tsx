@@ -238,29 +238,51 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     created_at: extra?.created_at || null,
   });
 
+  const fetchProductsMapByIds = async (productIds: string[]) => {
+    const cleanIds = [...new Set(productIds.filter(Boolean))];
+    if (cleanIds.length === 0) return new Map<string, any>();
+
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, title, name, description, price, thumbnail_url, slug, store_id, user_id, merchant_id')
+      .in('id', cleanIds);
+
+    if (error) throw error;
+
+    return new Map((data || []).map((product: any) => [product.id, product]));
+  };
+
   const fetchProfileStats = async () => {
     if (!user) return;
 
     setStatsLoading(true);
     try {
       const [favoritesRes, viewedRes] = await Promise.all([
-        supabase
-          .from('favorites')
-          .select('id, product_id, products(id, store_id, user_id, merchant_id)')
-          .eq('user_id', user.id),
-        supabase
-          .from('viewed_products')
-          .select('product_id, products(id, store_id, user_id, merchant_id)')
-          .eq('user_id', user.id),
+        supabase.from('favorites').select('id, product_id').eq('user_id', user.id),
+        supabase.from('viewed_products').select('id, product_id').eq('user_id', user.id),
       ]);
 
-      const favoritesCount = (favoritesRes.data || []).filter((row: any) =>
-        row?.products ? productMatchesScope(row.products, scopeInfo) : false
-      ).length;
+      const favoriteRows = favoritesRes.data || [];
+      const viewedRows = viewedRes.data || [];
 
-      const viewedCount = (viewedRes.data || []).filter((row: any) =>
-        row?.products ? productMatchesScope(row.products, scopeInfo) : false
-      ).length;
+      const productIds = [
+        ...new Set([
+          ...favoriteRows.map((row: any) => row.product_id),
+          ...viewedRows.map((row: any) => row.product_id),
+        ]),
+      ];
+
+      const productsMap = await fetchProductsMapByIds(productIds);
+
+      const favoritesCount = favoriteRows.filter((row: any) => {
+        const product = productsMap.get(row.product_id);
+        return product ? productMatchesScope(product, scopeInfo) : false;
+      }).length;
+
+      const viewedCount = viewedRows.filter((row: any) => {
+        const product = productsMap.get(row.product_id);
+        return product ? productMatchesScope(product, scopeInfo) : false;
+      }).length;
 
       setStats({
         favorites_count: favoritesCount,
@@ -306,15 +328,26 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     setOrdersError('');
 
     try {
-      const ownerFilter = `user_id.eq.${user.id},customer_id.eq.${user.id}`;
-
-      const { data: ordersData, error: ordersDbError } = await supabase
+      const orderQuery = supabase
         .from('orders')
-        .select('id, order_number, total_amount, status, created_at, currency')
-        .or(ownerFilter)
+        .select('id, order_number, total_amount, status, created_at, currency, user_id, customer_id, customer_email')
         .order('created_at', { ascending: false });
 
-      if (ordersDbError) throw ordersDbError;
+      let ordersData: any[] = [];
+      let primaryError: any = null;
+
+      const primaryFilters = [`user_id.eq.${user.id}`, `customer_id.eq.${user.id}`];
+      if (user.email) {
+        primaryFilters.push(`customer_email.eq.${user.email}`);
+      }
+
+      const primaryRes = await orderQuery.or(primaryFilters.join(','));
+      ordersData = primaryRes.data || [];
+      primaryError = primaryRes.error;
+
+      if (primaryError) {
+        throw primaryError;
+      }
 
       if (!ordersData || ordersData.length === 0) {
         setOrders([]);
@@ -334,21 +367,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const safeItems = rawItems || [];
       const productIds = [...new Set(safeItems.map((item: any) => item.product_id).filter(Boolean))];
-
-      let productsMap = new Map<string, any>();
-
-      if (productIds.length > 0) {
-        const { data: productsData, error: productsError } = await supabase
-          .from('products')
-          .select('id, title, name, price, currency, thumbnail_url, slug, store_id, user_id, merchant_id')
-          .in('id', productIds);
-
-        if (productsError) {
-          console.error('Error fetching products for orders:', productsError);
-        } else {
-          productsMap = new Map((productsData || []).map((product: any) => [product.id, product]));
-        }
-      }
+      const productsMap = await fetchProductsMapByIds(productIds);
 
       const itemsByOrderId = new Map<string, ProfileOrderItem[]>();
 
@@ -415,22 +434,27 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     try {
       const { data, error } = await supabase
         .from('favorites')
-        .select(
-          'id, created_at, product_id, products(id, title, name, description, price, thumbnail_url, slug, store_id, user_id, merchant_id)'
-        )
+        .select('id, created_at, product_id')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      const normalized = (data || [])
-        .filter((row: any) => row?.products && productMatchesScope(row.products, scopeInfo))
-        .map((row: any) =>
-          mapProductCard(row.products, {
+      const rows = data || [];
+      const productIds = rows.map((row: any) => row.product_id).filter(Boolean);
+      const productsMap = await fetchProductsMapByIds(productIds);
+
+      const normalized = rows
+        .map((row: any) => {
+          const product = productsMap.get(row.product_id);
+          if (!product || !productMatchesScope(product, scopeInfo)) return null;
+
+          return mapProductCard(product, {
             id: row.id,
             created_at: row.created_at,
-          })
-        );
+          });
+        })
+        .filter(Boolean) as ProfileListedProduct[];
 
       setFavorites(normalized);
     } catch (error) {
@@ -451,23 +475,28 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     try {
       const { data, error } = await supabase
         .from('viewed_products')
-        .select(
-          'id, created_at, viewed_at, product_id, products(id, title, name, description, price, thumbnail_url, slug, store_id, user_id, merchant_id)'
-        )
+        .select('id, created_at, viewed_at, product_id')
         .eq('user_id', user.id)
         .order('viewed_at', { ascending: false });
 
       if (error) throw error;
 
-      const normalized = (data || [])
-        .filter((row: any) => row?.products && productMatchesScope(row.products, scopeInfo))
-        .map((row: any) =>
-          mapProductCard(row.products, {
+      const rows = data || [];
+      const productIds = rows.map((row: any) => row.product_id).filter(Boolean);
+      const productsMap = await fetchProductsMapByIds(productIds);
+
+      const normalized = rows
+        .map((row: any) => {
+          const product = productsMap.get(row.product_id);
+          if (!product || !productMatchesScope(product, scopeInfo)) return null;
+
+          return mapProductCard(product, {
             id: row.id,
             created_at: row.created_at,
             viewed_at: row.viewed_at,
-          })
-        );
+          });
+        })
+        .filter(Boolean) as ProfileListedProduct[];
 
       setViewedProducts(normalized);
     } catch (error) {
@@ -488,7 +517,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       fetchViewedProducts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, profile?.role, scopeLoading, scopeInfo?.slug]);
+  }, [user?.id, user?.email, profile?.role, scopeLoading, scopeInfo?.slug]);
 
   const handleUpdateProfile = async () => {
     setLoading(true);
