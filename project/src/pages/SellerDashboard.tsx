@@ -280,10 +280,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [sellerOrders, setSellerOrders] = useState<SellerOrderUI[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
-  const [ordersFilter, setOrdersFilter] = useState<'all' | 'paid' | 'completed' | 'pending_payment'>('all');
+  const [ordersFilter, setOrdersFilter] = useState<'all' | 'paid' | 'pending_payment'>('all');
   const [selectedOrder, setSelectedOrder] = useState<SellerOrderUI | null>(null);
   const [showOrderDetails, setShowOrderDetails] = useState(false);
-  const [completingOrderId, setCompletingOrderId] = useState<string | null>(null);
 
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequestRow | null>(null);
   const [showWithdrawalDetails, setShowWithdrawalDetails] = useState(false);
@@ -823,27 +822,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     setShowOrderDetails(false);
   };
 
-  const handleCompleteOrder = async (order: SellerOrderUI) => {
-    if (!profile || normalizeOrderStatus(order.status) !== 'paid') return;
 
-    try {
-      setCompletingOrderId(order.id);
-      const { error } = await supabase
-        .from('orders')
-        .update({ status: 'completed' })
-        .eq('id', order.id)
-        .or(`seller_id.eq.${profile.id},merchant_id.eq.${profile.id}`);
-
-      if (error) throw error;
-
-      await fetchOrdersData();
-    } catch (error) {
-      console.error('Error completing order:', error);
-      alert('حدث خطأ أثناء تأكيد اكتمال الطلب');
-    } finally {
-      setCompletingOrderId(null);
-    }
-  };
 
   const fetchIdentityVerification = async () => {
     if (!profile) return;
@@ -1765,7 +1744,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const ordersStats = {
     total: sellerOrders.length,
     paid: sellerOrders.filter((order) => normalizeOrderStatus(order.status) === 'paid').length,
-    completed: sellerOrders.filter((order) => normalizeOrderStatus(order.status) === 'completed').length,
     pending: sellerOrders.filter((order) => normalizeOrderStatus(order.status) === 'pending_payment').length,
     revenue: sellerOrders
       .filter((order) => ['paid', 'completed'].includes(normalizeOrderStatus(order.status)))
@@ -2566,20 +2544,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <p className="text-sm text-gray-600">طلبات قيد الانتظار</p>
                 </div>
 
-                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
-                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4">
-                    <Check className="w-6 h-6 text-blue-600" />
-                  </div>
-                  <div className="text-3xl font-bold text-gray-900 mb-1">{ordersStats.completed}</div>
-                  <p className="text-sm text-gray-600">طلبات مكتملة</p>
-                </div>
               </div>
 
               <div className="flex items-center gap-3 overflow-x-auto pb-2 mb-6">
                 {[
                   { value: 'all', label: `الكل (${ordersStats.total})` },
                   { value: 'paid', label: `مدفوعة (${ordersStats.paid})` },
-                  { value: 'completed', label: `مكتملة (${ordersStats.completed})` },
                   { value: 'pending_payment', label: `قيد الانتظار (${ordersStats.pending})` },
                 ].map((filter) => (
                   <button
@@ -2653,16 +2623,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                             <span>عرض التفاصيل</span>
                           </button>
 
-                          {normalizeOrderStatus(order.status) === 'paid' && (
-                            <button
-                              onClick={() => handleCompleteOrder(order)}
-                              disabled={completingOrderId === order.id}
-                              className="px-5 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-colors disabled:opacity-50 inline-flex items-center gap-2"
-                            >
-                              <Check className="w-5 h-5" />
-                              <span>{completingOrderId === order.id ? 'جاري التأكيد...' : 'تأكيد الإكمال'}</span>
-                            </button>
-                          )}
                         </div>
                       </div>
                     </div>
