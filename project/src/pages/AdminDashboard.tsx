@@ -1519,6 +1519,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     return clean.replace(/(.{4})/g, '$1 ').trim();
   };
 
+  const filteredFinancialSales = useMemo(() => {
+    const q = financialSearchQuery.trim().toLowerCase();
+    if (!q) return salesRecords;
+
+    return salesRecords.filter((row) =>
+      [
+        row.order_number,
+        row.product_summary,
+        row.customer_name,
+        row.merchant_name,
+        row.store_name,
+        row.payment_transaction_id || '',
+        row.payment_provider_order_id || '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [salesRecords, financialSearchQuery]);
+
+  const filteredFinancialWithdrawals = useMemo(() => {
+    const q = financialSearchQuery.trim().toLowerCase();
+    if (!q) return withdrawalRecords;
+
+    return withdrawalRecords.filter((row) =>
+      [row.merchant_name, row.store_name, row.id, row.status, row.source_table]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [withdrawalRecords, financialSearchQuery]);
+
+  const showFinancialSales = financialRecordTab === 'sales' || financialRecordTab === 'all';
+  const showFinancialWithdrawals = financialRecordTab === 'withdrawals' || financialRecordTab === 'all';
+
   if (profile?.role !== 'admin' && profile?.role !== 'superadmin') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -1594,40 +1629,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   });
 
 
-  const filteredFinancialSales = useMemo(() => {
-    const q = financialSearchQuery.trim().toLowerCase();
-    if (!q) return salesRecords;
-
-    return salesRecords.filter((row) =>
-      [
-        row.order_number,
-        row.product_summary,
-        row.customer_name,
-        row.merchant_name,
-        row.store_name,
-        row.payment_transaction_id || '',
-        row.payment_provider_order_id || '',
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(q)
-    );
-  }, [salesRecords, financialSearchQuery]);
-
-  const filteredFinancialWithdrawals = useMemo(() => {
-    const q = financialSearchQuery.trim().toLowerCase();
-    if (!q) return withdrawalRecords;
-
-    return withdrawalRecords.filter((row) =>
-      [row.merchant_name, row.store_name, row.id, row.status, row.source_table]
-        .join(' ')
-        .toLowerCase()
-        .includes(q)
-    );
-  }, [withdrawalRecords, financialSearchQuery]);
-
-  const showFinancialSales = financialRecordTab === 'sales' || financialRecordTab === 'all';
-  const showFinancialWithdrawals = financialRecordTab === 'withdrawals' || financialRecordTab === 'all';
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
