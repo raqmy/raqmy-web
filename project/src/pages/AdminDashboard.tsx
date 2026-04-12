@@ -207,13 +207,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
   const fetchDashboardData = async () => {
     try {
-      const [usersRes, merchantsRes, storesRes, productsRes, verificationsRes, bankAccountsRes] = await Promise.all([
-        supabase.from('users_profile').select('*'),
+      const [
+        usersRes,
+        merchantsRes,
+        storesRes,
+        productsRes,
+        verificationsRes,
+        bankAccountsRes,
+        ordersRes,
+        favoritesRes,
+        viewedProductsRes,
+      ] = await Promise.all([
+        supabase.from('users_profile').select('id, name, email, role, created_at'),
         supabase.from('merchants').select('id, user_id, store_name, store_slug, created_at'),
         supabase.from('stores').select('*'),
         supabase.from('products').select('*'),
         supabase.from('identity_verifications').select('id, status'),
         supabase.from('bank_accounts').select('id, status'),
+        supabase.from('orders').select('user_id, customer_id, created_at'),
+        supabase.from('favorites').select('user_id, created_at'),
+        supabase.from('viewed_products').select('user_id, created_at, viewed_at'),
       ]);
 
       if (usersRes.error) console.error('users_profile fetch error:', usersRes.error);
@@ -222,6 +235,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       if (productsRes.error) console.error('products fetch error:', productsRes.error);
       if (verificationsRes.error) console.error('identity_verifications fetch error:', verificationsRes.error);
       if (bankAccountsRes.error) console.error('bank_accounts fetch error:', bankAccountsRes.error);
+      if (ordersRes.error) console.error('orders fetch error:', ordersRes.error);
+      if (favoritesRes.error) console.error('favorites fetch error:', favoritesRes.error);
+      if (viewedProductsRes.error) console.error('viewed_products fetch error:', viewedProductsRes.error);
 
       const usersData = (usersRes.data || []) as any[];
       const merchantsData = (merchantsRes.data || []) as Array<{
@@ -233,16 +249,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       }>;
       const storesData = (storesRes.data || []) as any[];
       const productsData = productsRes.data || [];
+      const ordersData = (ordersRes.data || []) as Array<{
+        user_id?: string | null;
+        customer_id?: string | null;
+        created_at?: string | null;
+      }>;
+      const favoritesData = (favoritesRes.data || []) as Array<{
+        user_id?: string | null;
+        created_at?: string | null;
+      }>;
+      const viewedProductsData = (viewedProductsRes.data || []) as Array<{
+        user_id?: string | null;
+        created_at?: string | null;
+        viewed_at?: string | null;
+      }>;
 
-      if (storesData) setStores(storesData);
-      if (productsData) setProducts(productsData);
+      setStores(storesData || []);
+      setProducts(productsData || []);
 
       const mergedUsersMap = new Map<string, AdminUserListItem>();
+
+      const upsertUser = (item: AdminUserListItem) => {
+        if (!item?.id) return;
+
+        const existing = mergedUsersMap.get(item.id);
+
+        if (!existing) {
+          mergedUsersMap.set(item.id, item);
+          return;
+        }
+
+        const nextRole =
+          existing.role === 'admin' || existing.role === 'superadmin'
+            ? existing.role
+            : item.role === 'admin' || item.role === 'superadmin'
+            ? item.role
+            : existing.role === 'seller' || item.role === 'seller'
+            ? 'seller'
+            : existing.role || item.role || 'customer';
+
+        mergedUsersMap.set(item.id, {
+          ...existing,
+          ...item,
+          name: existing.name || item.name,
+          email: existing.email || item.email,
+          role: nextRole,
+          created_at: existing.created_at || item.created_at || new Date().toISOString(),
+          source:
+            existing.source === 'users_profile'
+              ? 'users_profile'
+              : item.source === 'users_profile'
+              ? 'users_profile'
+              : existing.source,
+          source_label: existing.source_label || item.source_label,
+        });
+      };
 
       for (const user of usersData) {
         if (!user?.id) continue;
 
-        mergedUsersMap.set(user.id, {
+        upsertUser({
           id: user.id,
           name: user.name || null,
           email: user.email || null,
@@ -253,29 +319,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         });
       }
 
+      const sellerIds = new Set<string>();
+
       for (const merchant of merchantsData) {
         const merchantUserId = merchant?.user_id;
         if (!merchantUserId) continue;
 
-        const existingUser = mergedUsersMap.get(merchantUserId);
-        const matchingStore = storesData.find((store: any) => store?.user_id === merchantUserId);
+        sellerIds.add(merchantUserId);
 
-        if (existingUser) {
-          mergedUsersMap.set(merchantUserId, {
-            ...existingUser,
-            role: existingUser.role === 'admin' || existingUser.role === 'superadmin' ? existingUser.role : 'seller',
-          });
-          continue;
-        }
-
-        mergedUsersMap.set(merchantUserId, {
+        upsertUser({
           id: merchantUserId,
-          name: merchant.store_name || matchingStore?.name || 'تاجر',
+          name: null,
           email: null,
           role: 'seller',
-          created_at: merchant.created_at || matchingStore?.created_at || new Date().toISOString(),
+          created_at: merchant.created_at || new Date().toISOString(),
           source: 'merchant',
-          source_label: merchant.store_slug || matchingStore?.slug || 'merchant',
+          source_label: merchant.store_slug || merchant.store_name || 'merchant',
         });
       }
 
@@ -283,31 +342,75 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         const storeUserId = store?.user_id;
         if (!storeUserId) continue;
 
-        const existingUser = mergedUsersMap.get(storeUserId);
-        if (existingUser) {
-          mergedUsersMap.set(storeUserId, {
-            ...existingUser,
-            role: existingUser.role === 'admin' || existingUser.role === 'superadmin' ? existingUser.role : 'seller',
-          });
-          continue;
-        }
+        sellerIds.add(storeUserId);
 
-        mergedUsersMap.set(storeUserId, {
+        upsertUser({
           id: storeUserId,
-          name: store?.name || 'تاجر',
+          name: null,
           email: null,
           role: 'seller',
           created_at: store?.created_at || new Date().toISOString(),
           source: 'store',
-          source_label: store?.slug || 'store',
+          source_label: store?.slug || store?.name || 'store',
         });
       }
 
-      const mergedUsers = Array.from(mergedUsersMap.values()).sort((a, b) => {
-        const aTime = new Date(a.created_at || 0).getTime();
-        const bTime = new Date(b.created_at || 0).getTime();
-        return bTime - aTime;
-      });
+      const customerCreatedAtMap = new Map<string, string>();
+
+      for (const order of ordersData) {
+        const possibleIds = [order?.user_id, order?.customer_id].filter(Boolean) as string[];
+        for (const id of possibleIds) {
+          if (!customerCreatedAtMap.has(id) && order?.created_at) {
+            customerCreatedAtMap.set(id, order.created_at);
+          }
+        }
+      }
+
+      for (const row of favoritesData) {
+        const id = row?.user_id;
+        if (id && !customerCreatedAtMap.has(id) && row?.created_at) {
+          customerCreatedAtMap.set(id, row.created_at);
+        }
+      }
+
+      for (const row of viewedProductsData) {
+        const id = row?.user_id;
+        const createdAt = row?.created_at || row?.viewed_at || null;
+        if (id && !customerCreatedAtMap.has(id) && createdAt) {
+          customerCreatedAtMap.set(id, createdAt);
+        }
+      }
+
+      for (const [userId, createdAt] of customerCreatedAtMap.entries()) {
+        if (sellerIds.has(userId)) continue;
+
+        upsertUser({
+          id: userId,
+          name: null,
+          email: null,
+          role: 'customer',
+          created_at: createdAt || new Date().toISOString(),
+          source: 'users_profile',
+          source_label: 'activity',
+        });
+      }
+
+      const mergedUsers = Array.from(mergedUsersMap.values())
+        .map((user) => ({
+          ...user,
+          name:
+            user.name ||
+            (user.role === 'seller'
+              ? `تاجر ${user.id.slice(0, 8)}`
+              : user.role === 'admin' || user.role === 'superadmin'
+              ? `مدير ${user.id.slice(0, 8)}`
+              : `مستخدم ${user.id.slice(0, 8)}`),
+        }))
+        .sort((a, b) => {
+          const aTime = new Date(a.created_at || 0).getTime();
+          const bTime = new Date(b.created_at || 0).getTime();
+          return bTime - aTime;
+        });
 
       setUsers(mergedUsers);
 
@@ -1346,8 +1449,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                           <div className="text-xs text-gray-500">{user.email}</div>
                         ) : (
                           <div className="text-xs text-gray-400">
-                            {user.source !== 'users_profile'
-                              ? `مستخدم مستنتج من ${user.source === 'merchant' ? 'جدول التجار' : 'جدول المتاجر'}`
+                            {user.source === 'merchant'
+                              ? 'حساب مرتبط بجدول التجار'
+                              : user.source === 'store'
+                              ? 'حساب مرتبط بجدول المتاجر'
+                              : user.source_label === 'activity'
+                              ? 'حساب تم اكتشافه من نشاط الموقع'
                               : '—'}
                           </div>
                         )}
