@@ -150,6 +150,47 @@ interface EarningsOrderMeta {
   couponAmount?: number;
 }
 
+interface SellerOrderItemRow {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  quantity: number | null;
+  price_at_time: number | null;
+  product_name?: string | null;
+  product_title?: string | null;
+  subtotal?: number | null;
+  seller_amount?: number | null;
+  seller_id?: string | null;
+}
+
+interface SellerOrderRow {
+  id: string;
+  order_number?: string | null;
+  customer_id?: string | null;
+  user_id?: string | null;
+  seller_id?: string | null;
+  merchant_id?: string | null;
+  status: string | null;
+  total_amount: number | null;
+  seller_amount?: number | null;
+  phone?: string | null;
+  created_at: string | null;
+  paid_at?: string | null;
+  currency?: string | null;
+}
+
+interface SellerOrderUI extends SellerOrderRow {
+  customer_name: string;
+  customer_phone: string;
+  items: Array<{
+    id: string;
+    product_id: string | null;
+    product_name: string;
+    quantity: number;
+    amount: number;
+  }>;
+}
+
 type NormalizedProduct = Product & {
   name: string;
   user_id?: string | null;
@@ -236,6 +277,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   const [earningsOrderMeta, setEarningsOrderMeta] = useState<Record<string, EarningsOrderMeta>>({});
 
+  const [sellerOrders, setSellerOrders] = useState<SellerOrderUI[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState('');
+  const [ordersFilter, setOrdersFilter] = useState<'all' | 'paid' | 'completed' | 'pending_payment'>('all');
+  const [selectedOrder, setSelectedOrder] = useState<SellerOrderUI | null>(null);
+  const [showOrderDetails, setShowOrderDetails] = useState(false);
+  const [completingOrderId, setCompletingOrderId] = useState<string | null>(null);
+
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequestRow | null>(null);
   const [showWithdrawalDetails, setShowWithdrawalDetails] = useState(false);
   const [withdrawalProofUrl, setWithdrawalProofUrl] = useState<string | null>(null);
@@ -249,15 +298,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       fetchBankAccountData();
       fetchEarningsData();
       fetchWithdrawalLimitData();
+      fetchOrdersData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
-
-  useEffect(() => {
-    if (activeTab === 'orders') {
-      onNavigate('orders-management');
-    }
-  }, [activeTab, onNavigate]);
 
   const normalizeProduct = (row: any): NormalizedProduct => {
     const name = row?.name ?? row?.title ?? '';
@@ -627,6 +671,177 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       console.error('Error fetching dashboard data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+
+  const normalizeOrderStatus = (status: string | null | undefined) => {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'completed') return 'completed';
+    if (normalized === 'paid') return 'paid';
+    if (normalized === 'pending_payment' || normalized === 'pending') return 'pending_payment';
+    return normalized || 'unknown';
+  };
+
+  const getOrderStatusLabel = (status: string | null | undefined) => {
+    const normalized = normalizeOrderStatus(status);
+    if (normalized === 'completed') return 'مكتمل';
+    if (normalized === 'paid') return 'مدفوع';
+    if (normalized === 'pending_payment') return 'قيد الانتظار';
+    if (normalized === 'failed') return 'فشل الدفع';
+    if (normalized === 'canceled') return 'ملغي';
+    return status || 'غير معروف';
+  };
+
+  const getOrderStatusClass = (status: string | null | undefined) => {
+    const normalized = normalizeOrderStatus(status);
+    if (normalized === 'completed') return 'bg-blue-100 text-blue-700';
+    if (normalized === 'paid') return 'bg-green-100 text-green-700';
+    if (normalized === 'pending_payment') return 'bg-yellow-100 text-yellow-700';
+    if (normalized === 'failed' || normalized === 'canceled') return 'bg-red-100 text-red-700';
+    return 'bg-gray-100 text-gray-700';
+  };
+
+  const fetchOrdersData = async () => {
+    if (!profile) return;
+
+    try {
+      setOrdersLoading(true);
+      setOrdersError('');
+
+      const { data: ordersData, error: ordersErr } = await supabase
+        .from('orders')
+        .select('*')
+        .or(`seller_id.eq.${profile.id},merchant_id.eq.${profile.id}`)
+        .order('created_at', { ascending: false });
+
+      if (ordersErr) throw ordersErr;
+
+      const orderRows = safeArray(ordersData) as any[];
+      const orderIds = orderRows.map((row) => row?.id).filter(Boolean);
+      const customerIds = Array.from(
+        new Set(
+          orderRows
+            .map((row) => row?.customer_id || row?.user_id)
+            .filter(Boolean)
+        )
+      ) as string[];
+
+      let orderItemsRows: any[] = [];
+      if (orderIds.length > 0) {
+        const { data: orderItemsData, error: orderItemsErr } = await supabase
+          .from('order_items')
+          .select('*')
+          .in('order_id', orderIds);
+
+        if (orderItemsErr) throw orderItemsErr;
+        orderItemsRows = safeArray(orderItemsData) as any[];
+      }
+
+      const productIds = Array.from(
+        new Set(orderItemsRows.map((row) => row?.product_id).filter(Boolean))
+      ) as string[];
+      const productMap: Record<string, any> = {};
+      if (productIds.length > 0) {
+        const { data: productRows, error: productsErr } = await supabase
+          .from('products')
+          .select('*')
+          .in('id', productIds);
+
+        if (productsErr) {
+          console.error('orders products fetch error:', productsErr);
+        } else {
+          for (const row of safeArray(productRows) as any[]) {
+            if (row?.id) productMap[row.id] = row;
+          }
+        }
+      }
+
+      const customerMap: Record<string, any> = {};
+      if (customerIds.length > 0) {
+        const { data: customerRows, error: customersErr } = await supabase
+          .from('users_profile')
+          .select('*')
+          .in('id', customerIds);
+
+        if (customersErr) {
+          console.error('orders customers fetch error:', customersErr);
+        } else {
+          for (const row of safeArray(customerRows) as any[]) {
+            if (row?.id) customerMap[row.id] = row;
+          }
+        }
+      }
+
+      const itemsByOrder: Record<string, SellerOrderUI['items']> = {};
+      for (const row of orderItemsRows) {
+        const orderId = row?.order_id;
+        if (!orderId) continue;
+
+        const product = row?.product_id ? productMap[row.product_id] : null;
+        const quantity = Number(row?.quantity || 1) || 1;
+        const itemAmount = Number(row?.subtotal ?? row?.seller_amount ?? row?.price_at_time ?? product?.price ?? 0) || 0;
+        const productName = row?.product_name || row?.product_title || product?.title || product?.name || 'منتج';
+
+        if (!itemsByOrder[orderId]) itemsByOrder[orderId] = [];
+        itemsByOrder[orderId].push({
+          id: row?.id || `${orderId}-${row?.product_id || Math.random()}`,
+          product_id: row?.product_id || null,
+          product_name: productName,
+          quantity,
+          amount: itemAmount,
+        });
+      }
+
+      const normalizedOrders: SellerOrderUI[] = orderRows.map((row) => {
+        const customerId = row?.customer_id || row?.user_id || null;
+        const customer = customerId ? customerMap[customerId] : null;
+        return {
+          ...(row as SellerOrderRow),
+          customer_name: customer?.name || row?.customer_name || 'العميل',
+          customer_phone: customer?.phone || row?.phone || '—',
+          items: itemsByOrder[row.id] || [],
+        };
+      });
+
+      setSellerOrders(normalizedOrders);
+    } catch (error: any) {
+      console.error('Error fetching seller orders:', error);
+      setOrdersError(error?.message || 'حدث خطأ أثناء تحميل الطلبات');
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  const openOrderDetails = (order: SellerOrderUI) => {
+    setSelectedOrder(order);
+    setShowOrderDetails(true);
+  };
+
+  const closeOrderDetails = () => {
+    setSelectedOrder(null);
+    setShowOrderDetails(false);
+  };
+
+  const handleCompleteOrder = async (order: SellerOrderUI) => {
+    if (!profile || normalizeOrderStatus(order.status) !== 'paid') return;
+
+    try {
+      setCompletingOrderId(order.id);
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: 'completed' })
+        .eq('id', order.id)
+        .or(`seller_id.eq.${profile.id},merchant_id.eq.${profile.id}`);
+
+      if (error) throw error;
+
+      await fetchOrdersData();
+    } catch (error) {
+      console.error('Error completing order:', error);
+      alert('حدث خطأ أثناء تأكيد اكتمال الطلب');
+    } finally {
+      setCompletingOrderId(null);
     }
   };
 
@@ -1542,6 +1757,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     !hasReachedWithdrawalLimit &&
     !withdrawalSubmitting;
 
+  const filteredSellerOrders = sellerOrders.filter((order) => {
+    if (ordersFilter === 'all') return true;
+    return normalizeOrderStatus(order.status) === ordersFilter;
+  });
+
+  const ordersStats = {
+    total: sellerOrders.length,
+    paid: sellerOrders.filter((order) => normalizeOrderStatus(order.status) === 'paid').length,
+    completed: sellerOrders.filter((order) => normalizeOrderStatus(order.status) === 'completed').length,
+    pending: sellerOrders.filter((order) => normalizeOrderStatus(order.status) === 'pending_payment').length,
+    revenue: sellerOrders
+      .filter((order) => ['paid', 'completed'].includes(normalizeOrderStatus(order.status)))
+      .reduce((sum, order) => sum + Number(order.total_amount || order.seller_amount || 0), 0),
+  };
+
   const totalProductsCount = products.length;
   const averageViewsPerProduct = totalProductsCount > 0 ? stats.totalViews / totalProductsCount : 0;
   const averageRevenuePerSale = stats.totalSales > 0 ? stats.totalRevenue / stats.totalSales : 0;
@@ -2293,15 +2523,218 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         )}
 
         {activeTab === 'orders' && (
-          <div className="bg-white rounded-xl p-8">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">إدارة الطلبات</h2>
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium">
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>جاري فتح صفحة الطلبات...</span>
+          <div className="space-y-8">
+            <div className="bg-white rounded-2xl shadow-sm p-8">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6 mb-8">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">إدارة الطلبات</h2>
+                  <p className="text-gray-600">تتبع وإدارة جميع طلبات عملائك مباشرة من داخل لوحة التحكم.</p>
+                </div>
+
+                <button
+                  onClick={fetchOrdersData}
+                  disabled={ordersLoading}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-5 h-5 ${ordersLoading ? 'animate-spin' : ''}`} />
+                  <span>تحديث الطلبات</span>
+                </button>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
+                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4">
+                    <ShoppingBag className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div className="text-3xl font-bold text-gray-900 mb-1">{ordersStats.total}</div>
+                  <p className="text-sm text-gray-600">إجمالي الطلبات</p>
+                </div>
+
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
+                  <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-4">
+                    <DollarSign className="w-6 h-6 text-green-600" />
+                  </div>
+                  <div className="text-3xl font-bold text-gray-900 mb-1">{formatCurrency(ordersStats.revenue)}</div>
+                  <p className="text-sm text-gray-600">إجمالي الطلبات المدفوعة</p>
+                </div>
+
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
+                  <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center mb-4">
+                    <Clock3 className="w-6 h-6 text-yellow-600" />
+                  </div>
+                  <div className="text-3xl font-bold text-gray-900 mb-1">{ordersStats.pending}</div>
+                  <p className="text-sm text-gray-600">طلبات قيد الانتظار</p>
+                </div>
+
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
+                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4">
+                    <Check className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div className="text-3xl font-bold text-gray-900 mb-1">{ordersStats.completed}</div>
+                  <p className="text-sm text-gray-600">طلبات مكتملة</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 mb-6">
+                {[
+                  { value: 'all', label: `الكل (${ordersStats.total})` },
+                  { value: 'paid', label: `مدفوعة (${ordersStats.paid})` },
+                  { value: 'completed', label: `مكتملة (${ordersStats.completed})` },
+                  { value: 'pending_payment', label: `قيد الانتظار (${ordersStats.pending})` },
+                ].map((filter) => (
+                  <button
+                    key={filter.value}
+                    onClick={() => setOrdersFilter(filter.value as typeof ordersFilter)}
+                    className={`px-4 py-2 rounded-xl whitespace-nowrap font-medium transition-colors ${
+                      ordersFilter === filter.value
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+
+              {ordersError && (
+                <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
+                  {ordersError}
+                </div>
+              )}
+
+              {ordersLoading ? (
+                <div className="text-center py-16">
+                  <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-gray-600">جاري تحميل الطلبات...</p>
+                </div>
+              ) : filteredSellerOrders.length === 0 ? (
+                <div className="text-center py-16 border border-dashed border-gray-200 rounded-2xl">
+                  <ShoppingBag className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد طلبات حالياً</h3>
+                  <p className="text-gray-600">عندما تصلك طلبات جديدة ستظهر هنا مباشرة داخل لوحة التحكم.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredSellerOrders.map((order) => (
+                    <div key={order.id} className="border border-gray-200 rounded-2xl p-5 hover:shadow-sm transition-shadow">
+                      <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 flex-1">
+                          <div>
+                            <p className="text-sm text-gray-500 mb-1">المبلغ الإجمالي</p>
+                            <p className="text-3xl font-bold text-blue-600">{formatCurrency(order.total_amount || 0)}</p>
+                            <p className="text-sm text-gray-500 mt-1">{order.items.length} منتج</p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-gray-500 mb-1">التاريخ</p>
+                            <p className="text-base font-medium text-gray-900">{formatDate(order.created_at)}</p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-gray-500 mb-1">الهاتف</p>
+                            <p className="text-base font-medium text-gray-900">{order.customer_phone || '—'}</p>
+                          </div>
+
+                          <div>
+                            <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold mb-3 ${getOrderStatusClass(order.status)}`}>
+                              <span>{getOrderStatusLabel(order.status)}</span>
+                            </div>
+                            <p className="text-xl font-bold text-gray-900">طلب #{order.order_number || order.id.slice(0, 8)}</p>
+                            <p className="text-sm text-gray-500 mt-1">العميل: {order.customer_name}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3 xl:justify-end">
+                          <button
+                            onClick={() => openOrderDetails(order)}
+                            className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
+                          >
+                            <Eye className="w-5 h-5" />
+                            <span>عرض التفاصيل</span>
+                          </button>
+
+                          {normalizeOrderStatus(order.status) === 'paid' && (
+                            <button
+                              onClick={() => handleCompleteOrder(order)}
+                              disabled={completingOrderId === order.id}
+                              className="px-5 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                            >
+                              <Check className="w-5 h-5" />
+                              <span>{completingOrderId === order.id ? 'جاري التأكيد...' : 'تأكيد الإكمال'}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <p className="text-gray-600">يتم الآن فتح جميع الطلبات تلقائياً دون الحاجة للضغط على أي زر إضافي.</p>
+
+            {showOrderDetails && selectedOrder && (
+              <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl">
+                  <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                    <div>
+                      <h3 className="text-2xl font-bold text-gray-900">تفاصيل الطلب</h3>
+                      <p className="text-gray-500 mt-1">طلب #{selectedOrder.order_number || selectedOrder.id.slice(0, 8)}</p>
+                    </div>
+                    <button
+                      onClick={closeOrderDetails}
+                      className="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center"
+                    >
+                      <X className="w-5 h-5 text-gray-600" />
+                    </button>
+                  </div>
+
+                  <div className="p-6 space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-xl bg-gray-50 p-4">
+                        <p className="text-sm text-gray-500 mb-1">اسم العميل</p>
+                        <p className="text-lg font-bold text-gray-900">{selectedOrder.customer_name}</p>
+                      </div>
+                      <div className="rounded-xl bg-gray-50 p-4">
+                        <p className="text-sm text-gray-500 mb-1">رقم الهاتف</p>
+                        <p className="text-lg font-bold text-gray-900">{selectedOrder.customer_phone || '—'}</p>
+                      </div>
+                      <div className="rounded-xl bg-gray-50 p-4">
+                        <p className="text-sm text-gray-500 mb-1">الحالة</p>
+                        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${getOrderStatusClass(selectedOrder.status)}`}>
+                          {getOrderStatusLabel(selectedOrder.status)}
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-gray-50 p-4">
+                        <p className="text-sm text-gray-500 mb-1">إجمالي المبلغ</p>
+                        <p className="text-lg font-bold text-blue-600">{formatCurrency(selectedOrder.total_amount || 0)}</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-lg font-bold text-gray-900 mb-4">المنتجات داخل الطلب</h4>
+                      <div className="space-y-3">
+                        {selectedOrder.items.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-gray-500">
+                            لا توجد عناصر ظاهرة لهذا الطلب.
+                          </div>
+                        ) : (
+                          selectedOrder.items.map((item) => (
+                            <div key={item.id} className="rounded-xl border border-gray-200 p-4 flex items-center justify-between gap-4">
+                              <div>
+                                <p className="font-bold text-gray-900">{item.product_name}</p>
+                                <p className="text-sm text-gray-500 mt-1">الكمية: {item.quantity}</p>
+                              </div>
+                              <div className="text-left">
+                                <p className="text-lg font-bold text-blue-600">{formatCurrency(item.amount)}</p>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
