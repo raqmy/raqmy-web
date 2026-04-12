@@ -43,7 +43,7 @@ interface AdminUserListItem {
   email: string | null;
   role: string | null;
   created_at: string;
-  source: 'users_profile' | 'merchant' | 'store';
+  source: 'users_profile' | 'profiles' | 'merchant' | 'store' | 'activity';
   source_label?: string;
 }
 
@@ -209,6 +209,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     try {
       const [
         usersRes,
+        profilesRes,
         merchantsRes,
         storesRes,
         productsRes,
@@ -219,6 +220,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         viewedProductsRes,
       ] = await Promise.all([
         supabase.from('users_profile').select('id, name, email, role, created_at'),
+        supabase.from('profiles').select('*'),
         supabase.from('merchants').select('id, user_id, store_name, store_slug, created_at'),
         supabase.from('stores').select('*'),
         supabase.from('products').select('*'),
@@ -230,6 +232,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       ]);
 
       if (usersRes.error) console.error('users_profile fetch error:', usersRes.error);
+      if (profilesRes.error) console.error('profiles fetch error:', profilesRes.error);
       if (merchantsRes.error) console.error('merchants fetch error:', merchantsRes.error);
       if (storesRes.error) console.error('stores fetch error:', storesRes.error);
       if (productsRes.error) console.error('products fetch error:', productsRes.error);
@@ -240,6 +243,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       if (viewedProductsRes.error) console.error('viewed_products fetch error:', viewedProductsRes.error);
 
       const usersData = (usersRes.data || []) as any[];
+      const profilesData = (profilesRes.data || []) as any[];
       const merchantsData = (merchantsRes.data || []) as Array<{
         id: string;
         user_id?: string | null;
@@ -269,6 +273,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
       const mergedUsersMap = new Map<string, AdminUserListItem>();
 
+      const normalizeRole = (value: string | null | undefined) => {
+        const role = (value || '').toString().toLowerCase();
+        if (role === 'admin' || role === 'superadmin') return role;
+        if (role === 'seller' || role === 'merchant') return 'seller';
+        return 'customer';
+      };
+
       const upsertUser = (item: AdminUserListItem) => {
         if (!item?.id) return;
 
@@ -279,14 +290,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           return;
         }
 
+        const existingRole = normalizeRole(existing.role);
+        const incomingRole = normalizeRole(item.role);
+
         const nextRole =
-          existing.role === 'admin' || existing.role === 'superadmin'
-            ? existing.role
-            : item.role === 'admin' || item.role === 'superadmin'
-            ? item.role
-            : existing.role === 'seller' || item.role === 'seller'
+          existingRole === 'admin' || existingRole === 'superadmin'
+            ? existingRole
+            : incomingRole === 'admin' || incomingRole === 'superadmin'
+            ? incomingRole
+            : existingRole === 'seller' || incomingRole === 'seller'
             ? 'seller'
-            : existing.role || item.role || 'customer';
+            : 'customer';
 
         mergedUsersMap.set(item.id, {
           ...existing,
@@ -300,6 +314,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
               ? 'users_profile'
               : item.source === 'users_profile'
               ? 'users_profile'
+              : existing.source === 'profiles'
+              ? 'profiles'
+              : item.source === 'profiles'
+              ? 'profiles'
               : existing.source,
           source_label: existing.source_label || item.source_label,
         });
@@ -312,10 +330,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           id: user.id,
           name: user.name || null,
           email: user.email || null,
-          role: user.role || 'customer',
+          role: normalizeRole(user.role),
           created_at: user.created_at || new Date().toISOString(),
           source: 'users_profile',
           source_label: 'users_profile',
+        });
+      }
+
+      for (const profileRow of profilesData) {
+        if (!profileRow?.id) continue;
+
+        upsertUser({
+          id: profileRow.id,
+          name: profileRow.name || profileRow.full_name || profileRow.username || null,
+          email: profileRow.email || null,
+          role: normalizeRole(profileRow.role),
+          created_at: profileRow.created_at || new Date().toISOString(),
+          source: 'profiles',
+          source_label: 'profiles',
         });
       }
 
@@ -390,7 +422,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           email: null,
           role: 'customer',
           created_at: createdAt || new Date().toISOString(),
-          source: 'users_profile',
+          source: 'activity',
           source_label: 'activity',
         });
       }
@@ -1453,7 +1485,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                               ? 'حساب مرتبط بجدول التجار'
                               : user.source === 'store'
                               ? 'حساب مرتبط بجدول المتاجر'
-                              : user.source_label === 'activity'
+                              : user.source === 'profiles'
+                              ? 'حساب مرتبط بجدول profiles'
+                              : user.source === 'activity' || user.source_label === 'activity'
                               ? 'حساب تم اكتشافه من نشاط الموقع'
                               : '—'}
                           </div>
@@ -1483,14 +1517,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                         <button
                           onClick={() => handleDeleteUser(user.id)}
                           className={`${
-                            user.role === 'admin' || user.role === 'superadmin' || user.source !== 'users_profile'
+                            user.role === 'admin' || user.role === 'superadmin' || (user.source !== 'users_profile' && user.source !== 'profiles')
                               ? 'text-gray-300 cursor-not-allowed'
                               : 'text-red-600 hover:text-red-800'
                           }`}
-                          disabled={user.role === 'admin' || user.role === 'superadmin' || user.source !== 'users_profile'}
+                          disabled={user.role === 'admin' || user.role === 'superadmin' || (user.source !== 'users_profile' && user.source !== 'profiles')}
                           title={
-                            user.source !== 'users_profile'
-                              ? 'لا يمكن حذف هذا السجل لأنه غير موجود مباشرة في users_profile'
+                            user.source !== 'users_profile' && user.source !== 'profiles'
+                              ? 'لا يمكن حذف هذا السجل لأنه غير موجود مباشرة في users_profile أو profiles'
                               : user.role === 'admin' || user.role === 'superadmin'
                               ? 'لا يمكن حذف حساب المدير'
                               : 'حذف المستخدم'
