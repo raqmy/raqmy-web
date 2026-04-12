@@ -253,6 +253,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
+  useEffect(() => {
+    if (activeTab === 'orders') {
+      onNavigate('orders-management');
+    }
+  }, [activeTab, onNavigate]);
+
   const normalizeProduct = (row: any): NormalizedProduct => {
     const name = row?.name ?? row?.title ?? '';
     const user_id = row?.user_id ?? row?.merchant_id ?? null;
@@ -2290,14 +2296,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           <div className="bg-white rounded-xl p-8">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">إدارة الطلبات</h2>
-              <button
-                onClick={() => onNavigate('orders-management')}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-              >
-                عرض جميع الطلبات
-              </button>
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>جاري فتح صفحة الطلبات...</span>
+              </div>
             </div>
-            <p className="text-gray-600">تتبع وإدارة طلبات عملائك، تحديث حالة الطلبات، والتواصل مع المشترين</p>
+            <p className="text-gray-600">يتم الآن فتح جميع الطلبات تلقائياً دون الحاجة للضغط على أي زر إضافي.</p>
           </div>
         )}
 
