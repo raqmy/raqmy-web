@@ -817,6 +817,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   };
 
   const fetchFinancialTransactions = async () => {
+    const PAID_ORDER_STATUSES = new Set(['paid', 'completed']);
+    const PENDING_ORDER_STATUSES = new Set(['pending', 'pending_payment', 'on_hold', 'processing']);
+    const FAILED_ORDER_STATUSES = new Set(['failed', 'canceled', 'cancelled', 'rejected']);
+
+    const PAID_SUBSCRIPTION_STATUSES = new Set(['paid', 'completed', 'success', 'succeeded', 'active', 'approved']);
+    const PENDING_SUBSCRIPTION_STATUSES = new Set(['pending', 'processing', 'pending_payment', 'created']);
+
+    const PAID_WITHDRAWAL_STATUSES = new Set(['paid', 'approved', 'completed', 'success', 'succeeded']);
+    const PENDING_WITHDRAWAL_STATUSES = new Set(['pending', 'on_hold', 'processing', 'review']);
+
+    const isAccessError = (error: any) => {
+      const message = (error?.message || '').toLowerCase();
+      const code = (error?.code || '').toString().toLowerCase();
+      return (
+        code === '42501' ||
+        message.includes('permission denied') ||
+        message.includes('row-level security') ||
+        message.includes('not allowed')
+      );
+    };
+
     try {
       setFinancialError(null);
       setFinancialLoading(true);
@@ -825,19 +846,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
       const fetchOrdersWithFallback = async () => {
         const attempts = [
-          'id, order_number, total_amount, seller_amount, status, created_at, currency, payment_transaction_id, payment_provider_order_id, seller_id, merchant_id, user_id, customer_id',
-          'id, order_number, total_amount, seller_amount, status, created_at, currency, payment_transaction_id, seller_id, merchant_id, user_id, customer_id',
-          'id, order_number, total_amount, seller_amount, status, created_at, currency, user_id, customer_id',
+          'id, order_number, total_amount, seller_amount, status, created_at, paid_at, currency, payment_transaction_id, payment_provider_order_id, seller_id, merchant_id, user_id, customer_id, customer_name, customer_email, customer_phone',
+          'id, order_number, total_amount, seller_amount, status, created_at, paid_at, currency, payment_transaction_id, seller_id, merchant_id, user_id, customer_id, customer_name, customer_email, customer_phone',
+          'id, order_number, total_amount, seller_amount, status, created_at, paid_at, currency, user_id, customer_id, customer_name, customer_email, customer_phone',
+          'id, order_number, total_amount, seller_amount, status, created_at, currency, user_id, customer_id'
         ];
 
         let lastError: any = null;
+
         for (const selectClause of attempts) {
-          let query = supabase.from('orders').select(selectClause).order('created_at', { ascending: false });
-          if (startDate) query = query.gte('created_at', startDate);
+          let query = supabase
+            .from('orders')
+            .select(selectClause)
+            .order('paid_at', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false });
+
+          if (startDate) {
+            query = query.gte('created_at', startDate);
+          }
+
           const result = await query;
-          if (!result.error) return result.data || [];
+          if (!result.error) {
+            return result.data || [];
+          }
+
           lastError = result.error;
           console.error('orders query attempt failed:', selectClause, result.error);
+        }
+
+        if (isAccessError(lastError)) {
+          throw new Error('لا توجد صلاحية للأدمن لقراءة جدول orders من الواجهة. أضف سياسة SELECT للأدمن على جدول orders ثم أعد المحاولة.');
         }
 
         throw lastError;
@@ -848,14 +886,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
         const attempts = [
           'order_id, product_id, product_name, quantity, subtotal, seller_id, merchant_id',
-          'order_id, product_id, product_name, quantity, subtotal',
-          'order_id, product_id, quantity',
+          'order_id, product_id, quantity, subtotal, seller_id, merchant_id',
+          'order_id, product_id, quantity, seller_id, merchant_id',
+          'order_id, product_id, quantity'
         ];
+
+        let lastError: any = null;
 
         for (const selectClause of attempts) {
           const result = await supabase.from('order_items').select(selectClause).in('order_id', orderIds);
-          if (!result.error) return result.data || [];
+          if (!result.error) {
+            return result.data || [];
+          }
+
+          lastError = result.error;
           console.error('order_items query attempt failed:', selectClause, result.error);
+        }
+
+        if (isAccessError(lastError)) {
+          throw new Error('لا توجد صلاحية للأدمن لقراءة جدول order_items من الواجهة. أضف سياسة SELECT للأدمن على جدول order_items ثم أعد المحاولة.');
         }
 
         return [] as any[];
@@ -863,10 +912,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
       const fetchSubscriptionPaymentsWithFallback = async () => {
         const attempts = [
-          'id, user_id, plan_id, amount, currency, status, interval, created_at, paid_at, paymob_order_id, paymob_transaction_id',
-          'id, user_id, plan_id, amount, currency, status, interval, created_at, paid_at',
-          'id, user_id, plan_id, amount, currency, status, created_at',
+          'id, user_id, plan_id, amount, currency, interval, status, created_at, paid_at, paymob_order_id, paymob_transaction_id',
+          'id, user_id, plan_id, amount, currency, interval, status, created_at, paid_at, paymob_order_id',
+          'id, user_id, plan_id, amount, currency, interval, status, created_at, paid_at',
+          'id, user_id, plan_id, amount, currency, status, created_at'
         ];
+
+        let lastError: any = null;
 
         for (const selectClause of attempts) {
           let query = supabase
@@ -874,12 +926,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             .select(selectClause)
             .order('paid_at', { ascending: false, nullsFirst: false })
             .order('created_at', { ascending: false });
+
           if (startDate) {
             query = query.gte('created_at', startDate);
           }
+
           const result = await query;
-          if (!result.error) return result.data || [];
+          if (!result.error) {
+            return result.data || [];
+          }
+
+          lastError = result.error;
           console.error('subscription_payments query attempt failed:', selectClause, result.error);
+        }
+
+        if (isAccessError(lastError)) {
+          throw new Error('لا توجد صلاحية للأدمن لقراءة جدول subscription_payments من الواجهة. أضف سياسة SELECT للأدمن على جدول subscription_payments ثم أعد المحاولة.');
+        }
+
+        throw lastError;
+      };
+
+      const fetchWithdrawalTable = async (tableName: 'withdrawal_requests' | 'withdrawals') => {
+        const attempts = [
+          'id, amount, status, created_at, approved_at, processed_at, merchant_id',
+          'id, amount, status, created_at, approved_at, merchant_id',
+          'id, amount, status, created_at, merchant_id'
+        ];
+
+        let lastError: any = null;
+
+        for (const selectClause of attempts) {
+          let query = supabase
+            .from(tableName)
+            .select(selectClause)
+            .order('processed_at', { ascending: false, nullsFirst: false })
+            .order('approved_at', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false });
+
+          if (startDate) {
+            query = query.gte('created_at', startDate);
+          }
+
+          const result = await query;
+          if (!result.error) {
+            return result.data || [];
+          }
+
+          lastError = result.error;
+          console.error(`${tableName} query attempt failed:`, selectClause, result.error);
+        }
+
+        if (isAccessError(lastError)) {
+          throw new Error(`لا توجد صلاحية للأدمن لقراءة جدول ${tableName} من الواجهة. أضف سياسة SELECT للأدمن على هذا الجدول ثم أعد المحاولة.`);
         }
 
         return [] as any[];
@@ -890,10 +989,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       const orderItemsData = await fetchOrderItemsWithFallback(orderIds);
       const subscriptionPaymentsData = await fetchSubscriptionPaymentsWithFallback();
 
+      let withdrawalsSourceTable: 'withdrawal_requests' | 'withdrawals' = 'withdrawal_requests';
+      let withdrawalsSourceRows = await fetchWithdrawalTable('withdrawal_requests');
+      if (!withdrawalsSourceRows.length) {
+        const fallbackRows = await fetchWithdrawalTable('withdrawals');
+        if (fallbackRows.length) {
+          withdrawalsSourceRows = fallbackRows;
+          withdrawalsSourceTable = 'withdrawals';
+        }
+      }
+
       const orderMerchantIds = new Set<string>();
       const orderSellerUserIds = new Set<string>();
       const orderCustomerUserIds = new Set<string>();
       const planIds = new Set<string>();
+      const withdrawalMerchantIds = new Set<string>();
 
       for (const order of ordersData) {
         if (order?.merchant_id) orderMerchantIds.add(order.merchant_id);
@@ -912,7 +1022,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         if (payment?.plan_id) planIds.add(payment.plan_id);
       }
 
-      const merchantIds = Array.from(orderMerchantIds);
+      for (const withdrawal of withdrawalsSourceRows) {
+        if (withdrawal?.merchant_id) withdrawalMerchantIds.add(withdrawal.merchant_id);
+      }
+
+      const merchantIds = Array.from(new Set([...orderMerchantIds, ...withdrawalMerchantIds]));
       const sellerUserIds = Array.from(orderSellerUserIds);
       const customerUserIds = Array.from(orderCustomerUserIds);
       const allUserIds = Array.from(new Set([...sellerUserIds, ...customerUserIds]));
@@ -1021,14 +1135,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         const sellerId = order.seller_id || itemSellerId || merchantsMap.get(merchantId || '')?.user_id || null;
         const customerId = order.customer_id || order.user_id || null;
         const merchantName = usersMap.get(sellerId || '')?.name || 'غير معروف';
-        const customerName = usersMap.get(customerId || '')?.name || 'غير معروف';
+        const customerName = order.customer_name || usersMap.get(customerId || '')?.name || 'غير معروف';
         const storeName = storesByUserMap.get(sellerId || '')?.name || merchantsMap.get(merchantId || '')?.store_name || '—';
 
         const totalAmount = Number(order.total_amount || 0);
-        const sellerAmount = Number(order.seller_amount || 0);
-        const derivedSubtotal = items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
-        const fallbackSellerAmount = sellerAmount > 0 ? sellerAmount : derivedSubtotal > 0 ? Math.min(derivedSubtotal, totalAmount) : 0;
-        const finalSellerAmount = fallbackSellerAmount;
+        const finalSellerAmount = Number(order.seller_amount || 0);
         const platformFee = Math.max(totalAmount - finalSellerAmount, 0);
 
         return {
@@ -1038,7 +1149,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           seller_amount: finalSellerAmount,
           platform_fee: platformFee,
           status: order.status || 'unknown',
-          created_at: order.created_at,
+          created_at: order.paid_at || order.created_at,
           currency: order.currency || 'SAR',
           payment_transaction_id: order.payment_transaction_id || null,
           payment_provider_order_id: order.payment_provider_order_id || null,
@@ -1069,94 +1180,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           currency: payment.currency || 'SAR',
           status: payment.status || 'unknown',
           interval: payment.interval || plan?.interval || null,
-          created_at: payment.created_at || payment.paid_at || new Date().toISOString(),
+          created_at: payment.paid_at || payment.created_at || new Date().toISOString(),
           paid_at: payment.paid_at || null,
           paymob_order_id: payment.paymob_order_id || null,
           paymob_transaction_id: payment.paymob_transaction_id || null,
         };
       });
 
-      let withdrawalsRows: AdminWithdrawalRow[] = [];
-      const candidateTables: Array<'withdrawal_requests' | 'withdrawals'> = ['withdrawal_requests', 'withdrawals'];
+      const withdrawalsRows: AdminWithdrawalRow[] = (withdrawalsSourceRows || []).map((row: any) => {
+        const merchant = merchantsMap.get(row.merchant_id || '');
+        const merchantUserId = merchant?.user_id || null;
+        return {
+          id: row.id,
+          amount: Number(row.amount || 0),
+          status: row.status || 'unknown',
+          created_at: row.processed_at || row.approved_at || row.created_at,
+          merchant_id: row.merchant_id || null,
+          merchant_user_id: merchantUserId,
+          merchant_name: merchantUserId ? usersMap.get(merchantUserId)?.name || 'غير معروف' : 'غير معروف',
+          store_name: merchant?.store_name || storesByUserMap.get(merchantUserId || '')?.name || '—',
+          source_table: withdrawalsSourceTable,
+        };
+      });
 
-      for (const tableName of candidateTables) {
-        let query = supabase
-          .from(tableName)
-          .select('id, amount, status, created_at, merchant_id')
-          .order('created_at', { ascending: false });
+      const paidSales = salesRows.filter((row) => PAID_ORDER_STATUSES.has((row.status || '').toLowerCase()));
+      const pendingSales = salesRows.filter((row) => PENDING_ORDER_STATUSES.has((row.status || '').toLowerCase()));
+      const failedSales = salesRows.filter((row) => FAILED_ORDER_STATUSES.has((row.status || '').toLowerCase()));
+      const paidSubscriptions = subscriptionRows.filter((row) => PAID_SUBSCRIPTION_STATUSES.has((row.status || '').toLowerCase()));
+      const pendingSubscriptions = subscriptionRows.filter((row) => PENDING_SUBSCRIPTION_STATUSES.has((row.status || '').toLowerCase()));
+      const paidWithdrawals = withdrawalsRows.filter((row) => PAID_WITHDRAWAL_STATUSES.has((row.status || '').toLowerCase()));
+      const pendingWithdrawals = withdrawalsRows.filter((row) => PENDING_WITHDRAWAL_STATUSES.has((row.status || '').toLowerCase()));
 
-        if (startDate) {
-          query = query.gte('created_at', startDate);
-        }
-
-        const { data, error: tableError } = await query;
-        if (tableError) {
-          console.error(`${tableName} fetch error:`, tableError);
-          continue;
-        }
-
-        const rows = (data || []) as any[];
-        const localMerchantIds = Array.from(new Set(rows.map((row) => row.merchant_id).filter(Boolean))) as string[];
-        const localMerchantsMap = new Map<string, { user_id: string | null; store_name: string | null }>();
-        const localUserMap = new Map<string, string>();
-
-        if (localMerchantIds.length > 0) {
-          const { data: merchantRows } = await supabase
-            .from('merchants')
-            .select('id, user_id, store_name')
-            .in('id', localMerchantIds);
-
-          for (const merchant of merchantRows || []) {
-            localMerchantsMap.set((merchant as any).id, {
-              user_id: (merchant as any).user_id || null,
-              store_name: (merchant as any).store_name || null,
-            });
-          }
-        }
-
-        const localUserIds = Array.from(new Set(Array.from(localMerchantsMap.values()).map((item) => item.user_id).filter(Boolean))) as string[];
-        if (localUserIds.length > 0) {
-          const { data: userRows } = await supabase
-            .from('users_profile')
-            .select('id, name')
-            .in('id', localUserIds);
-
-          for (const user of userRows || []) {
-            localUserMap.set((user as any).id, (user as any).name || '—');
-          }
-        }
-
-        withdrawalsRows = rows.map((row) => {
-          const merchant = localMerchantsMap.get(row.merchant_id || '');
-          const merchantUserId = merchant?.user_id || null;
-          return {
-            id: row.id,
-            amount: Number(row.amount || 0),
-            status: row.status || 'unknown',
-            created_at: row.created_at,
-            merchant_id: row.merchant_id || null,
-            merchant_user_id: merchantUserId,
-            merchant_name: merchantUserId ? localUserMap.get(merchantUserId) || 'غير معروف' : 'غير معروف',
-            store_name: merchant?.store_name || '—',
-            source_table: tableName,
-          };
-        });
-
-        if (rows.length > 0 || tableName === 'withdrawals') {
-          break;
-        }
-      }
-
-      const paidSales = salesRows.filter((row) => ['paid', 'completed'].includes((row.status || '').toLowerCase()));
-      const pendingSales = salesRows.filter((row) => ['pending', 'pending_payment', 'on_hold', 'processing'].includes((row.status || '').toLowerCase()));
-      const failedSales = salesRows.filter((row) => ['failed', 'canceled', 'cancelled', 'rejected'].includes((row.status || '').toLowerCase()));
-      const paidSubscriptions = subscriptionRows.filter((row) => ['paid', 'completed', 'active', 'approved'].includes((row.status || '').toLowerCase()));
-      const pendingSubscriptions = subscriptionRows.filter((row) => ['pending', 'processing', 'pending_payment'].includes((row.status || '').toLowerCase()));
-      const platformFeesTotal = paidSales.reduce((sum, row) => sum + row.platform_fee, 0);
-      const subscriptionRevenueTotal = paidSubscriptions.reduce((sum, row) => sum + row.amount, 0);
+      const paidSalesTotal = paidSales.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
+      const merchantRevenueTotal = paidSales.reduce((sum, row) => sum + Number(row.seller_amount || 0), 0);
+      const platformFeesTotal = paidSales.reduce((sum, row) => sum + Number(row.platform_fee || 0), 0);
+      const subscriptionRevenueTotal = paidSubscriptions.reduce((sum, row) => sum + Number(row.amount || 0), 0);
       const platformTotalRevenue = platformFeesTotal + subscriptionRevenueTotal;
-      const paidSalesTotal = paidSales.reduce((sum, row) => sum + row.total_amount, 0);
-      const merchantRevenueTotal = paidSales.reduce((sum, row) => sum + row.seller_amount, 0);
+      const withdrawalsPaidTotal = paidWithdrawals.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      const withdrawalsPendingTotal = pendingWithdrawals.reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
       setSalesRecords(salesRows);
       setSubscriptionRecords(subscriptionRows);
@@ -1172,12 +1233,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         failedSalesCount: failedSales.length,
         subscriptionPaidCount: paidSubscriptions.length,
         subscriptionPendingCount: pendingSubscriptions.length,
-        withdrawalsPaidTotal: withdrawalsRows
-          .filter((row) => ['paid', 'approved', 'completed'].includes((row.status || '').toLowerCase()))
-          .reduce((sum, row) => sum + row.amount, 0),
-        withdrawalsPendingTotal: withdrawalsRows
-          .filter((row) => ['pending', 'on_hold', 'processing'].includes((row.status || '').toLowerCase()))
-          .reduce((sum, row) => sum + row.amount, 0),
+        withdrawalsPaidTotal,
+        withdrawalsPendingTotal,
         withdrawalsCount: withdrawalsRows.length,
       });
 
