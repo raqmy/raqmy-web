@@ -37,6 +37,16 @@ interface Stats {
   totalRevenue: number;
 }
 
+interface AdminUserListItem {
+  id: string;
+  name: string | null;
+  email: string | null;
+  role: string | null;
+  created_at: string;
+  source: 'users_profile' | 'merchant' | 'store';
+  source_label?: string;
+}
+
 interface IdentityVerificationRow {
   id: string;
   user_id: string;
@@ -103,7 +113,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     totalRevenue: 0,
   });
 
-  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -199,7 +209,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     try {
       const [usersRes, merchantsRes, storesRes, productsRes, verificationsRes, bankAccountsRes] = await Promise.all([
         supabase.from('users_profile').select('*'),
-        supabase.from('merchants').select('id, user_id'),
+        supabase.from('merchants').select('id, user_id, store_name, store_slug, created_at'),
         supabase.from('stores').select('*'),
         supabase.from('products').select('*'),
         supabase.from('identity_verifications').select('id, status'),
@@ -213,43 +223,103 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       if (verificationsRes.error) console.error('identity_verifications fetch error:', verificationsRes.error);
       if (bankAccountsRes.error) console.error('bank_accounts fetch error:', bankAccountsRes.error);
 
-      const usersData = usersRes.data || [];
-      const merchantsData = (merchantsRes.data || []) as Array<{ id: string; user_id?: string | null }>;
-      const storesData = storesRes.data || [];
+      const usersData = (usersRes.data || []) as any[];
+      const merchantsData = (merchantsRes.data || []) as Array<{
+        id: string;
+        user_id?: string | null;
+        store_name?: string | null;
+        store_slug?: string | null;
+        created_at?: string | null;
+      }>;
+      const storesData = (storesRes.data || []) as any[];
       const productsData = productsRes.data || [];
 
-      if (usersData) setUsers(usersData);
       if (storesData) setStores(storesData);
       if (productsData) setProducts(productsData);
 
-      const sellerUserIdsFromUsers = new Set(
-        usersData
-          .filter((u: any) => u.role === 'seller')
-          .map((u: any) => u.id)
+      const mergedUsersMap = new Map<string, AdminUserListItem>();
+
+      for (const user of usersData) {
+        if (!user?.id) continue;
+
+        mergedUsersMap.set(user.id, {
+          id: user.id,
+          name: user.name || null,
+          email: user.email || null,
+          role: user.role || 'customer',
+          created_at: user.created_at || new Date().toISOString(),
+          source: 'users_profile',
+          source_label: 'users_profile',
+        });
+      }
+
+      for (const merchant of merchantsData) {
+        const merchantUserId = merchant?.user_id;
+        if (!merchantUserId) continue;
+
+        const existingUser = mergedUsersMap.get(merchantUserId);
+        const matchingStore = storesData.find((store: any) => store?.user_id === merchantUserId);
+
+        if (existingUser) {
+          mergedUsersMap.set(merchantUserId, {
+            ...existingUser,
+            role: existingUser.role === 'admin' || existingUser.role === 'superadmin' ? existingUser.role : 'seller',
+          });
+          continue;
+        }
+
+        mergedUsersMap.set(merchantUserId, {
+          id: merchantUserId,
+          name: merchant.store_name || matchingStore?.name || 'تاجر',
+          email: null,
+          role: 'seller',
+          created_at: merchant.created_at || matchingStore?.created_at || new Date().toISOString(),
+          source: 'merchant',
+          source_label: merchant.store_slug || matchingStore?.slug || 'merchant',
+        });
+      }
+
+      for (const store of storesData) {
+        const storeUserId = store?.user_id;
+        if (!storeUserId) continue;
+
+        const existingUser = mergedUsersMap.get(storeUserId);
+        if (existingUser) {
+          mergedUsersMap.set(storeUserId, {
+            ...existingUser,
+            role: existingUser.role === 'admin' || existingUser.role === 'superadmin' ? existingUser.role : 'seller',
+          });
+          continue;
+        }
+
+        mergedUsersMap.set(storeUserId, {
+          id: storeUserId,
+          name: store?.name || 'تاجر',
+          email: null,
+          role: 'seller',
+          created_at: store?.created_at || new Date().toISOString(),
+          source: 'store',
+          source_label: store?.slug || 'store',
+        });
+      }
+
+      const mergedUsers = Array.from(mergedUsersMap.values()).sort((a, b) => {
+        const aTime = new Date(a.created_at || 0).getTime();
+        const bTime = new Date(b.created_at || 0).getTime();
+        return bTime - aTime;
+      });
+
+      setUsers(mergedUsers);
+
+      const totalSellerIds = new Set<string>(
+        mergedUsers
+          .filter((user) => user.role === 'seller')
+          .map((user) => user.id)
           .filter(Boolean)
       );
 
-      const sellerUserIdsFromMerchants = new Set(
-        merchantsData.map((merchant) => merchant.user_id).filter(Boolean) as string[]
-      );
-
-      const sellerUserIdsFromStores = new Set(
-        storesData.map((store: any) => store.user_id).filter(Boolean) as string[]
-      );
-
-      const totalSellerIds = new Set<string>([
-        ...Array.from(sellerUserIdsFromUsers),
-        ...Array.from(sellerUserIdsFromMerchants),
-        ...Array.from(sellerUserIdsFromStores),
-      ]);
-
-      const totalUsersEstimate = Math.max(
-        usersData.length,
-        usersData.length + Array.from(totalSellerIds).filter((id) => !usersData.some((u: any) => u.id === id)).length
-      );
-
       setStats({
-        totalUsers: totalUsersEstimate,
+        totalUsers: mergedUsers.length,
         totalSellers: totalSellerIds.size,
         totalStores: storesData.length || 0,
         totalProducts: productsData.length || 0,
@@ -954,7 +1024,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const filteredUsers = users.filter((user) => {
     const name = (user.name ?? '').toString().toLowerCase();
     const email = (user.email ?? '').toString().toLowerCase();
-    return name.includes(q) || email.includes(q);
+    const sourceLabel = (user.source_label ?? '').toString().toLowerCase();
+    return name.includes(q) || email.includes(q) || sourceLabel.includes(q);
   });
 
   const filteredStores = stores.filter((store) => {
@@ -1271,29 +1342,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                     <tr key={user.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4">
                         <div className="text-sm font-medium text-gray-900">{user.name || '—'}</div>
-                        {user.email && <div className="text-xs text-gray-500">{user.email}</div>}
+                        {user.email ? (
+                          <div className="text-xs text-gray-500">{user.email}</div>
+                        ) : (
+                          <div className="text-xs text-gray-400">
+                            {user.source !== 'users_profile'
+                              ? `مستخدم مستنتج من ${user.source === 'merchant' ? 'جدول التجار' : 'جدول المتاجر'}`
+                              : '—'}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <span
                           className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                            user.role === 'admin'
+                            user.role === 'admin' || user.role === 'superadmin'
                               ? 'bg-red-100 text-red-700'
                               : user.role === 'seller'
                               ? 'bg-blue-100 text-blue-700'
                               : 'bg-green-100 text-green-700'
                           }`}
                         >
-                          {user.role === 'admin' ? 'مدير' : user.role === 'seller' ? 'تاجر' : 'عميل'}
+                          {user.role === 'admin' || user.role === 'superadmin'
+                            ? 'مدير'
+                            : user.role === 'seller'
+                            ? 'تاجر'
+                            : 'عميل'}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-500">
-                        {new Date(user.created_at).toLocaleDateString('ar-SA')}
+                        {user.created_at ? new Date(user.created_at).toLocaleDateString('ar-SA') : '—'}
                       </td>
                       <td className="px-6 py-4">
                         <button
                           onClick={() => handleDeleteUser(user.id)}
-                          className="text-red-600 hover:text-red-800"
-                          disabled={user.role === 'admin'}
+                          className={`${
+                            user.role === 'admin' || user.role === 'superadmin' || user.source !== 'users_profile'
+                              ? 'text-gray-300 cursor-not-allowed'
+                              : 'text-red-600 hover:text-red-800'
+                          }`}
+                          disabled={user.role === 'admin' || user.role === 'superadmin' || user.source !== 'users_profile'}
+                          title={
+                            user.source !== 'users_profile'
+                              ? 'لا يمكن حذف هذا السجل لأنه غير موجود مباشرة في users_profile'
+                              : user.role === 'admin' || user.role === 'superadmin'
+                              ? 'لا يمكن حذف حساب المدير'
+                              : 'حذف المستخدم'
+                          }
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
