@@ -244,7 +244,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     const { data, error } = await supabase
       .from('products')
-      .select('id, title, name, description, price, thumbnail_url, slug, store_id, user_id, merchant_id')
+      .select('id, title, description, price, thumbnail_url, slug, store_id, user_id, merchant_id')
       .in('id', cleanIds);
 
     if (error) throw error;
@@ -330,7 +330,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     try {
       const orderQuery = supabase
         .from('orders')
-        .select('id, order_number, total_amount, status, created_at, currency, user_id, customer_id, customer_email')
+        .select('id, order_number, total_amount, status, created_at, user_id, customer_id, customer_email')
         .order('created_at', { ascending: false });
 
       let ordersData: any[] = [];
@@ -409,7 +409,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
             total_amount: scopedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0),
             status: order.status || 'pending',
             created_at: order.created_at,
-            currency: order.currency || 'SAR',
+            currency: 'SAR',
             items: scopedItems,
           } as ProfileOrder;
         })
