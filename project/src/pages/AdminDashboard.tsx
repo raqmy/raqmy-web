@@ -92,6 +92,54 @@ interface BankAccountUI extends BankAccountRow {
   store_slug?: string;
 }
 
+type AdminFinancialFilter = 'all' | 'today' | 'week' | 'month';
+type AdminFinancialRecordTab = 'all' | 'sales' | 'withdrawals';
+
+interface AdminSaleRow {
+  id: string;
+  order_number: string;
+  total_amount: number;
+  seller_amount: number;
+  platform_fee: number;
+  status: string;
+  created_at: string;
+  currency: string;
+  payment_transaction_id?: string | null;
+  payment_provider_order_id?: string | null;
+  seller_id?: string | null;
+  merchant_id?: string | null;
+  customer_id?: string | null;
+  customer_name: string;
+  merchant_name: string;
+  store_name: string;
+  product_summary: string;
+  quantity_total: number;
+}
+
+interface AdminWithdrawalRow {
+  id: string;
+  amount: number;
+  status: string;
+  created_at: string;
+  merchant_id?: string | null;
+  merchant_user_id?: string | null;
+  merchant_name: string;
+  store_name: string;
+  source_table: 'withdrawal_requests' | 'withdrawals';
+}
+
+interface AdminFinancialStats {
+  paidSalesTotal: number;
+  platformFeesTotal: number;
+  merchantRevenueTotal: number;
+  paidSalesCount: number;
+  pendingSalesCount: number;
+  failedSalesCount: number;
+  withdrawalsPaidTotal: number;
+  withdrawalsPendingTotal: number;
+  withdrawalsCount: number;
+}
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
 
@@ -100,6 +148,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     | 'users'
     | 'stores'
     | 'products'
+    | 'financial-transactions'
     | 'payment-settings'
     | 'merchant-verifications'
     | 'bank-account-verifications'
@@ -151,6 +200,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [bankAccountRejectionReason, setBankAccountRejectionReason] = useState('');
   const [pendingBankAccountsCount, setPendingBankAccountsCount] = useState(0);
 
+  const [financialLoading, setFinancialLoading] = useState(false);
+  const [financialRefreshing, setFinancialRefreshing] = useState(false);
+  const [financialError, setFinancialError] = useState<string | null>(null);
+  const [financialFilter, setFinancialFilter] = useState<AdminFinancialFilter>('all');
+  const [financialRecordTab, setFinancialRecordTab] = useState<AdminFinancialRecordTab>('all');
+  const [financialSearchQuery, setFinancialSearchQuery] = useState('');
+  const [salesRecords, setSalesRecords] = useState<AdminSaleRow[]>([]);
+  const [withdrawalRecords, setWithdrawalRecords] = useState<AdminWithdrawalRow[]>([]);
+  const [financialStats, setFinancialStats] = useState<AdminFinancialStats>({
+    paidSalesTotal: 0,
+    platformFeesTotal: 0,
+    merchantRevenueTotal: 0,
+    paidSalesCount: 0,
+    pendingSalesCount: 0,
+    failedSalesCount: 0,
+    withdrawalsPaidTotal: 0,
+    withdrawalsPendingTotal: 0,
+    withdrawalsCount: 0,
+  });
+
   useEffect(() => {
     if (profile?.role === 'admin' || profile?.role === 'superadmin') {
       fetchDashboardData();
@@ -165,6 +234,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
       if (activeTab === 'bank-account-verifications') {
         fetchBankAccountVerifications();
+      }
+
+      if (activeTab === 'financial-transactions') {
+        fetchFinancialTransactions();
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -659,6 +732,318 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       });
     } finally {
       setBankAccountsLoading(false);
+    }
+  };
+
+
+
+  const getFinancialPeriodStart = (value: AdminFinancialFilter) => {
+    const now = new Date();
+
+    if (value === 'today') {
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      return d.toISOString();
+    }
+
+    if (value === 'week') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 7);
+      return d.toISOString();
+    }
+
+    if (value === 'month') {
+      const d = new Date(now);
+      d.setMonth(d.getMonth() - 1);
+      return d.toISOString();
+    }
+
+    return null;
+  };
+
+  const getFinancialStatusMeta = (status?: string | null) => {
+    const normalized = (status || '').toLowerCase();
+
+    if (['paid', 'completed', 'approved'].includes(normalized)) {
+      return { label: 'ناجح', className: 'bg-green-100 text-green-700' };
+    }
+
+    if (['pending', 'pending_payment', 'on_hold'].includes(normalized)) {
+      return { label: 'قيد المراجعة', className: 'bg-yellow-100 text-yellow-700' };
+    }
+
+    if (['failed', 'canceled', 'cancelled', 'rejected'].includes(normalized)) {
+      return { label: 'فاشل', className: 'bg-red-100 text-red-700' };
+    }
+
+    return { label: status || 'غير معروف', className: 'bg-gray-100 text-gray-700' };
+  };
+
+  const formatMoney = (value: number, currency: string = 'SAR') => {
+    return `${Number(value || 0).toFixed(2)} ${currency === 'SAR' ? 'ريال' : currency}`;
+  };
+
+  const fetchFinancialTransactions = async () => {
+    try {
+      setFinancialError(null);
+      setFinancialLoading(true);
+
+      const startDate = getFinancialPeriodStart(financialFilter);
+
+      let ordersQuery = supabase
+        .from('orders')
+        .select(
+          'id, order_number, total_amount, seller_amount, status, created_at, currency, payment_transaction_id, payment_provider_order_id, seller_id, merchant_id, user_id, customer_id'
+        )
+        .order('created_at', { ascending: false });
+
+      if (startDate) {
+        ordersQuery = ordersQuery.gte('created_at', startDate);
+      }
+
+      const { data: ordersData, error: ordersError } = await ordersQuery;
+      if (ordersError) throw ordersError;
+
+      const orderIds = (ordersData || []).map((order: any) => order.id).filter(Boolean);
+
+      let orderItemsData: any[] = [];
+      if (orderIds.length > 0) {
+        const { data, error: orderItemsError } = await supabase
+          .from('order_items')
+          .select('order_id, product_id, product_name, quantity, subtotal')
+          .in('order_id', orderIds);
+
+        if (orderItemsError) {
+          console.error('order_items fetch error:', orderItemsError);
+        } else {
+          orderItemsData = data || [];
+        }
+      }
+
+      const sellerUserIds = Array.from(new Set((ordersData || []).map((order: any) => order.seller_id).filter(Boolean))) as string[];
+      const customerUserIds = Array.from(new Set((ordersData || []).map((order: any) => order.customer_id || order.user_id).filter(Boolean))) as string[];
+      const merchantIds = Array.from(new Set((ordersData || []).map((order: any) => order.merchant_id).filter(Boolean))) as string[];
+
+      const usersMap = new Map<string, { name: string; email: string | null }>();
+      const merchantsMap = new Map<string, { user_id: string | null; store_name: string | null }>();
+      const storesByUserMap = new Map<string, { name: string | null; slug: string | null }>();
+
+      const combinedUserIds = Array.from(new Set([...sellerUserIds, ...customerUserIds]));
+      if (combinedUserIds.length > 0) {
+        const { data: usersData, error: usersError } = await supabase
+          .from('users_profile')
+          .select('id, name, email')
+          .in('id', combinedUserIds);
+
+        if (usersError) {
+          console.error('users_profile fetch error:', usersError);
+        } else {
+          for (const user of usersData || []) {
+            usersMap.set((user as any).id, {
+              name: (user as any).name || '—',
+              email: (user as any).email || null,
+            });
+          }
+        }
+      }
+
+      if (merchantIds.length > 0) {
+        const { data: merchantsData, error: merchantsError } = await supabase
+          .from('merchants')
+          .select('id, user_id, store_name')
+          .in('id', merchantIds);
+
+        if (merchantsError) {
+          console.error('merchants fetch error:', merchantsError);
+        } else {
+          for (const merchant of merchantsData || []) {
+            merchantsMap.set((merchant as any).id, {
+              user_id: (merchant as any).user_id || null,
+              store_name: (merchant as any).store_name || null,
+            });
+          }
+        }
+      }
+
+      if (sellerUserIds.length > 0) {
+        const { data: storesData, error: storesError } = await supabase
+          .from('stores')
+          .select('id, user_id, name, slug')
+          .in('user_id', sellerUserIds);
+
+        if (storesError) {
+          console.error('stores fetch error:', storesError);
+        } else {
+          for (const store of storesData || []) {
+            storesByUserMap.set((store as any).user_id, {
+              name: (store as any).name || null,
+              slug: (store as any).slug || null,
+            });
+          }
+        }
+      }
+
+      const itemsByOrder = new Map<string, any[]>();
+      for (const item of orderItemsData) {
+        const orderId = item.order_id;
+        if (!itemsByOrder.has(orderId)) {
+          itemsByOrder.set(orderId, []);
+        }
+        itemsByOrder.get(orderId)!.push(item);
+      }
+
+      const salesRows: AdminSaleRow[] = (ordersData || []).map((order: any) => {
+        const items = itemsByOrder.get(order.id) || [];
+        const quantityTotal = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+        const productSummary =
+          items.length === 0
+            ? '—'
+            : items
+                .slice(0, 2)
+                .map((item) => item.product_name || `منتج ${String(item.product_id || '').slice(0, 8)}`)
+                .join('، ') + (items.length > 2 ? ` +${items.length - 2}` : '');
+
+        const sellerId = order.seller_id || merchantsMap.get(order.merchant_id || '')?.user_id || null;
+        const customerId = order.customer_id || order.user_id || null;
+        const merchantName = usersMap.get(sellerId || '')?.name || 'غير معروف';
+        const customerName = usersMap.get(customerId || '')?.name || 'غير معروف';
+        const storeName = storesByUserMap.get(sellerId || '')?.name || merchantsMap.get(order.merchant_id || '')?.store_name || '—';
+
+        const totalAmount = Number(order.total_amount || 0);
+        const sellerAmount = Number(order.seller_amount || 0);
+        const platformFee = Math.max(totalAmount - sellerAmount, 0);
+
+        return {
+          id: order.id,
+          order_number: order.order_number || `ORD-${String(order.id).slice(0, 8)}`,
+          total_amount: totalAmount,
+          seller_amount: sellerAmount,
+          platform_fee: platformFee,
+          status: order.status || 'unknown',
+          created_at: order.created_at,
+          currency: order.currency || 'SAR',
+          payment_transaction_id: order.payment_transaction_id || null,
+          payment_provider_order_id: order.payment_provider_order_id || null,
+          seller_id: sellerId,
+          merchant_id: order.merchant_id || null,
+          customer_id: customerId,
+          customer_name: customerName,
+          merchant_name: merchantName,
+          store_name: storeName,
+          product_summary: productSummary,
+          quantity_total: quantityTotal,
+        };
+      });
+
+      let withdrawalsRows: AdminWithdrawalRow[] = [];
+      const candidateTables: Array<'withdrawal_requests' | 'withdrawals'> = ['withdrawal_requests', 'withdrawals'];
+
+      for (const tableName of candidateTables) {
+        let query = supabase
+          .from(tableName)
+          .select('id, amount, status, created_at, merchant_id')
+          .order('created_at', { ascending: false });
+
+        if (startDate) {
+          query = query.gte('created_at', startDate);
+        }
+
+        const { data, error: tableError } = await query;
+        if (tableError) {
+          console.error(`${tableName} fetch error:`, tableError);
+          continue;
+        }
+
+        const rows = (data || []) as any[];
+        const localMerchantIds = Array.from(new Set(rows.map((row) => row.merchant_id).filter(Boolean))) as string[];
+        const localMerchantsMap = new Map<string, { user_id: string | null; store_name: string | null }>();
+        const localUserMap = new Map<string, string>();
+
+        if (localMerchantIds.length > 0) {
+          const { data: merchantRows } = await supabase
+            .from('merchants')
+            .select('id, user_id, store_name')
+            .in('id', localMerchantIds);
+
+          for (const merchant of merchantRows || []) {
+            localMerchantsMap.set((merchant as any).id, {
+              user_id: (merchant as any).user_id || null,
+              store_name: (merchant as any).store_name || null,
+            });
+          }
+        }
+
+        const localUserIds = Array.from(new Set(Array.from(localMerchantsMap.values()).map((item) => item.user_id).filter(Boolean))) as string[];
+        if (localUserIds.length > 0) {
+          const { data: userRows } = await supabase
+            .from('users_profile')
+            .select('id, name')
+            .in('id', localUserIds);
+
+          for (const user of userRows || []) {
+            localUserMap.set((user as any).id, (user as any).name || '—');
+          }
+        }
+
+        withdrawalsRows = rows.map((row) => {
+          const merchant = localMerchantsMap.get(row.merchant_id || '');
+          const merchantUserId = merchant?.user_id || null;
+          return {
+            id: row.id,
+            amount: Number(row.amount || 0),
+            status: row.status || 'unknown',
+            created_at: row.created_at,
+            merchant_id: row.merchant_id || null,
+            merchant_user_id: merchantUserId,
+            merchant_name: merchantUserId ? localUserMap.get(merchantUserId) || 'غير معروف' : 'غير معروف',
+            store_name: merchant?.store_name || '—',
+            source_table: tableName,
+          };
+        });
+
+        if (rows.length > 0 || tableName === 'withdrawals') {
+          break;
+        }
+      }
+
+      const paidSales = salesRows.filter((row) => ['paid', 'completed'].includes((row.status || '').toLowerCase()));
+      const pendingSales = salesRows.filter((row) => ['pending', 'pending_payment', 'on_hold'].includes((row.status || '').toLowerCase()));
+      const failedSales = salesRows.filter((row) => ['failed', 'canceled', 'cancelled'].includes((row.status || '').toLowerCase()));
+
+      setSalesRecords(salesRows);
+      setWithdrawalRecords(withdrawalsRows);
+      setFinancialStats({
+        paidSalesTotal: paidSales.reduce((sum, row) => sum + row.total_amount, 0),
+        platformFeesTotal: paidSales.reduce((sum, row) => sum + row.platform_fee, 0),
+        merchantRevenueTotal: paidSales.reduce((sum, row) => sum + row.seller_amount, 0),
+        paidSalesCount: paidSales.length,
+        pendingSalesCount: pendingSales.length,
+        failedSalesCount: failedSales.length,
+        withdrawalsPaidTotal: withdrawalsRows
+          .filter((row) => ['paid', 'approved'].includes((row.status || '').toLowerCase()))
+          .reduce((sum, row) => sum + row.amount, 0),
+        withdrawalsPendingTotal: withdrawalsRows
+          .filter((row) => ['pending', 'on_hold'].includes((row.status || '').toLowerCase()))
+          .reduce((sum, row) => sum + row.amount, 0),
+        withdrawalsCount: withdrawalsRows.length,
+      });
+    } catch (error: any) {
+      console.error('fetchFinancialTransactions error:', error);
+      setFinancialError(error?.message || 'تعذر تحميل المعاملات المالية');
+      setSalesRecords([]);
+      setWithdrawalRecords([]);
+    } finally {
+      setFinancialLoading(false);
+      setFinancialRefreshing(false);
+    }
+  };
+
+  const handleRefreshFinancialTransactions = async () => {
+    try {
+      setFinancialRefreshing(true);
+      await fetchFinancialTransactions();
+    } finally {
+      setFinancialRefreshing(false);
     }
   };
 
@@ -1208,6 +1593,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     );
   });
 
+
+  const filteredFinancialSales = useMemo(() => {
+    const q = financialSearchQuery.trim().toLowerCase();
+    if (!q) return salesRecords;
+
+    return salesRecords.filter((row) =>
+      [
+        row.order_number,
+        row.product_summary,
+        row.customer_name,
+        row.merchant_name,
+        row.store_name,
+        row.payment_transaction_id || '',
+        row.payment_provider_order_id || '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [salesRecords, financialSearchQuery]);
+
+  const filteredFinancialWithdrawals = useMemo(() => {
+    const q = financialSearchQuery.trim().toLowerCase();
+    if (!q) return withdrawalRecords;
+
+    return withdrawalRecords.filter((row) =>
+      [row.merchant_name, row.store_name, row.id, row.status, row.source_table]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [withdrawalRecords, financialSearchQuery]);
+
+  const showFinancialSales = financialRecordTab === 'sales' || financialRecordTab === 'all';
+  const showFinancialWithdrawals = financialRecordTab === 'withdrawals' || financialRecordTab === 'all';
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1256,6 +1677,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             >
               <Package className="w-5 h-5" />
               <span>المنتجات</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('financial-transactions')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'financial-transactions' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <Receipt className="w-5 h-5" />
+              <span>المعاملات المالية</span>
             </button>
 
             <button
@@ -1383,7 +1814,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
               </button>
 
               <button
-                onClick={() => onNavigate('transactions')}
+                onClick={() => setActiveTab('financial-transactions')}
                 className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
               >
                 <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
@@ -1667,6 +2098,258 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+
+
+        {activeTab === 'financial-transactions' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+                    <Receipt className="w-7 h-7 text-orange-500" />
+                    المعاملات المالية
+                  </h2>
+                  <p className="text-gray-600">عرض شامل للمبيعات المدفوعة والمعلقة، نصيب المنصة، نصيب التجار، وسجل طلبات السحب.</p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={handleRefreshFinancialTransactions}
+                    disabled={financialRefreshing || financialLoading}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${financialRefreshing ? 'animate-spin' : ''}`} />
+                    <span>تحديث البيانات</span>
+                  </button>
+
+                  <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+                    {([
+                      ['all', 'الكل'],
+                      ['today', 'اليوم'],
+                      ['week', 'الأسبوع'],
+                      ['month', 'الشهر'],
+                    ] as Array<[AdminFinancialFilter, string]>).map(([value, label]) => (
+                      <button
+                        key={value}
+                        onClick={() => setFinancialFilter(value)}
+                        className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                          financialFilter === value ? 'bg-orange-500 text-white' : 'text-gray-700 hover:bg-white'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {financialError && (
+                <div className="mb-6 p-4 rounded-lg border border-red-200 bg-red-50 text-red-700 flex items-start gap-2">
+                  <AlertCircle className="w-5 h-5 mt-0.5" />
+                  <span>{financialError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                <div className="bg-gray-50 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-11 h-11 rounded-lg bg-blue-100 flex items-center justify-center">
+                      <Receipt className="w-5 h-5 text-blue-600" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-bold text-gray-900">{financialStats.paidSalesCount}</div>
+                  <p className="text-sm text-gray-600 mt-1">المبيعات المدفوعة</p>
+                  <p className="text-xs text-gray-500 mt-2">{formatMoney(financialStats.paidSalesTotal)}</p>
+                </div>
+
+                <div className="bg-gray-50 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-11 h-11 rounded-lg bg-green-100 flex items-center justify-center">
+                      <Wallet className="w-5 h-5 text-green-600" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-bold text-gray-900">{formatMoney(financialStats.merchantRevenueTotal)}</div>
+                  <p className="text-sm text-gray-600 mt-1">نصيب التجار</p>
+                  <p className="text-xs text-gray-500 mt-2">بعد خصم عمولة المنصة من الطلبات المدفوعة</p>
+                </div>
+
+                <div className="bg-gray-50 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-11 h-11 rounded-lg bg-orange-100 flex items-center justify-center">
+                      <DollarSign className="w-5 h-5 text-orange-600" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-bold text-gray-900">{formatMoney(financialStats.platformFeesTotal)}</div>
+                  <p className="text-sm text-gray-600 mt-1">نصيب المنصة</p>
+                  <p className="text-xs text-gray-500 mt-2">من نفس الطلبات المدفوعة</p>
+                </div>
+
+                <div className="bg-gray-50 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-11 h-11 rounded-lg bg-purple-100 flex items-center justify-center">
+                      <TrendingUp className="w-5 h-5 text-purple-600" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-bold text-gray-900">{financialStats.pendingSalesCount}</div>
+                  <p className="text-sm text-gray-600 mt-1">طلبات معلقة</p>
+                  <p className="text-xs text-gray-500 mt-2">فاشلة: {financialStats.failedSalesCount}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-blue-50 rounded-xl p-5">
+                  <div className="text-lg font-bold text-blue-700">{formatMoney(financialStats.paidSalesTotal)}</div>
+                  <p className="text-sm text-blue-900 mt-1">إجمالي المبالغ المحصلة</p>
+                </div>
+                <div className="bg-yellow-50 rounded-xl p-5">
+                  <div className="text-lg font-bold text-yellow-700">{formatMoney(financialStats.withdrawalsPendingTotal)}</div>
+                  <p className="text-sm text-yellow-900 mt-1">طلبات سحب قيد المراجعة</p>
+                </div>
+                <div className="bg-green-50 rounded-xl p-5">
+                  <div className="text-lg font-bold text-green-700">{formatMoney(financialStats.withdrawalsPaidTotal)}</div>
+                  <p className="text-sm text-green-900 mt-1">سحوبات مدفوعة أو معتمدة</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col lg:flex-row lg:items-center gap-4 mb-6">
+                <div className="relative flex-1">
+                  <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input
+                    type="text"
+                    value={financialSearchQuery}
+                    onChange={(e) => setFinancialSearchQuery(e.target.value)}
+                    placeholder="ابحث في الطلبات أو السحوبات..."
+                    className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+                  {([
+                    ['all', 'الكل'],
+                    ['sales', 'المبيعات'],
+                    ['withdrawals', 'السحوبات'],
+                  ] as Array<[AdminFinancialRecordTab, string]>).map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => setFinancialRecordTab(value)}
+                      className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        financialRecordTab === value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {financialLoading ? (
+                <div className="py-16 text-center">
+                  <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-gray-600">جاري تحميل المعاملات المالية...</p>
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {showFinancialSales && (
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xl font-bold text-gray-900">سجل المبيعات والطلبات</h3>
+                        <span className="text-sm text-gray-500">{filteredFinancialSales.length} سجل</span>
+                      </div>
+
+                      {filteredFinancialSales.length === 0 ? (
+                        <div className="bg-gray-50 rounded-xl p-10 text-center text-gray-500">لا توجد مبيعات ضمن الفلاتر الحالية</div>
+                      ) : (
+                        <div className="space-y-4">
+                          {filteredFinancialSales.map((sale) => {
+                            const statusMeta = getFinancialStatusMeta(sale.status);
+                            return (
+                              <div key={sale.id} className="border border-gray-200 rounded-xl p-5">
+                                <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                      <h4 className="text-lg font-bold text-gray-900">{sale.order_number}</h4>
+                                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusMeta.className}`}>{statusMeta.label}</span>
+                                    </div>
+                                    <p className="text-sm text-gray-600">{sale.product_summary}</p>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-600">
+                                      <div>المتجر: <span className="font-semibold text-gray-900">{sale.store_name}</span></div>
+                                      <div>التاجر: <span className="font-semibold text-gray-900">{sale.merchant_name}</span></div>
+                                      <div>العميل: <span className="font-semibold text-gray-900">{sale.customer_name}</span></div>
+                                      <div>التاريخ: <span className="font-semibold text-gray-900">{formatDate(sale.created_at)}</span></div>
+                                      <div>عدد المنتجات: <span className="font-semibold text-gray-900">{sale.quantity_total}</span></div>
+                                      <div>رقم المعاملة: <span className="font-semibold text-gray-900">{sale.payment_transaction_id || '—'}</span></div>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 min-w-full xl:min-w-[420px]">
+                                    <div className="bg-blue-50 rounded-lg p-4">
+                                      <div className="text-xs text-gray-600 mb-1">إجمالي الطلب</div>
+                                      <div className="text-lg font-bold text-blue-700">{formatMoney(sale.total_amount, sale.currency)}</div>
+                                    </div>
+                                    <div className="bg-green-50 rounded-lg p-4">
+                                      <div className="text-xs text-gray-600 mb-1">نصيب التاجر</div>
+                                      <div className="text-lg font-bold text-green-700">{formatMoney(sale.seller_amount, sale.currency)}</div>
+                                    </div>
+                                    <div className="bg-orange-50 rounded-lg p-4">
+                                      <div className="text-xs text-gray-600 mb-1">نصيب المنصة</div>
+                                      <div className="text-lg font-bold text-orange-700">{formatMoney(sale.platform_fee, sale.currency)}</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {showFinancialWithdrawals && (
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xl font-bold text-gray-900">سجل السحوبات</h3>
+                        <span className="text-sm text-gray-500">{filteredFinancialWithdrawals.length} سجل</span>
+                      </div>
+
+                      {filteredFinancialWithdrawals.length === 0 ? (
+                        <div className="bg-gray-50 rounded-xl p-10 text-center text-gray-500">لا توجد طلبات سحب ضمن الفلاتر الحالية</div>
+                      ) : (
+                        <div className="space-y-4">
+                          {filteredFinancialWithdrawals.map((item) => {
+                            const statusMeta = getFinancialStatusMeta(item.status);
+                            return (
+                              <div key={`${item.source_table}-${item.id}`} className="border border-gray-200 rounded-xl p-5">
+                                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                      <h4 className="text-lg font-bold text-gray-900">طلب سحب #{item.id.slice(0, 8)}</h4>
+                                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusMeta.className}`}>{statusMeta.label}</span>
+                                      <span className="px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">{item.source_table}</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-gray-600">
+                                      <div>التاجر: <span className="font-semibold text-gray-900">{item.merchant_name}</span></div>
+                                      <div>المتجر: <span className="font-semibold text-gray-900">{item.store_name}</span></div>
+                                      <div>التاريخ: <span className="font-semibold text-gray-900">{formatDate(item.created_at)}</span></div>
+                                    </div>
+                                  </div>
+                                  <div className="bg-purple-50 rounded-lg p-4 min-w-[180px]">
+                                    <div className="text-xs text-gray-600 mb-1">المبلغ</div>
+                                    <div className="text-lg font-bold text-purple-700">{formatMoney(item.amount)}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
