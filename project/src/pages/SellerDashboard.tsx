@@ -4,7 +4,6 @@ import {
   Package,
   Store as StoreIcon,
   DollarSign,
-  BarChart3,
   Settings,
   Plus,
   TrendingUp,
@@ -211,7 +210,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     | 'products'
     | 'stores'
     | 'marketing'
-    | 'analytics'
     | 'settings'
     | 'orders'
     | 'earnings'
@@ -1876,16 +1874,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
-              onClick={() => setActiveTab('analytics')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'analytics' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <BarChart3 className="w-5 h-5" />
-              <span>التحليلات</span>
-            </button>
-
-            <button
               onClick={() => setActiveTab('verification')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'verification' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
@@ -3317,14 +3305,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 )}
               </div>
             </div>
-          </div>
-        )}
-
-        {activeTab === 'analytics' && (
-          <div className="bg-white rounded-xl p-8 text-center">
-            <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">التحليلات قريباً</h3>
-            <p className="text-gray-600">سيتم إضافة لوحة التحليلات قريباً</p>
           </div>
         )}
 
