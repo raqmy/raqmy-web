@@ -197,23 +197,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
   const fetchDashboardData = async () => {
     try {
-      const [usersRes, storesRes, productsRes, verificationsRes, bankAccountsRes] = await Promise.all([
+      const [usersRes, merchantsRes, storesRes, productsRes, verificationsRes, bankAccountsRes] = await Promise.all([
         supabase.from('users_profile').select('*'),
+        supabase.from('merchants').select('id, user_id'),
         supabase.from('stores').select('*'),
         supabase.from('products').select('*'),
         supabase.from('identity_verifications').select('id, status'),
         supabase.from('bank_accounts').select('id, status'),
       ]);
 
-      if (usersRes.data) setUsers(usersRes.data);
-      if (storesRes.data) setStores(storesRes.data);
-      if (productsRes.data) setProducts(productsRes.data);
+      if (usersRes.error) console.error('users_profile fetch error:', usersRes.error);
+      if (merchantsRes.error) console.error('merchants fetch error:', merchantsRes.error);
+      if (storesRes.error) console.error('stores fetch error:', storesRes.error);
+      if (productsRes.error) console.error('products fetch error:', productsRes.error);
+      if (verificationsRes.error) console.error('identity_verifications fetch error:', verificationsRes.error);
+      if (bankAccountsRes.error) console.error('bank_accounts fetch error:', bankAccountsRes.error);
+
+      const usersData = usersRes.data || [];
+      const merchantsData = (merchantsRes.data || []) as Array<{ id: string; user_id?: string | null }>;
+      const storesData = storesRes.data || [];
+      const productsData = productsRes.data || [];
+
+      if (usersData) setUsers(usersData);
+      if (storesData) setStores(storesData);
+      if (productsData) setProducts(productsData);
+
+      const sellerUserIdsFromUsers = new Set(
+        usersData
+          .filter((u: any) => u.role === 'seller')
+          .map((u: any) => u.id)
+          .filter(Boolean)
+      );
+
+      const sellerUserIdsFromMerchants = new Set(
+        merchantsData.map((merchant) => merchant.user_id).filter(Boolean) as string[]
+      );
+
+      const sellerUserIdsFromStores = new Set(
+        storesData.map((store: any) => store.user_id).filter(Boolean) as string[]
+      );
+
+      const totalSellerIds = new Set<string>([
+        ...Array.from(sellerUserIdsFromUsers),
+        ...Array.from(sellerUserIdsFromMerchants),
+        ...Array.from(sellerUserIdsFromStores),
+      ]);
+
+      const totalUsersEstimate = Math.max(
+        usersData.length,
+        usersData.length + Array.from(totalSellerIds).filter((id) => !usersData.some((u: any) => u.id === id)).length
+      );
 
       setStats({
-        totalUsers: usersRes.data?.length || 0,
-        totalSellers: usersRes.data?.filter((u) => u.role === 'seller').length || 0,
-        totalStores: storesRes.data?.length || 0,
-        totalProducts: productsRes.data?.length || 0,
+        totalUsers: totalUsersEstimate,
+        totalSellers: totalSellerIds.size,
+        totalStores: storesData.length || 0,
+        totalProducts: productsData.length || 0,
         totalRevenue: 0,
       });
 
