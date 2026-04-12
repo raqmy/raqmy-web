@@ -1806,6 +1806,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const showFinancialSubscriptions = financialRecordTab === 'subscriptions' || financialRecordTab === 'all';
   const showFinancialWithdrawals = financialRecordTab === 'withdrawals' || financialRecordTab === 'all';
 
+  const displayedFinancialSales = financialRecordTab === 'all'
+    ? filteredFinancialSales.slice(0, 2)
+    : filteredFinancialSales;
+
+  const displayedFinancialSubscriptions = financialRecordTab === 'all'
+    ? filteredFinancialSubscriptions.slice(0, 2)
+    : filteredFinancialSubscriptions;
+
+  const displayedFinancialWithdrawals = financialRecordTab === 'all'
+    ? filteredFinancialWithdrawals.slice(0, 2)
+    : filteredFinancialWithdrawals;
+
   if (profile?.role !== 'admin' && profile?.role !== 'superadmin') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -2514,16 +2526,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                 <div className="space-y-8">
                   {showFinancialSales && (
                     <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xl font-bold text-gray-900">سجل المبيعات والطلبات</h3>
-                        <span className="text-sm text-gray-500">{filteredFinancialSales.length} سجل</span>
+                      <div className="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                          <h3 className="text-xl font-bold text-gray-900">سجل المبيعات والطلبات</h3>
+                          <span className="text-sm text-gray-500">{filteredFinancialSales.length} سجل</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {financialRecordTab === 'sales' && (
+                            <button
+                              onClick={() => setFinancialRecordTab('all')}
+                              className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            >
+                              العودة للكل
+                            </button>
+                          )}
+
+                          {financialRecordTab === 'all' && filteredFinancialSales.length > 2 && (
+                            <button
+                              onClick={() => setFinancialRecordTab('sales')}
+                              className="px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                            >
+                              إظهار الكل
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {filteredFinancialSales.length === 0 ? (
                         <div className="bg-gray-50 rounded-xl p-10 text-center text-gray-500">لا توجد مبيعات ضمن الفلاتر الحالية</div>
                       ) : (
                         <div className="space-y-4">
-                          {filteredFinancialSales.map((sale) => {
+                          {displayedFinancialSales.map((sale) => {
                             const statusMeta = getFinancialStatusMeta(sale.status);
                             return (
                               <div key={sale.id} className="border border-gray-200 rounded-xl p-5">
@@ -2569,16 +2603,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
                   {showFinancialSubscriptions && (
                     <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xl font-bold text-gray-900">سجل اشتراكات الباقات</h3>
-                        <span className="text-sm text-gray-500">{filteredFinancialSubscriptions.length} سجل</span>
+                      <div className="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                          <h3 className="text-xl font-bold text-gray-900">سجل اشتراكات الباقات</h3>
+                          <span className="text-sm text-gray-500">{filteredFinancialSubscriptions.length} سجل</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {financialRecordTab === 'subscriptions' && (
+                            <button
+                              onClick={() => setFinancialRecordTab('all')}
+                              className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            >
+                              العودة للكل
+                            </button>
+                          )}
+
+                          {financialRecordTab === 'all' && filteredFinancialSubscriptions.length > 2 && (
+                            <button
+                              onClick={() => setFinancialRecordTab('subscriptions')}
+                              className="px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                            >
+                              إظهار الكل
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {filteredFinancialSubscriptions.length === 0 ? (
                         <div className="bg-gray-50 rounded-xl p-10 text-center text-gray-500">لا توجد اشتراكات ضمن الفلاتر الحالية</div>
                       ) : (
                         <div className="space-y-4">
-                          {filteredFinancialSubscriptions.map((item) => {
+                          {displayedFinancialSubscriptions.map((item) => {
                             const statusMeta = getFinancialStatusMeta(item.status);
                             return (
                               <div key={item.id} className="border border-gray-200 rounded-xl p-5">
@@ -2613,16 +2669,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
                   {showFinancialWithdrawals && (
                     <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xl font-bold text-gray-900">سجل السحوبات</h3>
-                        <span className="text-sm text-gray-500">{filteredFinancialWithdrawals.length} سجل</span>
+                      <div className="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                          <h3 className="text-xl font-bold text-gray-900">سجل السحوبات</h3>
+                          <span className="text-sm text-gray-500">{filteredFinancialWithdrawals.length} سجل</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {financialRecordTab === 'withdrawals' && (
+                            <button
+                              onClick={() => setFinancialRecordTab('all')}
+                              className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                            >
+                              العودة للكل
+                            </button>
+                          )}
+
+                          {financialRecordTab === 'all' && filteredFinancialWithdrawals.length > 2 && (
+                            <button
+                              onClick={() => setFinancialRecordTab('withdrawals')}
+                              className="px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                            >
+                              إظهار الكل
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {filteredFinancialWithdrawals.length === 0 ? (
                         <div className="bg-gray-50 rounded-xl p-10 text-center text-gray-500">لا توجد طلبات سحب ضمن الفلاتر الحالية</div>
                       ) : (
                         <div className="space-y-4">
-                          {filteredFinancialWithdrawals.map((item) => {
+                          {displayedFinancialWithdrawals.map((item) => {
                             const statusMeta = getFinancialStatusMeta(item.status);
                             return (
                               <div key={`${item.source_table}-${item.id}`} className="border border-gray-200 rounded-xl p-5">
