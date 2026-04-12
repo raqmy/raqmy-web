@@ -8,7 +8,6 @@ import {
   Eye,
   Package,
   Store as StoreIcon,
-  BarChart3,
   Settings as SettingsIcon,
   Trash2,
   AlertCircle,
@@ -168,7 +167,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const { user, profile, updateProfile } = useAuth();
 
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'orders' | 'favorites' | 'viewed' | 'stores' | 'products' | 'analytics' | 'settings'
+    'overview' | 'orders' | 'favorites' | 'viewed' | 'settings'
   >('overview');
 
   const [name, setName] = useState(profile?.name || '');
@@ -1118,48 +1117,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 <Eye className="w-5 h-5" />
                 <span>تمت مشاهدتها</span>
               </button>
-
-              {isMerchant && !scopeInfo && (
-                <>
-                  <div className="border-t border-gray-200 my-2"></div>
-
-                  <button
-                    onClick={() => setActiveTab('stores')}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
-                      activeTab === 'stores'
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    <StoreIcon className="w-5 h-5" />
-                    <span>متاجري</span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab('products')}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
-                      activeTab === 'products'
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    <Package className="w-5 h-5" />
-                    <span>منتجاتي</span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab('analytics')}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
-                      activeTab === 'analytics'
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    <BarChart3 className="w-5 h-5" />
-                    <span>التحليلات</span>
-                  </button>
-                </>
-              )}
 
               <div className="border-t border-gray-200 my-2"></div>
 
