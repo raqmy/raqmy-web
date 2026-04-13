@@ -169,6 +169,7 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const { user, profile, updateProfile } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const avatarMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [activeTab, setActiveTab] = useState<
     'overview' | 'orders' | 'favorites' | 'viewed' | 'settings'
@@ -176,6 +177,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
   const [name, setName] = useState(profile?.name || '');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(((profile as any)?.avatar_url as string) || null);
+  const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [message, setMessage] = useState('');
@@ -229,6 +231,22 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     loadScope();
   }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (avatarMenuRef.current && !avatarMenuRef.current.contains(event.target as Node)) {
+        setShowAvatarMenu(false);
+      }
+    };
+
+    if (showAvatarMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showAvatarMenu]);
 
   const fetchProductImageMapByIds = async (productIds: string[]) => {
     const cleanIds = [...new Set(productIds.filter(Boolean))];
@@ -616,8 +634,95 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
+  const syncAvatarEverywhere = async (nextAvatarUrl: string | null) => {
+    const updatePromises = [
+      supabase.from('users_profile').update({ avatar_url: nextAvatarUrl }).eq('id', user!.id),
+      supabase.from('profiles').update({ avatar_url: nextAvatarUrl }).eq('id', user!.id),
+      supabase.auth.updateUser({ data: { avatar_url: nextAvatarUrl } }),
+    ];
+
+    const results = await Promise.allSettled(updatePromises);
+    const profileTableResults = results.slice(0, 2);
+
+    const hardFailure = profileTableResults.every(
+      (result) => result.status === 'fulfilled' && result.value.error
+    );
+
+    if (hardFailure) {
+      const firstError = profileTableResults.find(
+        (result) => result.status === 'fulfilled' && result.value.error
+      ) as PromiseFulfilledResult<any> | undefined;
+
+      throw firstError?.value.error || new Error('تعذر حفظ صورة الملف الشخصي');
+    }
+
+    try {
+      await updateProfile({ avatar_url: nextAvatarUrl } as any);
+    } catch (contextError) {
+      console.error('updateProfile avatar sync error:', contextError);
+    }
+
+    try {
+      window.dispatchEvent(new CustomEvent('profile-updated', { detail: { avatar_url: nextAvatarUrl } }));
+      window.dispatchEvent(new CustomEvent('profile-avatar-updated', { detail: { avatar_url: nextAvatarUrl } }));
+    } catch (eventError) {
+      console.error('Avatar sync event error:', eventError);
+    }
+  };
+
   const handleAvatarButtonClick = () => {
+    setShowAvatarMenu((prev) => !prev);
+  };
+
+  const handleChooseAvatarFile = () => {
+    setShowAvatarMenu(false);
     avatarInputRef.current?.click();
+  };
+
+  const handleDeleteAvatar = async () => {
+    if (!user) return;
+
+    const confirmed = window.confirm('هل تريد حذف الصورة الشخصية؟');
+    if (!confirmed) return;
+
+    setUploadingAvatar(true);
+    setMessage('');
+    setShowAvatarMenu(false);
+
+    try {
+      const { data: existingFiles, error: listError } = await supabase.storage
+        .from(AVATAR_BUCKET)
+        .list(user.id, { limit: 100 });
+
+      if (listError) {
+        console.error('Error listing avatar files:', listError);
+      }
+
+      const filesToRemove = (existingFiles || [])
+        .filter((file: any) => !!file?.name)
+        .map((file: any) => `${user.id}/${file.name}`);
+
+      if (filesToRemove.length > 0) {
+        const { error: removeError } = await supabase.storage
+          .from(AVATAR_BUCKET)
+          .remove(filesToRemove);
+
+        if (removeError) throw removeError;
+      }
+
+      await syncAvatarEverywhere(null);
+      setAvatarUrl(null);
+      setMessage('تم حذف صورة الملف الشخصي بنجاح');
+
+      setTimeout(() => {
+        window.location.reload();
+      }, 250);
+    } catch (error: any) {
+      console.error('Error deleting avatar:', error);
+      setMessage(error?.message || 'حدث خطأ أثناء حذف صورة الملف الشخصي');
+    } finally {
+      setUploadingAvatar(false);
+    }
   };
 
   const handleAvatarFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -656,32 +761,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       const { data: publicData } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(filePath);
       const uploadedAvatarUrl = `${publicData.publicUrl}?t=${Date.now()}`;
 
-      const updatePromises = [
-        supabase.from('users_profile').update({ avatar_url: uploadedAvatarUrl }).eq('id', user.id),
-        supabase.from('profiles').update({ avatar_url: uploadedAvatarUrl }).eq('id', user.id),
-      ];
-
-      const results = await Promise.allSettled(updatePromises);
-      const hardFailure = results.every(
-        (result) => result.status === 'fulfilled' && result.value.error
-      );
-
-      if (hardFailure) {
-        const firstError = results.find((result) => result.status === 'fulfilled' && result.value.error) as
-          | PromiseFulfilledResult<any>
-          | undefined;
-        throw firstError?.value.error || new Error('تعذر حفظ رابط الصورة في الملف الشخصي');
-      }
-
+      await syncAvatarEverywhere(uploadedAvatarUrl);
       setAvatarUrl(uploadedAvatarUrl);
-
-      try {
-        await updateProfile({ avatar_url: uploadedAvatarUrl } as any);
-      } catch (contextError) {
-        console.error('updateProfile avatar sync error:', contextError);
-      }
-
+      setShowAvatarMenu(false);
       setMessage('تم تحديث صورة الملف الشخصي بنجاح');
+
+      setTimeout(() => {
+        window.location.reload();
+      }, 250);
     } catch (error: any) {
       console.error('Error uploading avatar:', error);
       if ((error?.message || '').includes('Bucket not found')) {
@@ -1118,19 +1205,44 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                   className="hidden"
                 />
 
-                <button
-                  type="button"
-                  onClick={handleAvatarButtonClick}
-                  disabled={uploadingAvatar}
-                  className="absolute bottom-0 left-0 w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white hover:bg-blue-700 shadow-lg disabled:opacity-50"
-                  title="تغيير الصورة الشخصية"
-                >
-                  {uploadingAvatar ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Camera className="w-5 h-5" />
+                <div ref={avatarMenuRef} className="absolute bottom-0 left-0">
+                  <button
+                    type="button"
+                    onClick={handleAvatarButtonClick}
+                    disabled={uploadingAvatar}
+                    className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white hover:bg-blue-700 shadow-lg disabled:opacity-50"
+                    title="خيارات الصورة الشخصية"
+                  >
+                    {uploadingAvatar ? (
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Camera className="w-5 h-5" />
+                    )}
+                  </button>
+
+                  {showAvatarMenu && !uploadingAvatar && (
+                    <div className="absolute left-0 mt-2 w-44 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-20">
+                      <button
+                        type="button"
+                        onClick={handleChooseAvatarFile}
+                        className="w-full px-4 py-3 text-right text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                      >
+                        <span>تعديل الصورة</span>
+                        <Camera className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleDeleteAvatar}
+                        disabled={!avatarUrl}
+                        className="w-full px-4 py-3 text-right text-sm text-red-600 hover:bg-red-50 flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <span>حذف الصورة</span>
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   )}
-                </button>
+                </div>
               </div>
             </div>
           </div>
