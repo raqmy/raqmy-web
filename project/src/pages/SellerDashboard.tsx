@@ -279,6 +279,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
   const [ordersFilter, setOrdersFilter] = useState<'all' | 'paid' | 'pending_payment'>('all');
+  const [productsSearchQuery, setProductsSearchQuery] = useState('');
+  const [productsStatusFilter, setProductsStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [productsSortBy, setProductsSortBy] = useState<'newest' | 'name' | 'price_high' | 'price_low' | 'views' | 'sales'>('newest');
+  const [storesSearchQuery, setStoresSearchQuery] = useState('');
+  const [storesStatusFilter, setStoresStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [storesSortBy, setStoresSortBy] = useState<'newest' | 'name'>('newest');
+  const [ordersSearchQuery, setOrdersSearchQuery] = useState('');
+  const [ordersSortBy, setOrdersSortBy] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
   const [selectedOrder, setSelectedOrder] = useState<SellerOrderUI | null>(null);
   const [showOrderDetails, setShowOrderDetails] = useState(false);
 
@@ -1748,6 +1756,103 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       .reduce((sum, order) => sum + Number(order.total_amount || order.seller_amount || 0), 0),
   };
 
+  const filteredProducts = useMemo(() => {
+    const query = productsSearchQuery.trim().toLowerCase();
+
+    const result = products.filter((product) => {
+      const matchesSearch =
+        query === '' ||
+        String(product.name || '').toLowerCase().includes(query) ||
+        String((product as any).title || '').toLowerCase().includes(query) ||
+        String((product as any).description || '').toLowerCase().includes(query) ||
+        String((product as any).slug || '').toLowerCase().includes(query);
+
+      const matchesStatus =
+        productsStatusFilter === 'all' ||
+        (productsStatusFilter === 'active' && Boolean(product.is_active)) ||
+        (productsStatusFilter === 'inactive' && !Boolean(product.is_active));
+
+      return matchesSearch && matchesStatus;
+    });
+
+    return [...result].sort((a, b) => {
+      switch (productsSortBy) {
+        case 'name':
+          return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+        case 'price_high':
+          return Number(b.price || 0) - Number(a.price || 0);
+        case 'price_low':
+          return Number(a.price || 0) - Number(b.price || 0);
+        case 'views':
+          return Number(b.views_count || 0) - Number(a.views_count || 0);
+        case 'sales':
+          return Number(b.sales_count || 0) - Number(a.sales_count || 0);
+        case 'newest':
+        default:
+          return new Date((b as any).created_at || 0).getTime() - new Date((a as any).created_at || 0).getTime();
+      }
+    });
+  }, [products, productsSearchQuery, productsStatusFilter, productsSortBy]);
+
+  const filteredStores = useMemo(() => {
+    const query = storesSearchQuery.trim().toLowerCase();
+
+    const result = stores.filter((store) => {
+      const matchesSearch =
+        query === '' ||
+        String(store.name || '').toLowerCase().includes(query) ||
+        String((store as any).slug || '').toLowerCase().includes(query) ||
+        String((store as any).description || '').toLowerCase().includes(query);
+
+      const matchesStatus =
+        storesStatusFilter === 'all' ||
+        (storesStatusFilter === 'active' && Boolean(store.is_active)) ||
+        (storesStatusFilter === 'inactive' && !Boolean(store.is_active));
+
+      return matchesSearch && matchesStatus;
+    });
+
+    return [...result].sort((a, b) => {
+      switch (storesSortBy) {
+        case 'name':
+          return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+        case 'newest':
+        default:
+          return new Date((b as any).created_at || 0).getTime() - new Date((a as any).created_at || 0).getTime();
+      }
+    });
+  }, [stores, storesSearchQuery, storesStatusFilter, storesSortBy]);
+
+  const filteredOrdersResults = useMemo(() => {
+    const query = ordersSearchQuery.trim().toLowerCase();
+
+    const result = filteredSellerOrders.filter((order) => {
+      const itemsText = order.items.map((item) => item.product_name).join(' ').toLowerCase();
+      const matchesSearch =
+        query === '' ||
+        String(order.order_number || order.id || '').toLowerCase().includes(query) ||
+        String(order.customer_name || '').toLowerCase().includes(query) ||
+        String(order.customer_phone || '').toLowerCase().includes(query) ||
+        itemsText.includes(query);
+
+      return matchesSearch;
+    });
+
+    return [...result].sort((a, b) => {
+      switch (ordersSortBy) {
+        case 'oldest':
+          return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+        case 'highest':
+          return Number(b.total_amount || 0) - Number(a.total_amount || 0);
+        case 'lowest':
+          return Number(a.total_amount || 0) - Number(b.total_amount || 0);
+        case 'newest':
+        default:
+          return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      }
+    });
+  }, [filteredSellerOrders, ordersSearchQuery, ordersSortBy]);
+
   const totalProductsCount = products.length;
   const averageViewsPerProduct = totalProductsCount > 0 ? stats.totalViews / totalProductsCount : 0;
   const averageRevenuePerSale = stats.totalSales > 0 ? stats.totalRevenue / stats.totalSales : 0;
@@ -2233,63 +2338,111 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {products.map((product) => (
-                  <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                    <div
-                      className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center cursor-pointer"
-                      onClick={() => openProduct(product)}
-                      role="button"
-                      tabIndex={0}
+              <>
+                <div className="bg-white rounded-2xl shadow-sm p-5 mb-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="relative">
+                      <Search className="w-5 h-5 text-gray-400 absolute top-1/2 -translate-y-1/2 right-4" />
+                      <input
+                        type="text"
+                        value={productsSearchQuery}
+                        onChange={(e) => setProductsSearchQuery(e.target.value)}
+                        placeholder="ابحث عن منتج..."
+                        className="w-full pr-12 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      />
+                    </div>
+
+                    <select
+                      value={productsStatusFilter}
+                      onChange={(e) => setProductsStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
                     >
-                      {product.thumbnail_url ? (
-                        <img
-                          src={product.thumbnail_url}
-                          alt={product.name}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <Package className="w-12 h-12 text-blue-600" />
-                      )}
-                    </div>
+                      <option value="all">كل الحالات</option>
+                      <option value="active">النشطة فقط</option>
+                      <option value="inactive">غير النشطة فقط</option>
+                    </select>
 
-                    <div className="p-6">
-                      <h3
-                        className="text-lg font-bold text-gray-900 mb-2 line-clamp-1 cursor-pointer hover:text-blue-600"
-                        onClick={() => openProduct(product)}
-                      >
-                        {product.name || 'بدون اسم'}
-                      </h3>
-
-                      <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
-                        <span>{product.sales_count || 0} مبيعات</span>
-                        <span>{product.views_count || 0} مشاهدة</span>
-                      </div>
-
-                      <div className="flex items-center justify-between mb-4">
-                        <span className="text-xl font-bold text-blue-600">
-                          {product.price} {product.currency}
-                        </span>
-
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                            product.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-                          }`}
-                        >
-                          {product.is_active ? 'نشط' : 'غير نشط'}
-                        </span>
-                      </div>
-
-                      <button
-                        onClick={() => setEditingProductId(product.id)}
-                        className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                      >
-                        تعديل المنتج
-                      </button>
-                    </div>
+                    <select
+                      value={productsSortBy}
+                      onChange={(e) => setProductsSortBy(e.target.value as 'newest' | 'name' | 'price_high' | 'price_low' | 'views' | 'sales')}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                    >
+                      <option value="newest">الأحدث</option>
+                      <option value="name">الاسم</option>
+                      <option value="price_high">السعر: من الأعلى للأقل</option>
+                      <option value="price_low">السعر: من الأقل للأعلى</option>
+                      <option value="views">الأكثر مشاهدة</option>
+                      <option value="sales">الأكثر مبيعاً</option>
+                    </select>
                   </div>
-                ))}
-              </div>
+                </div>
+
+                {filteredProducts.length === 0 ? (
+                  <div className="bg-white rounded-xl p-12 text-center">
+                    <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد نتائج</h3>
+                    <p className="text-gray-600">جرّب تغيير كلمات البحث أو الفلاتر</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredProducts.map((product) => (
+                      <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
+                        <div
+                          className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center cursor-pointer"
+                          onClick={() => openProduct(product)}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          {product.thumbnail_url ? (
+                            <img
+                              src={product.thumbnail_url}
+                              alt={product.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <Package className="w-12 h-12 text-blue-600" />
+                          )}
+                        </div>
+
+                        <div className="p-6">
+                          <h3
+                            className="text-lg font-bold text-gray-900 mb-2 line-clamp-1 cursor-pointer hover:text-blue-600"
+                            onClick={() => openProduct(product)}
+                          >
+                            {product.name || 'بدون اسم'}
+                          </h3>
+
+                          <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
+                            <span>{product.sales_count || 0} مبيعات</span>
+                            <span>{product.views_count || 0} مشاهدة</span>
+                          </div>
+
+                          <div className="flex items-center justify-between mb-4">
+                            <span className="text-xl font-bold text-blue-600">
+                              {product.price} {product.currency}
+                            </span>
+
+                            <span
+                              className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                product.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                              }`}
+                            >
+                              {product.is_active ? 'نشط' : 'غير نشط'}
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={() => setEditingProductId(product.id)}
+                            className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                          >
+                            تعديل المنتج
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -2320,51 +2473,95 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {stores.map((store) => (
-                  <div key={store.id} className="bg-white rounded-xl shadow-sm p-6">
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                        <StoreIcon className="w-8 h-8 text-white" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-xl font-bold text-gray-900">{store.name}</h3>
-                        <p className="text-sm text-gray-500" dir="ltr">
-                          {store.slug ? `/s/${store.slug}` : 'بدون رابط بعد'}
-                        </p>
-                      </div>
+              <>
+                <div className="bg-white rounded-2xl shadow-sm p-5 mb-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="relative">
+                      <Search className="w-5 h-5 text-gray-400 absolute top-1/2 -translate-y-1/2 right-4" />
+                      <input
+                        type="text"
+                        value={storesSearchQuery}
+                        onChange={(e) => setStoresSearchQuery(e.target.value)}
+                        placeholder="ابحث عن متجر..."
+                        className="w-full pr-12 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      />
                     </div>
 
-                    {store.description && <p className="text-gray-600 mb-4 line-clamp-2">{store.description}</p>}
+                    <select
+                      value={storesStatusFilter}
+                      onChange={(e) => setStoresStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                    >
+                      <option value="all">كل الحالات</option>
+                      <option value="active">النشطة فقط</option>
+                      <option value="inactive">غير النشطة فقط</option>
+                    </select>
 
-                    <div className="flex items-center justify-between mb-4">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          store.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-                        }`}
-                      >
-                        {store.is_active ? 'نشط' : 'غير نشط'}
-                      </span>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => openStorefront(store)}
-                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-                      >
-                        دخول المتجر
-                      </button>
-
-                      <button
-                        onClick={() => setEditingStoreId(store.id)}
-                        className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                      >
-                        تعديل
-                      </button>
-                    </div>
+                    <select
+                      value={storesSortBy}
+                      onChange={(e) => setStoresSortBy(e.target.value as 'newest' | 'name')}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                    >
+                      <option value="newest">الأحدث</option>
+                      <option value="name">الاسم</option>
+                    </select>
                   </div>
-                ))}
-              </div>
+                </div>
+
+                {filteredStores.length === 0 ? (
+                  <div className="bg-white rounded-xl p-12 text-center">
+                    <StoreIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد نتائج</h3>
+                    <p className="text-gray-600">جرّب تغيير كلمات البحث أو الفلاتر</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {filteredStores.map((store) => (
+                      <div key={store.id} className="bg-white rounded-xl shadow-sm p-6">
+                        <div className="flex items-center gap-4 mb-4">
+                          <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+                            <StoreIcon className="w-8 h-8 text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <h3 className="text-xl font-bold text-gray-900">{store.name}</h3>
+                            <p className="text-sm text-gray-500" dir="ltr">
+                              {store.slug ? `/s/${store.slug}` : 'بدون رابط بعد'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {store.description && <p className="text-gray-600 mb-4 line-clamp-2">{store.description}</p>}
+
+                        <div className="flex items-center justify-between mb-4">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                              store.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {store.is_active ? 'نشط' : 'غير نشط'}
+                          </span>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => openStorefront(store)}
+                            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                          >
+                            دخول المتجر
+                          </button>
+
+                          <button
+                            onClick={() => setEditingStoreId(store.id)}
+                            className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                          >
+                            تعديل
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -2554,6 +2751,30 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 ))}
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+                <div className="relative">
+                  <Search className="w-5 h-5 text-gray-400 absolute top-1/2 -translate-y-1/2 right-4" />
+                  <input
+                    type="text"
+                    value={ordersSearchQuery}
+                    onChange={(e) => setOrdersSearchQuery(e.target.value)}
+                    placeholder="ابحث برقم الطلب أو اسم العميل أو رقم الهاتف أو المنتج..."
+                    className="w-full pr-12 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+
+                <select
+                  value={ordersSortBy}
+                  onChange={(e) => setOrdersSortBy(e.target.value as 'newest' | 'oldest' | 'highest' | 'lowest')}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                >
+                  <option value="newest">الأحدث</option>
+                  <option value="oldest">الأقدم</option>
+                  <option value="highest">الأعلى قيمة</option>
+                  <option value="lowest">الأقل قيمة</option>
+                </select>
+              </div>
+
               {ordersError && (
                 <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
                   {ordersError}
@@ -2565,7 +2786,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                   <p className="text-gray-600">جاري تحميل الطلبات...</p>
                 </div>
-              ) : filteredSellerOrders.length === 0 ? (
+              ) : filteredOrdersResults.length === 0 ? (
                 <div className="text-center py-16 border border-dashed border-gray-200 rounded-2xl">
                   <ShoppingBag className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد طلبات حالياً</h3>
@@ -2573,7 +2794,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {filteredSellerOrders.map((order) => (
+                  {filteredOrdersResults.map((order) => (
                     <div key={order.id} className="border border-gray-200 rounded-2xl p-5 hover:shadow-sm transition-shadow">
                       <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 flex-1">
