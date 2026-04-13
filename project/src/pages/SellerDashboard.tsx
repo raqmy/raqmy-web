@@ -26,6 +26,8 @@ import {
   Paperclip,
   X,
   Search,
+  ImagePlus,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Store, Product } from '../lib/supabase';
@@ -200,8 +202,11 @@ type NormalizedProduct = Product & {
   thumbnail_url?: string | null;
 };
 
+type StoreImageRecord = Store & Record<string, any>;
+
 const FALLBACK_MIN_WITHDRAWAL_AMOUNT = 10;
 const WITHDRAWAL_PROOFS_BUCKET = 'withdrawal-proofs';
+const STORE_IMAGES_BUCKET = 'store-images';
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
@@ -286,6 +291,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [storesSearchQuery, setStoresSearchQuery] = useState('');
   const [storesStatusFilter, setStoresStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [storesSortBy, setStoresSortBy] = useState<'newest' | 'name'>('newest');
+  const [storeImageUploadingId, setStoreImageUploadingId] = useState<string | null>(null);
+  const [storeImageError, setStoreImageError] = useState('');
+  const [storeImageSuccess, setStoreImageSuccess] = useState('');
   const [ordersSearchQuery, setOrdersSearchQuery] = useState('');
   const [ordersSortBy, setOrdersSortBy] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
   const [selectedOrder, setSelectedOrder] = useState<SellerOrderUI | null>(null);
@@ -334,6 +342,192 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     if (!path) return '';
     const parts = path.split('/');
     return parts[parts.length - 1] || path;
+  };
+
+  const STORE_IMAGE_URL_FIELDS = ['store_image_url', 'logo_url', 'image_url', 'cover_image', 'cover_url'] as const;
+  const STORE_IMAGE_PATH_FIELDS = ['store_image_path', 'logo_path', 'image_path', 'cover_image_path', 'cover_path'] as const;
+
+  const extractSupabaseStoragePath = (value: string | null | undefined, bucketName: string) => {
+    if (!value) return '';
+
+    let pathValue = String(value).trim();
+    if (!pathValue) return '';
+
+    const signMarker = `/object/sign/${bucketName}/`;
+    const publicMarker = `/object/public/${bucketName}/`;
+
+    if (pathValue.includes(signMarker)) {
+      pathValue = pathValue.split(signMarker)[1] || '';
+    } else if (pathValue.includes(publicMarker)) {
+      pathValue = pathValue.split(publicMarker)[1] || '';
+    }
+
+    if (pathValue.startsWith(`${bucketName}/`)) {
+      pathValue = pathValue.slice(bucketName.length + 1);
+    }
+
+    if (pathValue.startsWith('/')) {
+      pathValue = pathValue.slice(1);
+    }
+
+    const queryIndex = pathValue.indexOf('?');
+    if (queryIndex !== -1) {
+      pathValue = pathValue.slice(0, queryIndex);
+    }
+
+    return decodeURIComponent(pathValue);
+  };
+
+  const getStoreImageUrl = (store: StoreImageRecord) => {
+    for (const field of STORE_IMAGE_URL_FIELDS) {
+      const value = store?.[field];
+      if (typeof value === 'string' && value.trim()) {
+        return value;
+      }
+    }
+    return '';
+  };
+
+  const getStoreImagePath = (store: StoreImageRecord) => {
+    for (const field of STORE_IMAGE_PATH_FIELDS) {
+      const value = store?.[field];
+      if (typeof value === 'string' && value.trim()) {
+        return value;
+      }
+    }
+
+    return extractSupabaseStoragePath(getStoreImageUrl(store), STORE_IMAGES_BUCKET);
+  };
+
+  const resolveStoreImageFields = (store: StoreImageRecord) => {
+    const existingUrlField = STORE_IMAGE_URL_FIELDS.find((field) => field in store);
+    const existingPathField = STORE_IMAGE_PATH_FIELDS.find((field) => field in store);
+
+    return {
+      urlField: existingUrlField || 'logo_url',
+      pathField: existingPathField || null,
+    };
+  };
+
+  const updateStoreImageReference = async (
+    store: StoreImageRecord,
+    nextUrl: string | null,
+    nextPath: string | null
+  ) => {
+    const { urlField, pathField } = resolveStoreImageFields(store);
+    const updatePayload: Record<string, any> = {
+      [urlField]: nextUrl,
+    };
+
+    if (pathField) {
+      updatePayload[pathField] = nextPath;
+    }
+
+    let { error } = await supabase.from('stores').update(updatePayload).eq('id', store.id);
+
+    if (!error) return;
+
+    const fallbackFields = STORE_IMAGE_URL_FIELDS.filter((field) => field !== urlField);
+    for (const field of fallbackFields) {
+      const fallbackPayload: Record<string, any> = { [field]: nextUrl };
+      if (pathField) fallbackPayload[pathField] = nextPath;
+
+      const response = await supabase.from('stores').update(fallbackPayload).eq('id', store.id);
+      if (!response.error) return;
+      error = response.error;
+    }
+
+    throw error;
+  };
+
+  const uploadStoreImage = async (store: StoreImageRecord, file: File) => {
+    if (!profile?.id) throw new Error('يجب تسجيل الدخول أولاً');
+
+    const fileExt = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
+    const safeExt = (fileExt || 'jpg').toLowerCase();
+    const filePath = `${profile.id}/${store.id}-${Date.now()}.${safeExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(STORE_IMAGES_BUCKET)
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from(STORE_IMAGES_BUCKET).getPublicUrl(filePath);
+    const publicUrl = data?.publicUrl || '';
+
+    await updateStoreImageReference(store, publicUrl, filePath);
+    return filePath;
+  };
+
+  const handleStoreImageSelected = async (store: StoreImageRecord, file: File | null) => {
+    if (!file) return;
+
+    setStoreImageError('');
+    setStoreImageSuccess('');
+
+    if (!file.type.startsWith('image/')) {
+      setStoreImageError('يرجى اختيار ملف صورة صحيح للمتجر');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setStoreImageError('حجم صورة المتجر يجب ألا يتجاوز 5MB');
+      return;
+    }
+
+    try {
+      setStoreImageUploadingId(store.id);
+
+      const previousPath = getStoreImagePath(store);
+      const uploadedPath = await uploadStoreImage(store, file);
+
+      if (previousPath && previousPath !== uploadedPath) {
+        await supabase.storage.from(STORE_IMAGES_BUCKET).remove([previousPath]);
+      }
+
+      setStoreImageSuccess('تم تحديث صورة المتجر بنجاح');
+      await fetchDashboardData();
+    } catch (error: any) {
+      console.error('Store image upload error:', error);
+      const message = String(error?.message || '');
+      if (message.includes('Bucket not found')) {
+        setStoreImageError('مجلد صور المتاجر غير موجود في التخزين. أنشئ bucket باسم store-images ثم أعد المحاولة.');
+      } else {
+        setStoreImageError(error?.message || 'حدث خطأ أثناء رفع صورة المتجر');
+      }
+    } finally {
+      setStoreImageUploadingId(null);
+    }
+  };
+
+  const handleStoreImageDelete = async (store: StoreImageRecord) => {
+    setStoreImageError('');
+    setStoreImageSuccess('');
+
+    const existingImageUrl = getStoreImageUrl(store);
+    if (!existingImageUrl) {
+      setStoreImageError('لا توجد صورة محفوظة لهذا المتجر');
+      return;
+    }
+
+    try {
+      setStoreImageUploadingId(store.id);
+
+      const existingPath = getStoreImagePath(store);
+      if (existingPath) {
+        await supabase.storage.from(STORE_IMAGES_BUCKET).remove([existingPath]);
+      }
+
+      await updateStoreImageReference(store, null, null);
+      setStoreImageSuccess('تم حذف صورة المتجر بنجاح');
+      await fetchDashboardData();
+    } catch (error: any) {
+      console.error('Store image delete error:', error);
+      setStoreImageError(error?.message || 'حدث خطأ أثناء حذف صورة المتجر');
+    } finally {
+      setStoreImageUploadingId(null);
+    }
   };
 
   const formatCurrency = (value: number | null | undefined) => {
@@ -2220,7 +2414,19 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   </p>
 
                   <div className="flex flex-wrap gap-4 mb-6">
-                    {stores.length === 0 ? (
+                    {storeImageError && (
+              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {storeImageError}
+              </div>
+            )}
+
+            {storeImageSuccess && (
+              <div className="mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                {storeImageSuccess}
+              </div>
+            )}
+
+            {stores.length === 0 ? (
                       <button
                         onClick={() => setShowCreateStoreModal(true)}
                         className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
@@ -2517,49 +2723,112 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {filteredStores.map((store) => (
-                      <div key={store.id} className="bg-white rounded-xl shadow-sm p-6">
-                        <div className="flex items-center gap-4 mb-4">
-                          <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                            <StoreIcon className="w-8 h-8 text-white" />
+                    {filteredStores.map((store) => {
+                      const storeImageUrl = getStoreImageUrl(store as StoreImageRecord);
+                      const isStoreImageBusy = storeImageUploadingId === store.id;
+
+                      return (
+                        <div key={store.id} className="bg-white rounded-xl shadow-sm p-6">
+                          <input
+                            id={`store-image-input-${store.id}`}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              void handleStoreImageSelected(store as StoreImageRecord, file);
+                              e.currentTarget.value = '';
+                            }}
+                          />
+
+                          <div className="flex items-start gap-4 mb-4">
+                            <div className="relative w-24 h-24 rounded-xl overflow-hidden border border-gray-200 bg-gray-50 shrink-0">
+                              {storeImageUrl ? (
+                                <img
+                                  src={storeImageUrl}
+                                  alt={store.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+                                  <StoreIcon className="w-10 h-10 text-white" />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-3 mb-2">
+                                <div>
+                                  <h3 className="text-xl font-bold text-gray-900">{store.name}</h3>
+                                  <p className="text-sm text-gray-500" dir="ltr">
+                                    {store.slug ? `/s/${store.slug}` : 'بدون رابط بعد'}
+                                  </p>
+                                </div>
+
+                                <span
+                                  className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                    store.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                                  }`}
+                                >
+                                  {store.is_active ? 'نشط' : 'غير نشط'}
+                                </span>
+                              </div>
+
+                              {store.description && (
+                                <p className="text-gray-600 mb-3 line-clamp-2">{store.description}</p>
+                              )}
+
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={isStoreImageBusy}
+                                  onClick={() => {
+                                    const input = document.getElementById(`store-image-input-${store.id}`) as HTMLInputElement | null;
+                                    input?.click();
+                                  }}
+                                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors disabled:opacity-60"
+                                >
+                                  <ImagePlus className="w-4 h-4" />
+                                  <span>{storeImageUrl ? 'تعديل الصورة' : 'إضافة صورة'}</span>
+                                </button>
+
+                                {storeImageUrl && (
+                                  <button
+                                    type="button"
+                                    disabled={isStoreImageBusy}
+                                    onClick={() => {
+                                      if (window.confirm('هل أنت متأكد من حذف صورة المتجر؟')) {
+                                        void handleStoreImageDelete(store as StoreImageRecord);
+                                      }
+                                    }}
+                                    className="inline-flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors disabled:opacity-60"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                    <span>حذف الصورة</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex-1">
-                            <h3 className="text-xl font-bold text-gray-900">{store.name}</h3>
-                            <p className="text-sm text-gray-500" dir="ltr">
-                              {store.slug ? `/s/${store.slug}` : 'بدون رابط بعد'}
-                            </p>
+
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => openStorefront(store)}
+                              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                            >
+                              دخول المتجر
+                            </button>
+
+                            <button
+                              onClick={() => setEditingStoreId(store.id)}
+                              className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                            >
+                              تعديل
+                            </button>
                           </div>
                         </div>
-
-                        {store.description && <p className="text-gray-600 mb-4 line-clamp-2">{store.description}</p>}
-
-                        <div className="flex items-center justify-between mb-4">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                              store.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-                            }`}
-                          >
-                            {store.is_active ? 'نشط' : 'غير نشط'}
-                          </span>
-                        </div>
-
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => openStorefront(store)}
-                            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-                          >
-                            دخول المتجر
-                          </button>
-
-                          <button
-                            onClick={() => setEditingStoreId(store.id)}
-                            className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                          >
-                            تعديل
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </>
