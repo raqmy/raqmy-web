@@ -37,6 +37,11 @@ interface Stats {
   totalRevenue: number;
 }
 
+interface AdminProductUI extends Product {
+  thumbnail_url?: string | null;
+  display_name?: string;
+}
+
 interface AdminUserListItem {
   id: string;
   name: string | null;
@@ -185,7 +190,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<AdminProductUI[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -358,7 +363,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         created_at?: string | null;
       }>;
       const storesData = (storesRes.data || []) as any[];
-      const productsData = productsRes.data || [];
+      const productsData = (productsRes.data || []) as any[];
       const ordersData = (ordersRes.data || []) as Array<{
         user_id?: string | null;
         customer_id?: string | null;
@@ -374,8 +379,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         viewed_at?: string | null;
       }>;
 
+      const productIds = productsData.map((product) => product?.id).filter(Boolean);
+      const thumbnailMap: Record<string, string> = {};
+
+      if (productIds.length > 0) {
+        const { data: productImagesData, error: productImagesError } = await supabase
+          .from('product_images')
+          .select('product_id, image_url, is_primary, display_order, created_at')
+          .in('product_id', productIds)
+          .order('is_primary', { ascending: false })
+          .order('display_order', { ascending: true })
+          .order('created_at', { ascending: true });
+
+        if (productImagesError) {
+          console.error('product_images fetch error:', productImagesError);
+        } else {
+          for (const row of (productImagesData || []) as any[]) {
+            if (row?.product_id && row?.image_url && !thumbnailMap[row.product_id]) {
+              thumbnailMap[row.product_id] = row.image_url;
+            }
+          }
+        }
+      }
+
+      const productsWithThumbnails: AdminProductUI[] = productsData.map((product) => ({
+        ...(product as Product),
+        thumbnail_url:
+          product?.thumbnail_url ||
+          product?.image_url ||
+          product?.cover_image_url ||
+          thumbnailMap[product.id] ||
+          null,
+        display_name: product?.title || product?.name || '—',
+      }));
+
       setStores(storesData || []);
-      setProducts(productsData || []);
+      setProducts(productsWithThumbnails);
 
       const mergedUsersMap = new Map<string, AdminUserListItem>();
 
@@ -2325,11 +2364,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredProducts.map((product) => {
-                const displayName = ((product as any).name ?? (product as any).title ?? '—') as string;
+                const displayName = ((product as any).display_name ?? (product as any).name ?? (product as any).title ?? '—') as string;
+                const thumbnailUrl = ((product as any).thumbnail_url ?? (product as any).image_url ?? null) as string | null;
                 return (
                   <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                    <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                      <Package className="w-12 h-12 text-blue-600" />
+                    <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center overflow-hidden">
+                      {thumbnailUrl ? (
+                        <img
+                          src={thumbnailUrl}
+                          alt={displayName}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <Package className="w-12 h-12 text-blue-600" />
+                      )}
                     </div>
                     <div className="p-6">
                       <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-1">{displayName}</h3>
