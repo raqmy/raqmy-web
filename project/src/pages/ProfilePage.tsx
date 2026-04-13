@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   User,
   Camera,
@@ -73,6 +73,9 @@ type ProfileListedProduct = {
   viewed_at?: string | null;
   created_at?: string | null;
 };
+
+const AVATAR_BUCKET = 'avatars';
+const MAX_AVATAR_SIZE_MB = 5;
 
 const getActiveStoreScopeSlug = () => {
   try {
@@ -165,13 +168,16 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
 
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const { user, profile, updateProfile } = useAuth();
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const [activeTab, setActiveTab] = useState<
     'overview' | 'orders' | 'favorites' | 'viewed' | 'settings'
   >('overview');
 
   const [name, setName] = useState(profile?.name || '');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(((profile as any)?.avatar_url as string) || null);
   const [loading, setLoading] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [message, setMessage] = useState('');
   const [scopeInfo, setScopeInfo] = useState<ScopeInfo | null>(null);
   const [scopeLoading, setScopeLoading] = useState(true);
@@ -204,7 +210,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     setName(profile?.name || '');
-  }, [profile?.name]);
+    setAvatarUrl(((profile as any)?.avatar_url as string) || null);
+  }, [profile?.name, (profile as any)?.avatar_url]);
 
   useEffect(() => {
     const loadScope = async () => {
@@ -606,6 +613,84 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       setMessage('فشل تحديث الملف الشخصي');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAvatarButtonClick = () => {
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file || !user) return;
+
+    if (!file.type.startsWith('image/')) {
+      setMessage('اختر صورة صحيحة فقط');
+      return;
+    }
+
+    if (file.size > MAX_AVATAR_SIZE_MB * 1024 * 1024) {
+      setMessage(`حجم الصورة يجب أن يكون أقل من ${MAX_AVATAR_SIZE_MB}MB`);
+      return;
+    }
+
+    setUploadingAvatar(true);
+    setMessage('');
+
+    try {
+      const extension = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const safeExtension = extension === 'jpeg' ? 'jpg' : extension;
+      const filePath = `${user.id}/avatar.${safeExtension}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(AVATAR_BUCKET)
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicData } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(filePath);
+      const uploadedAvatarUrl = `${publicData.publicUrl}?t=${Date.now()}`;
+
+      const updatePromises = [
+        supabase.from('users_profile').update({ avatar_url: uploadedAvatarUrl }).eq('id', user.id),
+        supabase.from('profiles').update({ avatar_url: uploadedAvatarUrl }).eq('id', user.id),
+      ];
+
+      const results = await Promise.allSettled(updatePromises);
+      const hardFailure = results.every(
+        (result) => result.status === 'fulfilled' && result.value.error
+      );
+
+      if (hardFailure) {
+        const firstError = results.find((result) => result.status === 'fulfilled' && result.value.error) as
+          | PromiseFulfilledResult<any>
+          | undefined;
+        throw firstError?.value.error || new Error('تعذر حفظ رابط الصورة في الملف الشخصي');
+      }
+
+      setAvatarUrl(uploadedAvatarUrl);
+
+      try {
+        await updateProfile({ avatar_url: uploadedAvatarUrl } as any);
+      } catch (contextError) {
+        console.error('updateProfile avatar sync error:', contextError);
+      }
+
+      setMessage('تم تحديث صورة الملف الشخصي بنجاح');
+    } catch (error: any) {
+      console.error('Error uploading avatar:', error);
+      if ((error?.message || '').includes('Bucket not found')) {
+        setMessage('مجلد صور الملفات الشخصية غير موجود في التخزين. أنشئ bucket باسم avatars أولاً');
+      } else {
+        setMessage(error?.message || 'حدث خطأ أثناء رفع صورة الملف الشخصي');
+      }
+    } finally {
+      setUploadingAvatar(false);
     }
   };
 
@@ -1013,11 +1098,38 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
           <div className="relative h-32 bg-gradient-to-r from-blue-600 to-purple-600">
             <div className="absolute -bottom-16 right-8">
               <div className="relative">
-                <div className="w-32 h-32 bg-white rounded-full border-4 border-white flex items-center justify-center text-4xl font-bold text-blue-600">
-                  {(profile.name?.charAt(0) || '?').toUpperCase()}
+                <div className="w-32 h-32 bg-white rounded-full border-4 border-white flex items-center justify-center overflow-hidden text-4xl font-bold text-blue-600">
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={profile.name || 'الصورة الشخصية'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span>{(profile.name?.charAt(0) || '?').toUpperCase()}</span>
+                  )}
                 </div>
-                <button className="absolute bottom-0 left-0 w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white hover:bg-blue-700 shadow-lg">
-                  <Camera className="w-5 h-5" />
+
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarFileChange}
+                  className="hidden"
+                />
+
+                <button
+                  type="button"
+                  onClick={handleAvatarButtonClick}
+                  disabled={uploadingAvatar}
+                  className="absolute bottom-0 left-0 w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white hover:bg-blue-700 shadow-lg disabled:opacity-50"
+                  title="تغيير الصورة الشخصية"
+                >
+                  {uploadingAvatar ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Camera className="w-5 h-5" />
+                  )}
                 </button>
               </div>
             </div>
