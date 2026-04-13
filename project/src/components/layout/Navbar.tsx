@@ -29,6 +29,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
   const { user, profile, signOut } = useAuth();
 
   const scopedStoreSlug = getScopedStoreSlug(currentPage);
+  const avatarUrl = ((profile as any)?.avatar_url as string) || '';
 
   const clearStoreContext = () => {
     try {
@@ -79,6 +80,31 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
 
     onNavigate('auth');
   };
+
+  const renderProfileAvatar = () => {
+    if (avatarUrl) {
+      return (
+        <img
+          src={avatarUrl}
+          alt={profile?.name || 'الصورة الشخصية'}
+          className="w-full h-full rounded-full object-cover"
+          onError={(event) => {
+            const target = event.currentTarget;
+            target.style.display = 'none';
+
+            const fallback = target.parentElement?.querySelector('[data-avatar-fallback]');
+            if (fallback) {
+              (fallback as HTMLElement).style.display = 'flex';
+            }
+          }}
+        />
+      );
+    }
+
+    return null;
+  };
+
+  const fallbackLetter = (profile?.name?.trim()?.charAt(0) || 'U').toUpperCase();
 
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
@@ -160,9 +186,22 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
                   onClick={handleProfileNavigate}
                   className="flex items-center gap-3 px-4 py-2 hover:bg-gray-100 rounded-lg transition-colors"
                 >
-                  <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-                    <User className="w-5 h-5 text-white" />
+                  <div className="w-8 h-8 rounded-full overflow-hidden bg-blue-600 flex items-center justify-center relative">
+                    {renderProfileAvatar()}
+                    <div
+                      data-avatar-fallback
+                      className={`absolute inset-0 items-center justify-center text-white ${
+                        avatarUrl ? 'hidden' : 'flex'
+                      }`}
+                    >
+                      {avatarUrl ? (
+                        <User className="w-5 h-5 text-white" />
+                      ) : (
+                        <span className="text-sm font-bold">{fallbackLetter}</span>
+                      )}
+                    </div>
                   </div>
+
                   <div className="text-right">
                     <p className="text-sm font-semibold text-gray-900">{profile.name}</p>
                     <p className="text-xs text-gray-500">
