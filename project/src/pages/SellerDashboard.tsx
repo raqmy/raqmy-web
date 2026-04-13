@@ -318,6 +318,78 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
+
+  useEffect(() => {
+    if (!editingStoreId) return;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const findEditStoreModalScrollable = () => {
+      const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5')) as HTMLElement[];
+      const titleElement = headings.find((el) => el.textContent?.includes('تعديل المتجر'));
+      if (!titleElement) return null;
+
+      let node = titleElement.parentElement as HTMLElement | null;
+      while (node && node !== document.body) {
+        const style = window.getComputedStyle(node);
+        const isScrollable = (style.overflowY === 'auto' || style.overflowY === 'scroll') && node.scrollHeight > node.clientHeight;
+        if (isScrollable) return node;
+        node = node.parentElement;
+      }
+
+      return null;
+    };
+
+    const hideUnneededEditStoreContent = () => {
+      const allElements = Array.from(document.querySelectorAll('div, p, span, h1, h2, h3, h4, h5')) as HTMLElement[];
+
+      allElements.forEach((element) => {
+        const content = element.textContent?.trim() || '';
+
+        if (content.includes('المنتجات المرتبطة بالمتجر')) {
+          const section = element.closest('div.border-t, div.mt-6, div.pt-6, div') as HTMLElement | null;
+          if (section) section.style.display = 'none';
+        }
+
+        if (content.includes('يمكنك تعديل صورة المتجر من داخل نافذة تعديل المتجر')) {
+          element.style.display = 'none';
+        }
+      });
+
+      const scrollable = findEditStoreModalScrollable();
+      if (scrollable) {
+        scrollable.style.overscrollBehavior = 'contain';
+        scrollable.style.scrollBehavior = 'smooth';
+      }
+    };
+
+    hideUnneededEditStoreContent();
+    const cleanupTimer = window.setInterval(hideUnneededEditStoreContent, 400);
+
+    const wheelHandler = (event: WheelEvent) => {
+      const scrollable = findEditStoreModalScrollable();
+      if (!scrollable) return;
+
+      const rect = scrollable.getBoundingClientRect();
+      const insideX = event.clientX >= rect.left && event.clientX <= rect.right;
+      const insideY = event.clientY >= rect.top && event.clientY <= rect.bottom;
+
+      if (insideX && insideY) {
+        scrollable.scrollTop += event.deltaY;
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener('wheel', wheelHandler, { passive: false });
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      window.removeEventListener('wheel', wheelHandler);
+      window.clearInterval(cleanupTimer);
+    };
+  }, [editingStoreId]);
+
   const normalizeProduct = (row: any): NormalizedProduct => {
     const name = row?.name ?? row?.title ?? '';
     const user_id = row?.user_id ?? row?.merchant_id ?? null;
@@ -2783,11 +2855,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                               {store.description && (
                                 <p className="text-gray-600 mb-3 line-clamp-2">{store.description}</p>
                               )}
-
-                              <div className="inline-flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
-                                <ImagePlus className="w-4 h-4" />
-                                <span>يمكنك تعديل صورة المتجر من داخل نافذة تعديل المتجر</span>
-                              </div>
                             </div>
                           </div>
 
@@ -4226,91 +4293,96 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             }}
           />
 
-          <div className="fixed inset-0 z-[70] pointer-events-none flex justify-center px-4">
-            <div className="pointer-events-auto relative w-full max-w-xl" style={{ marginTop: '5.75rem' }}>
-              <div className="rounded-2xl border border-gray-200 bg-white/95 backdrop-blur-sm p-4 shadow-xl">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-right">
-                    <h3 className="text-lg font-bold text-gray-900">صورة المتجر</h3>
-                    <p className="text-sm text-gray-500">يمكنك تعديل الصورة أو حذفها من هنا، وعند عدم وجود صورة ستظهر الصورة الكلاسيكية.</p>
-                  </div>
 
-                  <div className="relative shrink-0">
-                    <div className="h-24 w-24 overflow-hidden rounded-2xl border-4 border-white bg-gray-100 shadow-sm">
-                      {editingStoreImageUrl ? (
-                        <img
-                          src={editingStoreImageUrl}
-                          alt={editingStore.name}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-600 to-purple-600">
-                          <StoreIcon className="h-10 w-10 text-white" />
+          <div className="fixed inset-0 z-[70] pointer-events-none flex justify-center px-4">
+            <div className="pointer-events-none relative w-full max-w-3xl" style={{ marginTop: '6.5rem' }}>
+              <div className="flex justify-end">
+                <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-gray-200 bg-white shadow-2xl">
+                  <div className="flex items-center gap-4 p-4">
+                    <div className="relative shrink-0">
+                      <div className="h-24 w-24 overflow-hidden rounded-2xl border border-gray-200 bg-gray-100">
+                        {editingStoreImageUrl ? (
+                          <img
+                            src={editingStoreImageUrl}
+                            alt={editingStore.name}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-600 to-purple-600">
+                            <StoreIcon className="h-10 w-10 text-white" />
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isEditingStoreImageBusy}
+                        onClick={() => {
+                          setStoreImageError('');
+                          setStoreImageSuccess('');
+                          setStoreImageMenuOpenId((current) => (current === editingStore.id ? null : editingStore.id));
+                        }}
+                        className="absolute -bottom-2 -left-2 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        <ImagePlus className="h-5 w-5" />
+                      </button>
+
+                      {storeImageMenuOpenId === editingStore.id && (
+                        <div className="absolute left-0 top-full z-20 mt-3 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
+                          <button
+                            type="button"
+                            disabled={isEditingStoreImageBusy}
+                            onClick={() => {
+                              const input = document.getElementById(`store-image-edit-input-${editingStore.id}`) as HTMLInputElement | null;
+                              input?.click();
+                            }}
+                            className="flex w-full items-center gap-2 px-4 py-3 text-right text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+                          >
+                            <ImagePlus className="h-4 w-4 text-blue-600" />
+                            <span>{editingStoreImageUrl ? 'تعديل الصورة' : 'إضافة صورة'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isEditingStoreImageBusy || !editingStoreImageUrl}
+                            onClick={() => {
+                              setStoreImageMenuOpenId(null);
+                              if (window.confirm('هل أنت متأكد من حذف صورة المتجر؟')) {
+                                void handleStoreImageDelete(editingStore as StoreImageRecord);
+                              }
+                            }}
+                            className="flex w-full items-center gap-2 px-4 py-3 text-right text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            <span>حذف الصورة</span>
+                          </button>
                         </div>
                       )}
                     </div>
 
-                    <button
-                      type="button"
-                      disabled={isEditingStoreImageBusy}
-                      onClick={() => {
-                        setStoreImageError('');
-                        setStoreImageSuccess('');
-                        setStoreImageMenuOpenId((current) => (current === editingStore.id ? null : editingStore.id));
-                      }}
-                      className="absolute -bottom-2 -left-2 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-700 disabled:opacity-60"
-                    >
-                      <ImagePlus className="h-5 w-5" />
-                    </button>
+                    <div className="min-w-0 flex-1 text-right">
+                      <h3 className="text-lg font-bold text-gray-900">صورة المتجر</h3>
+                      <p className="mt-1 text-sm text-gray-500">
+                        يمكنك تعديل الصورة أو حذفها من هنا، وعند عدم وجود صورة ستظهر الصورة الكلاسيكية.
+                      </p>
 
-                    {storeImageMenuOpenId === editingStore.id && (
-                      <div className="absolute left-0 top-full z-20 mt-3 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
-                        <button
-                          type="button"
-                          disabled={isEditingStoreImageBusy}
-                          onClick={() => {
-                            const input = document.getElementById(`store-image-edit-input-${editingStore.id}`) as HTMLInputElement | null;
-                            input?.click();
-                          }}
-                          className="flex w-full items-center gap-2 px-4 py-3 text-right text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
-                        >
-                          <ImagePlus className="h-4 w-4 text-blue-600" />
-                          <span>{editingStoreImageUrl ? 'تعديل الصورة' : 'إضافة صورة'}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={isEditingStoreImageBusy || !editingStoreImageUrl}
-                          onClick={() => {
-                            setStoreImageMenuOpenId(null);
-                            if (window.confirm('هل أنت متأكد من حذف صورة المتجر؟')) {
-                              void handleStoreImageDelete(editingStore as StoreImageRecord);
-                            }
-                          }}
-                          className="flex w-full items-center gap-2 px-4 py-3 text-right text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          <span>حذف الصورة</span>
-                        </button>
-                      </div>
-                    )}
+                      {(storeImageError || storeImageSuccess) && (
+                        <div className="mt-3">
+                          {storeImageError && (
+                            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                              {storeImageError}
+                            </div>
+                          )}
+                          {!storeImageError && storeImageSuccess && (
+                            <div className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                              {storeImageSuccess}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-
-                {(storeImageError || storeImageSuccess) && (
-                  <div className="mt-4">
-                    {storeImageError && (
-                      <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {storeImageError}
-                      </div>
-                    )}
-                    {!storeImageError && storeImageSuccess && (
-                      <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-                        {storeImageSuccess}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
           </div>
