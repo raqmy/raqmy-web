@@ -1992,32 +1992,45 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   }, [products, productsSearchQuery, productsStatusFilter, productsSortBy]);
 
   const filteredStores = useMemo(() => {
-    const query = storesSearchQuery.trim().toLowerCase();
+    try {
+      const query = storesSearchQuery.trim().toLowerCase();
+      const storesList = safeArray(stores) as StoreImageRecord[];
 
-    const result = stores.filter((store) => {
-      const matchesSearch =
-        query === '' ||
-        String(store.name || '').toLowerCase().includes(query) ||
-        String((store as any).slug || '').toLowerCase().includes(query) ||
-        String((store as any).description || '').toLowerCase().includes(query);
+      const result = storesList.filter((store) => {
+        const storeName = String(store?.name || '').toLowerCase();
+        const storeSlug = String((store as any)?.slug || '').toLowerCase();
+        const storeDescription = String((store as any)?.description || '').toLowerCase();
 
-      const matchesStatus =
-        storesStatusFilter === 'all' ||
-        (storesStatusFilter === 'active' && Boolean(store.is_active)) ||
-        (storesStatusFilter === 'inactive' && !Boolean(store.is_active));
+        const matchesSearch =
+          query === '' ||
+          storeName.includes(query) ||
+          storeSlug.includes(query) ||
+          storeDescription.includes(query);
 
-      return matchesSearch && matchesStatus;
-    });
+        const matchesStatus =
+          storesStatusFilter === 'all' ||
+          (storesStatusFilter === 'active' && Boolean(store?.is_active)) ||
+          (storesStatusFilter === 'inactive' && !Boolean(store?.is_active));
 
-    return [...result].sort((a, b) => {
-      switch (storesSortBy) {
-        case 'name':
-          return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
-        case 'newest':
-        default:
-          return new Date((b as any).created_at || 0).getTime() - new Date((a as any).created_at || 0).getTime();
-      }
-    });
+        return matchesSearch && matchesStatus;
+      });
+
+      return [...result].sort((a, b) => {
+        switch (storesSortBy) {
+          case 'name':
+            return String(a?.name || '').localeCompare(String(b?.name || ''), 'ar');
+          case 'newest':
+          default:
+            return (
+              new Date((b as any)?.created_at || 0).getTime() -
+              new Date((a as any)?.created_at || 0).getTime()
+            );
+        }
+      });
+    } catch (error) {
+      console.error('Error while filtering stores:', error);
+      return [] as StoreImageRecord[];
+    }
   }, [stores, storesSearchQuery, storesStatusFilter, storesSortBy]);
 
   const editingStore = useMemo(() => {
@@ -2815,17 +2828,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {filteredStores.map((store) => {
-                      const storeImageUrl = getStoreImageUrl(store as StoreImageRecord);
-                      const isStoreImageBusy = storeImageUploadingId === store.id;
+                      const normalizedStore = store as StoreImageRecord;
+                      const storeImageUrl = getStoreImageUrl(normalizedStore);
+                      const storeName = String(normalizedStore?.name || 'متجر');
+                      const storeSlug = String((normalizedStore as any)?.slug || '');
+                      const storeDescription = String((normalizedStore as any)?.description || '').trim();
+                      const isStoreActive = Boolean(normalizedStore?.is_active);
 
                       return (
-                        <div key={store.id} className="bg-white rounded-xl shadow-sm p-6">
+                        <div key={normalizedStore.id} className="bg-white rounded-xl shadow-sm p-6">
                           <div className="flex items-start gap-4 mb-4">
                             <div className="relative w-24 h-24 rounded-xl overflow-hidden border border-gray-200 bg-gray-50 shrink-0">
                               {storeImageUrl ? (
                                 <img
                                   src={storeImageUrl}
-                                  alt={store.name}
+                                  alt={storeName}
                                   className="w-full h-full object-cover"
                                 />
                               ) : (
@@ -2838,30 +2855,30 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-3 mb-2">
                                 <div>
-                                  <h3 className="text-xl font-bold text-gray-900">{store.name}</h3>
+                                  <h3 className="text-xl font-bold text-gray-900">{storeName}</h3>
                                   <p className="text-sm text-gray-500" dir="ltr">
-                                    {store.slug ? `/s/${store.slug}` : 'بدون رابط بعد'}
+                                    {storeSlug ? `/s/${storeSlug}` : 'بدون رابط بعد'}
                                   </p>
                                 </div>
 
                                 <span
                                   className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                                    store.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                                    isStoreActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
                                   }`}
                                 >
-                                  {store.is_active ? 'نشط' : 'غير نشط'}
+                                  {isStoreActive ? 'نشط' : 'غير نشط'}
                                 </span>
                               </div>
 
-                              {store.description && (
-                                <p className="text-gray-600 mb-3 line-clamp-2">{store.description}</p>
-                              )}
+                              {storeDescription ? (
+                                <p className="text-gray-600 mb-3 line-clamp-2">{storeDescription}</p>
+                              ) : null}
                             </div>
                           </div>
 
                           <div className="flex gap-2">
                             <button
-                              onClick={() => openStorefront(store)}
+                              onClick={() => openStorefront(normalizedStore)}
                               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
                             >
                               دخول المتجر
@@ -2872,7 +2889,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                 setStoreImageError('');
                                 setStoreImageSuccess('');
                                 setStoreImageMenuOpenId(null);
-                                setEditingStoreId(store.id);
+                                setEditingStoreId(normalizedStore.id);
                               }}
                               className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
                             >
