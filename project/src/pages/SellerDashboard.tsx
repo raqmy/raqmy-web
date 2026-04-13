@@ -25,6 +25,7 @@ import {
   Download,
   Paperclip,
   X,
+  Search,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Store, Product } from '../lib/supabase';
