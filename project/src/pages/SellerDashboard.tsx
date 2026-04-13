@@ -2051,53 +2051,45 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   }, [editingStoreId, showCreateStoreModal]);
 
   useEffect(() => {
-    if (!editingStoreId) return;
+    const isStoreModalOpen = Boolean(editingStoreId) || showCreateStoreModal;
+    if (!isStoreModalOpen) return;
 
-    const hideModalSections = () => {
-      try {
-        const textTargets = [
-          'عرض هذا المتجر في السوق العام',
-          'المنتجات المرتبطة بالمتجر',
-          'اختر المنتجات التي تريد ربطها بهذا المتجر',
-          'لا توجد منتجات لديك حالياً',
-          'يمكنك تعديل صورة المتجر من داخل نافذة تعديل المتجر',
-        ];
+    const hiddenLabels = [
+      'عرض هذا المتجر في السوق العام',
+      'المنتجات المرتبطة بالمتجر',
+      'اختر المنتجات التي تريد ربطها بهذا المتجر',
+      'لا توجد منتجات لديك حالياً',
+      'يمكنك تعديل صورة المتجر من داخل نافذة تعديل المتجر',
+    ];
 
-        const elements = Array.from(
-          document.querySelectorAll('label, p, span, div, h1, h2, h3, h4, h5, h6')
-        ) as HTMLElement[];
+    const hideStoreModalExtras = () => {
+      const elements = Array.from(document.querySelectorAll('label, p, span, div, h1, h2, h3, h4, h5, h6')) as HTMLElement[];
 
-        elements.forEach((element) => {
-          const content = (element.textContent || '').replace(/\s+/g, ' ').trim();
-          if (!content) return;
-          if (!textTargets.some((text) => content.includes(text))) return;
+      elements.forEach((element) => {
+        const content = (element.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!content) return;
+        if (!hiddenLabels.some((label) => content.includes(label))) return;
 
-          let target: HTMLElement | null = element;
-          for (let i = 0; i < 4 && target?.parentElement; i += 1) {
-            const parent = target.parentElement as HTMLElement;
-            const parentText = (parent.textContent || '').replace(/\s+/g, ' ').trim();
-            if (parentText.includes(content) && parent.clientHeight <= 280) {
-              target = parent;
-            }
-          }
+        let target: HTMLElement | null = element;
+        for (let i = 0; i < 5 && target?.parentElement; i += 1) {
+          const parent = target.parentElement as HTMLElement;
+          const parentText = (parent.textContent || '').replace(/\s+/g, ' ').trim();
+          if (parentText.includes(content)) target = parent;
+        }
 
-          if (target) {
-            target.style.display = 'none';
-          }
-        });
-      } catch (error) {
-        console.error('hideModalSections error:', error);
-      }
+        if (target) target.style.display = 'none';
+      });
     };
 
-    const timer = window.setInterval(hideModalSections, 250);
-    const initial = window.setTimeout(hideModalSections, 80);
+    const initial = window.setTimeout(hideStoreModalExtras, 50);
+    const observer = new MutationObserver(() => hideStoreModalExtras());
+    observer.observe(document.body, { childList: true, subtree: true });
 
     return () => {
-      window.clearInterval(timer);
       window.clearTimeout(initial);
+      observer.disconnect();
     };
-  }, [editingStoreId]);
+  }, [editingStoreId, showCreateStoreModal]);
 
   useEffect(() => {
     if (!storeImageMenuOpenId) return;
@@ -4275,11 +4267,16 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         </div>
       )}
 
-      <CreateStoreModal
-        isOpen={showCreateStoreModal}
-        onClose={() => setShowCreateStoreModal(false)}
-        onSuccess={fetchDashboardData}
-      />
+      {showCreateStoreModal && (
+        <CreateStoreModal
+          isOpen={true}
+          onClose={() => setShowCreateStoreModal(false)}
+          onSuccess={async () => {
+            setStoreImageMenuOpenId(null);
+            await fetchDashboardData();
+          }}
+        />
+      )}
 
       <CreateProductModal
         isOpen={showCreateProductModal}
