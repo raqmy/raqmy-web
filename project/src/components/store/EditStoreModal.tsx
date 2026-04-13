@@ -7,7 +7,6 @@ import {
   Trash2,
   Camera,
   Upload,
-  Image as ImageIcon,
 } from 'lucide-react';
 import { supabase, Store, StoreCategory } from '../../lib/supabase';
 import { CopyLinkButton } from '../shared/CopyLinkButton';
@@ -267,11 +266,12 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
         await supabase.storage.from(STORE_IMAGES_BUCKET).remove([previousPath]);
       }
 
+      const resolvedFields = resolveStoreImageFields(store);
       const refreshedStore = {
         ...store,
-        [resolveStoreImageFields(store).urlField]: result.publicUrl,
-        ...(resolveStoreImageFields(store).pathField
-          ? { [resolveStoreImageFields(store).pathField as string]: result.filePath }
+        [resolvedFields.urlField]: result.publicUrl,
+        ...(resolvedFields.pathField
+          ? { [resolvedFields.pathField as string]: result.filePath }
           : {}),
       };
 
@@ -312,11 +312,12 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
 
       await updateStoreImageReference(store, null, null);
 
+      const resolvedFields = resolveStoreImageFields(store);
       const refreshedStore = {
         ...store,
-        [resolveStoreImageFields(store).urlField]: null,
-        ...(resolveStoreImageFields(store).pathField
-          ? { [resolveStoreImageFields(store).pathField as string]: null }
+        [resolvedFields.urlField]: null,
+        ...(resolvedFields.pathField
+          ? { [resolvedFields.pathField as string]: null }
           : {}),
       };
 
@@ -446,299 +447,301 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
   const currentImageUrl = getStoreImageUrl(store);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl">
-        <div className="sticky top-0 z-10 bg-white border-b border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <StoreIcon className="w-5 h-5 text-blue-600" />
+    <div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto">
+      <div className="min-h-screen flex items-center justify-center p-4 sm:p-6">
+        <div className="bg-white rounded-xl w-full max-w-2xl h-[calc(100vh-2rem)] sm:h-[calc(100vh-3rem)] shadow-2xl flex flex-col">
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-200 p-6 shrink-0 rounded-t-xl">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <StoreIcon className="w-5 h-5 text-blue-600" />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900">تعديل المتجر</h2>
               </div>
-              <h2 className="text-2xl font-bold text-gray-900">تعديل المتجر</h2>
+
+              <button
+                onClick={onClose}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                type="button"
+              >
+                <X className="w-6 h-6" />
+              </button>
             </div>
 
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-              type="button"
-            >
-              <X className="w-6 h-6" />
-            </button>
+            {store && (
+              <CopyLinkButton
+                url={`${window.location.origin}/#/storefront-${store.slug}`}
+                label="نسخ رابط المتجر"
+                variant="minimal"
+              />
+            )}
           </div>
 
-          {store && (
-            <CopyLinkButton
-              url={`${window.location.origin}/#/storefront-${store.slug}`}
-              label="نسخ رابط المتجر"
-              variant="minimal"
-            />
-          )}
-        </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <form onSubmit={handleSubmit} className="p-6 space-y-6 min-h-full">
+              {error && (
+                <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <span className="text-sm">{error}</span>
+                </div>
+              )}
 
-        <div className="max-h-[calc(90vh-110px)] overflow-y-auto">
-          <form onSubmit={handleSubmit} className="p-6 space-y-6">
-            {error && (
-              <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                <span className="text-sm">{error}</span>
-              </div>
-            )}
+              <div className="border border-gray-200 rounded-xl p-4 bg-gray-50">
+                <div className="flex items-start gap-4">
+                  <div className="relative shrink-0" ref={imageMenuRef}>
+                    <div className="w-24 h-24 rounded-2xl overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
+                      {currentImageUrl ? (
+                        <img
+                          src={currentImageUrl}
+                          alt={formData.name || 'صورة المتجر'}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                          <StoreIcon className="w-10 h-10 text-white" />
+                        </div>
+                      )}
+                    </div>
 
-            <div className="border border-gray-200 rounded-xl p-4 bg-gray-50">
-              <div className="flex items-start gap-4">
-                <div className="relative" ref={imageMenuRef}>
-                  <div className="w-24 h-24 rounded-2xl overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
-                    {currentImageUrl ? (
-                      <img
-                        src={currentImageUrl}
-                        alt={formData.name || 'صورة المتجر'}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                        <StoreIcon className="w-10 h-10 text-white" />
+                    <button
+                      type="button"
+                      onClick={() => setImageMenuOpen((prev) => !prev)}
+                      disabled={imageUploading}
+                      className="absolute -bottom-2 -left-2 w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-lg disabled:opacity-50"
+                      title="خيارات صورة المتجر"
+                    >
+                      {imageUploading ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Camera className="w-5 h-5" />
+                      )}
+                    </button>
+
+                    {imageMenuOpen && (
+                      <div className="absolute top-full mt-3 left-0 w-44 bg-white border border-gray-200 rounded-xl shadow-xl z-20 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImageMenuOpen(false);
+                            fileInputRef.current?.click();
+                          }}
+                          className="w-full px-4 py-3 text-right text-sm hover:bg-gray-50 flex items-center gap-2"
+                        >
+                          <Upload className="w-4 h-4 text-blue-600" />
+                          <span>تعديل الصورة</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleStoreImageDelete}
+                          className="w-full px-4 py-3 text-right text-sm hover:bg-red-50 text-red-600 flex items-center gap-2 border-t border-gray-100"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>حذف الصورة</span>
+                        </button>
                       </div>
                     )}
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => handleStoreImageSelected(e.target.files?.[0] || null)}
+                    />
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setImageMenuOpen((prev) => !prev)}
-                    disabled={imageUploading}
-                    className="absolute -bottom-2 -left-2 w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-lg disabled:opacity-50"
-                    title="خيارات صورة المتجر"
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-bold text-gray-900 mb-1">صورة المتجر</h3>
+                    <p className="text-sm text-gray-600 leading-6">
+                      يمكنك تعديل الصورة أو حذفها من هنا، وعند عدم وجود صورة ستظهر الصورة الكلاسيكية.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  اسم المتجر <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  وصف المتجر
+                </label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  rows={4}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    تصنيف المتجر
+                  </label>
+                  <select
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
-                    {imageUploading ? (
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.name}>
+                        {cat.icon} {cat.name_ar}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    العملة الافتراضية
+                  </label>
+                  <select
+                    value={formData.default_currency}
+                    onChange={(e) =>
+                      setFormData({ ...formData, default_currency: e.target.value })
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="SAR">ريال سعودي (SAR)</option>
+                    <option value="USD">دولار أمريكي (USD)</option>
+                    <option value="EUR">يورو (EUR)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
+                <input
+                  type="checkbox"
+                  id="is_active_store_edit"
+                  checked={formData.is_active}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <label
+                  htmlFor="is_active_store_edit"
+                  className="text-sm text-gray-700 cursor-pointer"
+                >
+                  المتجر نشط
+                </label>
+              </div>
+
+              <div className="border-t border-gray-200 pt-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">وسائل التواصل</h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      البريد الإلكتروني
+                    </label>
+                    <input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      dir="ltr"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Twitter / X
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.twitter}
+                      onChange={(e) => setFormData({ ...formData, twitter: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      dir="ltr"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Instagram
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.instagram}
+                      onChange={(e) => setFormData({ ...formData, instagram: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      dir="ltr"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Telegram
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.telegram}
+                      onChange={(e) => setFormData({ ...formData, telegram: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      dir="ltr"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 pt-6 pb-2 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {deleting ? (
+                    <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Camera className="w-5 h-5" />
-                    )}
-                  </button>
-
-                  {imageMenuOpen && (
-                    <div className="absolute top-full mt-3 left-0 w-44 bg-white border border-gray-200 rounded-xl shadow-xl z-20 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setImageMenuOpen(false);
-                          fileInputRef.current?.click();
-                        }}
-                        className="w-full px-4 py-3 text-right text-sm hover:bg-gray-50 flex items-center gap-2"
-                      >
-                        <Upload className="w-4 h-4 text-blue-600" />
-                        <span>تعديل الصورة</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleStoreImageDelete}
-                        className="w-full px-4 py-3 text-right text-sm hover:bg-red-50 text-red-600 flex items-center gap-2 border-t border-gray-100"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        <span>حذف الصورة</span>
-                      </button>
-                    </div>
+                      <span>جاري الحذف...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-5 h-5" />
+                      <span>حذف المتجر</span>
+                    </>
                   )}
+                </button>
 
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => handleStoreImageSelected(e.target.files?.[0] || null)}
-                  />
-                </div>
+                <div className="flex-1"></div>
 
-                <div className="flex-1">
-                  <h3 className="text-lg font-bold text-gray-900 mb-1">صورة المتجر</h3>
-                  <p className="text-sm text-gray-600 leading-6">
-                    يمكنك تعديل الصورة أو حذفها من هنا، وعند عدم وجود صورة ستظهر الصورة الكلاسيكية.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                اسم المتجر <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                وصف المتجر
-              </label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  تصنيف المتجر
-                </label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
                 >
-                  {categories.map((cat) => (
-                    <option key={cat.id} value={cat.name}>
-                      {cat.icon} {cat.name_ar}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  إلغاء
+                </button>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  العملة الافتراضية
-                </label>
-                <select
-                  value={formData.default_currency}
-                  onChange={(e) =>
-                    setFormData({ ...formData, default_currency: e.target.value })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
                 >
-                  <option value="SAR">ريال سعودي (SAR)</option>
-                  <option value="USD">دولار أمريكي (USD)</option>
-                  <option value="EUR">يورو (EUR)</option>
-                </select>
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>جاري الحفظ...</span>
+                    </>
+                  ) : (
+                    'حفظ التغييرات'
+                  )}
+                </button>
               </div>
-            </div>
-
-            <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
-              <input
-                type="checkbox"
-                id="is_active_store_edit"
-                checked={formData.is_active}
-                onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-              />
-              <label
-                htmlFor="is_active_store_edit"
-                className="text-sm text-gray-700 cursor-pointer"
-              >
-                المتجر نشط
-              </label>
-            </div>
-
-            <div className="border-t border-gray-200 pt-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">وسائل التواصل</h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    البريد الإلكتروني
-                  </label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    dir="ltr"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Twitter / X
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.twitter}
-                    onChange={(e) => setFormData({ ...formData, twitter: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    dir="ltr"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Instagram
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.instagram}
-                    onChange={(e) => setFormData({ ...formData, instagram: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    dir="ltr"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Telegram
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.telegram}
-                    onChange={(e) => setFormData({ ...formData, telegram: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    dir="ltr"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 pt-6 border-t border-gray-200">
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={deleting}
-                className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
-              >
-                {deleting ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>جاري الحذف...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-5 h-5" />
-                    <span>حذف المتجر</span>
-                  </>
-                )}
-              </button>
-
-              <div className="flex-1"></div>
-
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
-              >
-                إلغاء
-              </button>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>جاري الحفظ...</span>
-                  </>
-                ) : (
-                  'حفظ التغييرات'
-                )}
-              </button>
-            </div>
-          </form>
+            </form>
+          </div>
         </div>
       </div>
     </div>
