@@ -1,13 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Search,
-  Filter,
-  Download,
-  Star,
-  Store as StoreIcon,
-  X,
-  SlidersHorizontal,
-} from 'lucide-react';
+import { Search, Download, Star } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 
 interface ProductWithDetails extends Product {
@@ -24,22 +16,12 @@ interface MarketplacePageProps {
 
 type SortOption = 'newest' | 'popular' | 'price_low' | 'price_high';
 
-interface StoreFilterOption {
-  id: string;
-  name: string;
-}
-
 export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) => {
   const [products, setProducts] = useState<ProductWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
-
-  const [selectedStoreId, setSelectedStoreId] = useState<string>('all');
-  const [minPrice, setMinPrice] = useState('');
-  const [maxPrice, setMaxPrice] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     fetchProducts();
@@ -91,17 +73,11 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
           .order('display_order', { ascending: true }),
 
         storeIds.length > 0
-          ? supabase
-              .from('stores')
-              .select('id, name, slug, category')
-              .in('id', storeIds)
+          ? supabase.from('stores').select('id, name, slug, category').in('id', storeIds)
           : Promise.resolve({ data: [] as any[] }),
 
         sellerIds.length > 0
-          ? supabase
-              .from('users_profile')
-              .select('id, name')
-              .in('id', sellerIds)
+          ? supabase.from('users_profile').select('id, name').in('id', sellerIds)
           : Promise.resolve({ data: [] as any[] }),
       ]);
 
@@ -149,53 +125,25 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
     }
   };
 
-  const storeOptions = useMemo<StoreFilterOption[]>(() => {
-    const map = new Map<string, string>();
-
-    products.forEach((product) => {
-      if (product.store?.id && product.store?.name) {
-        map.set(product.store.id, product.store.name);
-      }
-    });
-
-    return Array.from(map.entries())
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'ar'));
-  }, [products]);
-
   const filteredProducts = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    const parsedMin = minPrice.trim() === '' ? null : Number(minPrice);
-    const parsedMax = maxPrice.trim() === '' ? null : Number(maxPrice);
 
-    const safeMin = parsedMin !== null && !Number.isNaN(parsedMin) ? parsedMin : null;
-    const safeMax = parsedMax !== null && !Number.isNaN(parsedMax) ? parsedMax : null;
-
-    let result = products.filter((product) => {
+    const result = products.filter((product) => {
       const displayName = (product.display_name ?? '').toLowerCase();
       const description = String((product as any).description ?? '').toLowerCase();
       const storeName = String(product.store?.name ?? '').toLowerCase();
       const sellerName = String(product.seller?.name ?? '').toLowerCase();
 
-      const productPrice = Number(product.price ?? 0);
-
-      const matchesSearch =
+      return (
         query === '' ||
         displayName.includes(query) ||
         description.includes(query) ||
         storeName.includes(query) ||
-        sellerName.includes(query);
-
-      const matchesStore =
-        selectedStoreId === 'all' || product.store?.id === selectedStoreId;
-
-      const matchesMinPrice = safeMin === null || productPrice >= safeMin;
-      const matchesMaxPrice = safeMax === null || productPrice <= safeMax;
-
-      return matchesSearch && matchesStore && matchesMinPrice && matchesMaxPrice;
+        sellerName.includes(query)
+      );
     });
 
-    result = [...result].sort((a, b) => {
+    return [...result].sort((a, b) => {
       const aPrice = Number(a.price ?? 0);
       const bPrice = Number(b.price ?? 0);
 
@@ -217,17 +165,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
           return bCreatedAt - aCreatedAt;
       }
     });
-
-    return result;
-  }, [products, searchQuery, selectedStoreId, minPrice, maxPrice, sortBy]);
-
-  const clearFilters = () => {
-    setSearchQuery('');
-    setSelectedStoreId('all');
-    setMinPrice('');
-    setMaxPrice('');
-    setSortBy('newest');
-  };
+  }, [products, searchQuery, sortBy]);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8" dir="rtl">
@@ -241,30 +179,10 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                   ابحث في المنتجات الرقمية واستعرضها بسهولة
                 </p>
               </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowFilters((prev) => !prev)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  <SlidersHorizontal className="w-4 h-4" />
-                  <span>الفلاتر</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                  <span>مسح الكل</span>
-                </button>
-              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-              <div className="lg:col-span-6 relative">
+              <div className="lg:col-span-8 relative">
                 <Search className="w-5 h-5 text-gray-400 absolute top-1/2 -translate-y-1/2 right-4" />
                 <input
                   type="text"
@@ -275,7 +193,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                 />
               </div>
 
-              <div className="lg:col-span-3">
+              <div className="lg:col-span-4">
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as SortOption)}
@@ -287,72 +205,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                   <option value="price_high">السعر: من الأعلى للأقل</option>
                 </select>
               </div>
-
-              <div className="lg:col-span-3 flex items-center justify-between rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                <span>عدد النتائج</span>
-                <span className="font-bold">{filteredProducts.length}</span>
-              </div>
             </div>
-
-            {showFilters && (
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2 border-t border-gray-100">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    المتجر
-                  </label>
-                  <div className="relative">
-                    <StoreIcon className="w-4 h-4 text-gray-400 absolute top-1/2 -translate-y-1/2 right-3" />
-                    <select
-                      value={selectedStoreId}
-                      onChange={(e) => setSelectedStoreId(e.target.value)}
-                      className="w-full pr-10 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                    >
-                      <option value="all">كل المتاجر</option>
-                      {storeOptions.map((store) => (
-                        <option key={store.id} value={store.id}>
-                          {store.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    أقل سعر
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={minPrice}
-                    onChange={(e) => setMinPrice(e.target.value)}
-                    placeholder="0"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    أعلى سعر
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={maxPrice}
-                    onChange={(e) => setMaxPrice(e.target.value)}
-                    placeholder="1000"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
-                </div>
-
-                <div className="flex items-end">
-                  <div className="w-full rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-600 flex items-center gap-2">
-                    <Filter className="w-4 h-4" />
-                    <span>يمكنك دمج البحث مع السعر والترتيب والمتجر</span>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
@@ -364,17 +217,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
               <Search className="w-8 h-8 text-gray-400" />
             </div>
             <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد نتائج</h3>
-            <p className="text-gray-500 mb-4">
-              جرّب تغيير كلمات البحث أو مسح بعض الفلاتر
-            </p>
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-            >
-              <X className="w-4 h-4" />
-              <span>مسح الفلاتر</span>
-            </button>
+            <p className="text-gray-500">جرّب تغيير كلمات البحث</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -401,7 +244,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                     {product.display_name}
                   </h3>
 
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between">
                     <div className="text-blue-600 font-bold text-xl">
                       {Number(product.price ?? 0)} ريال
                     </div>
@@ -409,19 +252,6 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                     <div className="flex items-center gap-1 text-sm text-gray-500">
                       <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
                       <span>4.8</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-sm text-gray-500">
-                    <div className="flex items-center gap-1 min-w-0">
-                      <StoreIcon className="w-4 h-4 flex-shrink-0" />
-                      <span className="truncate">
-                        {product.store?.name || product.seller?.name || 'متجر رقمي'}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <span>{Number((product as any).sales_count ?? 0)} مبيعات</span>
                     </div>
                   </div>
                 </div>
