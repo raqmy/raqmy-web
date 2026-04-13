@@ -2037,6 +2037,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     setStoreImageMenuOpenId(null);
   }, [editingStoreId]);
 
+
   useEffect(() => {
     const isStoreModalOpen = Boolean(editingStoreId) || showCreateStoreModal;
     if (!isStoreModalOpen) return;
@@ -2044,258 +2045,77 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     const previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    const findModalTitle = () => {
-      const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5')) as HTMLElement[];
-      return headings.find((el) => {
-        const text = (el.textContent || '').trim();
-        return text.includes('تعديل المتجر') || text.includes('إنشاء متجر') || text.includes('إضافة متجر');
-      }) || null;
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
     };
+  }, [editingStoreId, showCreateStoreModal]);
 
-    const findStoreModalRoot = () => {
-      const titleElement = findModalTitle();
-      if (!titleElement) return null;
+  useEffect(() => {
+    if (!editingStoreId) return;
 
-      let node = titleElement.parentElement as HTMLElement | null;
-      while (node && node !== document.body) {
-        const rect = node.getBoundingClientRect();
-        if (rect.width > 400 && rect.height > 300) {
-          return node;
-        }
-        node = node.parentElement;
-      }
+    const hideModalSections = () => {
+      try {
+        const textTargets = [
+          'عرض هذا المتجر في السوق العام',
+          'المنتجات المرتبطة بالمتجر',
+          'اختر المنتجات التي تريد ربطها بهذا المتجر',
+          'لا توجد منتجات لديك حالياً',
+          'يمكنك تعديل صورة المتجر من داخل نافذة تعديل المتجر',
+        ];
 
-      return null;
-    };
+        const elements = Array.from(
+          document.querySelectorAll('label, p, span, div, h1, h2, h3, h4, h5, h6')
+        ) as HTMLElement[];
 
-    const findStoreModalScrollable = () => {
-      const modalRoot = findStoreModalRoot();
-      if (!modalRoot) return null;
+        elements.forEach((element) => {
+          const content = (element.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!content) return;
+          if (!textTargets.some((text) => content.includes(text))) return;
 
-      const allNodes = [modalRoot, ...Array.from(modalRoot.querySelectorAll('*'))] as HTMLElement[];
-      for (const node of allNodes) {
-        const style = window.getComputedStyle(node);
-        const isScrollable = (style.overflowY === 'auto' || style.overflowY === 'scroll') && node.scrollHeight > node.clientHeight;
-        if (isScrollable) return node;
-      }
-
-      return modalRoot;
-    };
-
-    const hideSectionByText = (texts: string[]) => {
-      const allElements = Array.from(document.querySelectorAll('label, p, span, div, h1, h2, h3, h4, h5')) as HTMLElement[];
-      allElements.forEach((element) => {
-        const content = (element.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!content) return;
-
-        if (texts.some((text) => content.includes(text))) {
           let target: HTMLElement | null = element;
-          for (let i = 0; i < 5 && target; i += 1) {
-            const parent = target.parentElement as HTMLElement | null;
-            if (!parent) break;
+          for (let i = 0; i < 4 && target?.parentElement; i += 1) {
+            const parent = target.parentElement as HTMLElement;
             const parentText = (parent.textContent || '').replace(/\s+/g, ' ').trim();
-            if (parentText.includes(content) && parent.clientHeight <= 260) {
+            if (parentText.includes(content) && parent.clientHeight <= 280) {
               target = parent;
             }
           }
+
           if (target) {
             target.style.display = 'none';
           }
-        }
-      });
-    };
-
-    const enhanceStoreModal = () => {
-      const modalRoot = findStoreModalRoot();
-      const scrollable = findStoreModalScrollable();
-      if (!modalRoot || !scrollable) return;
-
-      scrollable.style.overscrollBehavior = 'contain';
-      scrollable.style.scrollBehavior = 'smooth';
-
-      hideSectionByText(['عرض هذا المتجر في السوق العام', 'المنتجات المرتبطة بالمتجر']);
-
-      const oldHelper = Array.from(modalRoot.querySelectorAll('div, p, span')) as HTMLElement[];
-      oldHelper.forEach((element) => {
-        const content = (element.textContent || '').trim();
-        if (
-          content.includes('يمكنك تعديل صورة المتجر من داخل نافذة تعديل المتجر') ||
-          content.includes('اختر المنتجات التي تريد ربطها بهذا المتجر') ||
-          content.includes('لا توجد منتجات لديك حالياً')
-        ) {
-          element.style.display = 'none';
-        }
-      });
-
-      const imageSectionId = 'seller-dashboard-store-image-panel';
-      const existingSection = modalRoot.querySelector(`#${imageSectionId}`) as HTMLElement | null;
-
-      if (!editingStoreId || !editingStore) {
-        if (existingSection) existingSection.remove();
-        return;
-      }
-
-      const nameLabel = Array.from(modalRoot.querySelectorAll('label, p, span, div'))
-        .find((el) => ((el.textContent || '').replace(/\s+/g, ' ').trim().includes('اسم المتجر'))) as HTMLElement | undefined;
-
-      const insertionAnchor = nameLabel
-        ? ((nameLabel.closest('div')?.parentElement as HTMLElement | null) || (nameLabel.closest('div') as HTMLElement | null))
-        : (scrollable.firstElementChild as HTMLElement | null);
-
-      if (!insertionAnchor) return;
-
-      const imageSection = existingSection || document.createElement('div');
-      imageSection.id = imageSectionId;
-      imageSection.className = 'mx-6 mt-5 mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm';
-      imageSection.innerHTML = `
-        <div class="flex items-start justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div class="relative h-28 w-28 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 shrink-0" id="seller-dashboard-store-image-preview"></div>
-            <div>
-              <h3 class="text-lg font-bold text-gray-900 mb-1">صورة المتجر</h3>
-              <p class="text-sm text-gray-500 leading-6">اختر صورة واضحة للمتجر، وعند عدم وجود صورة ستظهر الصورة الكلاسيكية.</p>
-            </div>
-          </div>
-          <div class="relative shrink-0">
-            <button type="button" id="seller-dashboard-store-image-trigger" class="inline-flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 text-white shadow hover:bg-blue-700 transition-colors disabled:opacity-60">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h4l2-2h6l2 2h4v12H3V7z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 17a4 4 0 100-8 4 4 0 000 8z" /></svg>
-            </button>
-            <div id="seller-dashboard-store-image-menu" class="absolute left-0 top-14 z-50 hidden min-w-[170px] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
-              <button type="button" id="seller-dashboard-store-image-upload-action" class="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors">
-                <span>تعديل الصورة</span>
-              </button>
-              <button type="button" id="seller-dashboard-store-image-delete-action" class="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors">
-                <span>حذف الصورة</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        <input id="seller-dashboard-store-image-input" type="file" accept="image/*" class="hidden" />
-        <div id="seller-dashboard-store-image-feedback" class="mt-3"></div>
-      `;
-
-      if (!existingSection) {
-        insertionAnchor.parentElement?.insertBefore(imageSection, insertionAnchor);
-      }
-
-      const preview = imageSection.querySelector('#seller-dashboard-store-image-preview') as HTMLElement | null;
-      const trigger = imageSection.querySelector('#seller-dashboard-store-image-trigger') as HTMLButtonElement | null;
-      const menu = imageSection.querySelector('#seller-dashboard-store-image-menu') as HTMLElement | null;
-      const uploadAction = imageSection.querySelector('#seller-dashboard-store-image-upload-action') as HTMLButtonElement | null;
-      const deleteAction = imageSection.querySelector('#seller-dashboard-store-image-delete-action') as HTMLButtonElement | null;
-      const fileInput = imageSection.querySelector('#seller-dashboard-store-image-input') as HTMLInputElement | null;
-      const feedback = imageSection.querySelector('#seller-dashboard-store-image-feedback') as HTMLElement | null;
-
-      if (preview) {
-        preview.innerHTML = editingStoreImageUrl
-          ? `<img src="${editingStoreImageUrl}" alt="${editingStore.name}" class="h-full w-full object-cover" />`
-          : `<div class="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-600 to-purple-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 9.75L12 4l9 5.75V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.75z" /><path stroke-linecap="round" stroke-linejoin="round" d="M9 21V12h6v9" /></svg></div>`;
-      }
-
-      if (feedback) {
-        if (storeImageError) {
-          feedback.innerHTML = `<div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">${storeImageError}</div>`;
-        } else if (storeImageSuccess) {
-          feedback.innerHTML = `<div class="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">${storeImageSuccess}</div>`;
-        } else {
-          feedback.innerHTML = '';
-        }
-      }
-
-      if (trigger) {
-        trigger.disabled = isEditingStoreImageBusy;
-        trigger.onclick = (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          setStoreImageMenuOpenId((current) => (current === editingStore.id ? null : editingStore.id));
-        };
-      }
-
-      if (menu) {
-        menu.classList.toggle('hidden', storeImageMenuOpenId !== editingStore.id);
-      }
-
-      if (uploadAction) {
-        uploadAction.onclick = (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          fileInput?.click();
-        };
-      }
-
-      if (deleteAction) {
-        deleteAction.disabled = !editingStoreImageUrl || isEditingStoreImageBusy;
-        deleteAction.style.opacity = !editingStoreImageUrl || isEditingStoreImageBusy ? '0.55' : '1';
-        deleteAction.onclick = async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          setStoreImageMenuOpenId(null);
-          await handleStoreImageDelete(editingStore);
-        };
-      }
-
-      if (fileInput) {
-        fileInput.onchange = async (event) => {
-          const target = event.target as HTMLInputElement;
-          const file = target.files?.[0] || null;
-          target.value = '';
-          setStoreImageMenuOpenId(null);
-          await handleStoreImageSelected(editingStore, file);
-        };
+        });
+      } catch (error) {
+        console.error('hideModalSections error:', error);
       }
     };
 
-    const intervalId = window.setInterval(enhanceStoreModal, 300);
-    const timeoutId = window.setTimeout(enhanceStoreModal, 80);
-    const observer = new MutationObserver(() => enhanceStoreModal());
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    const wheelHandler = (event: WheelEvent) => {
-      const scrollable = findStoreModalScrollable();
-      if (!scrollable) return;
-
-      const modalRoot = findStoreModalRoot();
-      if (!modalRoot) return;
-
-      const rect = modalRoot.getBoundingClientRect();
-      const insideX = event.clientX >= rect.left && event.clientX <= rect.right;
-      const insideY = event.clientY >= rect.top && event.clientY <= rect.bottom;
-
-      if (insideX && insideY) {
-        scrollable.scrollTop += event.deltaY;
-        event.preventDefault();
-      }
-    };
-
-    const outsideClickHandler = (event: MouseEvent) => {
-      const modalRoot = findStoreModalRoot();
-      if (!modalRoot) return;
-      if (!modalRoot.contains(event.target as Node)) {
-        setStoreImageMenuOpenId(null);
-      }
-    };
-
-    window.addEventListener('wheel', wheelHandler, { passive: false });
-    document.addEventListener('click', outsideClickHandler);
+    const timer = window.setInterval(hideModalSections, 250);
+    const initial = window.setTimeout(hideModalSections, 80);
 
     return () => {
-      document.body.style.overflow = previousBodyOverflow;
-      window.removeEventListener('wheel', wheelHandler);
-      document.removeEventListener('click', outsideClickHandler);
-      observer.disconnect();
-      window.clearInterval(intervalId);
-      window.clearTimeout(timeoutId);
+      window.clearInterval(timer);
+      window.clearTimeout(initial);
     };
-  }, [
-    editingStoreId,
-    showCreateStoreModal,
-    editingStore,
-    editingStoreImageUrl,
-    isEditingStoreImageBusy,
-    storeImageMenuOpenId,
-    storeImageError,
-    storeImageSuccess,
-  ]);
+  }, [editingStoreId]);
+
+  useEffect(() => {
+    if (!storeImageMenuOpenId) return;
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-store-image-menu]') || target?.closest('[data-store-image-trigger]')) {
+        return;
+      }
+      setStoreImageMenuOpenId(null);
+    };
+
+    document.addEventListener('click', handleOutsideClick);
+    return () => {
+      document.removeEventListener('click', handleOutsideClick);
+    };
+  }, [storeImageMenuOpenId]);
+
 
   const filteredOrdersResults = useMemo(() => {
     const query = ordersSearchQuery.trim().toLowerCase();
@@ -4466,6 +4286,99 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         onClose={() => setShowCreateProductModal(false)}
         onSuccess={fetchDashboardData}
       />
+
+      {editingStoreId && editingStore && (
+        <div className="fixed inset-0 z-[80] pointer-events-none">
+          <div className="absolute top-28 left-1/2 -translate-x-[260px] w-[260px] max-w-[calc(100vw-2rem)] pointer-events-auto">
+            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-xl">
+              <div className="flex items-start gap-3">
+                <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+                  {editingStoreImageUrl ? (
+                    <img
+                      src={editingStoreImageUrl}
+                      alt={editingStore.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-600 to-purple-600">
+                      <StoreIcon className="h-10 w-10 text-white" />
+                    </div>
+                  )}
+
+                  <div className="absolute -bottom-2 -right-2">
+                    <button
+                      type="button"
+                      data-store-image-trigger
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setStoreImageMenuOpenId((current) => (current === editingStore.id ? null : editingStore.id));
+                      }}
+                      disabled={isEditingStoreImageBusy}
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <ImagePlus className="h-4 w-4" />
+                    </button>
+
+                    {storeImageMenuOpenId === editingStore.id && (
+                      <div
+                        data-store-image-menu
+                        className="absolute bottom-12 right-0 z-20 min-w-[160px] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl"
+                      >
+                        <label className="flex cursor-pointer items-center gap-2 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-blue-50 hover:text-blue-700">
+                          <ImagePlus className="h-4 w-4" />
+                          <span>تعديل الصورة</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={async (event) => {
+                              const file = event.target.files?.[0] || null;
+                              event.currentTarget.value = '';
+                              setStoreImageMenuOpenId(null);
+                              await handleStoreImageSelected(editingStore, file);
+                            }}
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setStoreImageMenuOpenId(null);
+                            await handleStoreImageDelete(editingStore);
+                          }}
+                          disabled={!editingStoreImageUrl || isEditingStoreImageBusy}
+                          className="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>حذف الصورة</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <h3 className="mb-1 text-lg font-bold text-gray-900">صورة المتجر</h3>
+                  <p className="text-sm leading-6 text-gray-500">
+                    اختر صورة واضحة للمتجر، وعند عدم وجود صورة ستظهر الصورة الكلاسيكية.
+                  </p>
+                </div>
+              </div>
+
+              {(storeImageError || storeImageSuccess) && (
+                <div className="mt-4">
+                  {storeImageError ? (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{storeImageError}</div>
+                  ) : (
+                    <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{storeImageSuccess}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingStoreId && (
         <EditStoreModal
