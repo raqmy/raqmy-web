@@ -294,6 +294,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [storeImageUploadingId, setStoreImageUploadingId] = useState<string | null>(null);
   const [storeImageError, setStoreImageError] = useState('');
   const [storeImageSuccess, setStoreImageSuccess] = useState('');
+  const [storeImageMenuOpenId, setStoreImageMenuOpenId] = useState<string | null>(null);
   const [ordersSearchQuery, setOrdersSearchQuery] = useState('');
   const [ordersSortBy, setOrdersSortBy] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
   const [selectedOrder, setSelectedOrder] = useState<SellerOrderUI | null>(null);
@@ -2018,6 +2019,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     });
   }, [stores, storesSearchQuery, storesStatusFilter, storesSortBy]);
 
+  const editingStore = useMemo(() => {
+    if (!editingStoreId) return null;
+    return (stores.find((store) => store.id === editingStoreId) as StoreImageRecord | undefined) || null;
+  }, [stores, editingStoreId]);
+
+  const editingStoreImageUrl = editingStore ? getStoreImageUrl(editingStore) : '';
+  const isEditingStoreImageBusy = editingStore ? storeImageUploadingId === editingStore.id : false;
+
+  useEffect(() => {
+    if (!editingStoreId) {
+      setStoreImageMenuOpenId(null);
+      return;
+    }
+
+    setStoreImageMenuOpenId(null);
+  }, [editingStoreId]);
+
   const filteredOrdersResults = useMemo(() => {
     const query = ordersSearchQuery.trim().toLowerCase();
 
@@ -2729,18 +2747,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
                       return (
                         <div key={store.id} className="bg-white rounded-xl shadow-sm p-6">
-                          <input
-                            id={`store-image-input-${store.id}`}
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0] || null;
-                              void handleStoreImageSelected(store as StoreImageRecord, file);
-                              e.currentTarget.value = '';
-                            }}
-                          />
-
                           <div className="flex items-start gap-4 mb-4">
                             <div className="relative w-24 h-24 rounded-xl overflow-hidden border border-gray-200 bg-gray-50 shrink-0">
                               {storeImageUrl ? (
@@ -2778,35 +2784,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                 <p className="text-gray-600 mb-3 line-clamp-2">{store.description}</p>
                               )}
 
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  disabled={isStoreImageBusy}
-                                  onClick={() => {
-                                    const input = document.getElementById(`store-image-input-${store.id}`) as HTMLInputElement | null;
-                                    input?.click();
-                                  }}
-                                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors disabled:opacity-60"
-                                >
-                                  <ImagePlus className="w-4 h-4" />
-                                  <span>{storeImageUrl ? 'تعديل الصورة' : 'إضافة صورة'}</span>
-                                </button>
-
-                                {storeImageUrl && (
-                                  <button
-                                    type="button"
-                                    disabled={isStoreImageBusy}
-                                    onClick={() => {
-                                      if (window.confirm('هل أنت متأكد من حذف صورة المتجر؟')) {
-                                        void handleStoreImageDelete(store as StoreImageRecord);
-                                      }
-                                    }}
-                                    className="inline-flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors disabled:opacity-60"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                    <span>حذف الصورة</span>
-                                  </button>
-                                )}
+                              <div className="inline-flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                                <ImagePlus className="w-4 h-4" />
+                                <span>يمكنك تعديل صورة المتجر من داخل نافذة تعديل المتجر</span>
                               </div>
                             </div>
                           </div>
@@ -2820,7 +2800,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                             </button>
 
                             <button
-                              onClick={() => setEditingStoreId(store.id)}
+                              onClick={() => {
+                                setStoreImageError('');
+                                setStoreImageSuccess('');
+                                setStoreImageMenuOpenId(null);
+                                setEditingStoreId(store.id);
+                              }}
                               className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
                             >
                               تعديل
@@ -4226,14 +4211,127 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         onSuccess={fetchDashboardData}
       />
 
-      {editingStoreId && (
-        <EditStoreModal
-          isOpen={true}
-          storeId={editingStoreId}
-          onClose={() => setEditingStoreId(null)}
-          onSuccess={fetchDashboardData}
-          onDelete={fetchDashboardData}
-        />
+      {editingStoreId && editingStore && (
+        <>
+          <input
+            id={`store-image-edit-input-${editingStore.id}`}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0] || null;
+              void handleStoreImageSelected(editingStore as StoreImageRecord, file);
+              e.currentTarget.value = '';
+              setStoreImageMenuOpenId(null);
+            }}
+          />
+
+          <div className="fixed inset-0 z-[70] pointer-events-none flex justify-center px-4">
+            <div className="pointer-events-auto relative w-full max-w-xl" style={{ marginTop: '5.75rem' }}>
+              <div className="rounded-2xl border border-gray-200 bg-white/95 backdrop-blur-sm p-4 shadow-xl">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-right">
+                    <h3 className="text-lg font-bold text-gray-900">صورة المتجر</h3>
+                    <p className="text-sm text-gray-500">يمكنك تعديل الصورة أو حذفها من هنا، وعند عدم وجود صورة ستظهر الصورة الكلاسيكية.</p>
+                  </div>
+
+                  <div className="relative shrink-0">
+                    <div className="h-24 w-24 overflow-hidden rounded-2xl border-4 border-white bg-gray-100 shadow-sm">
+                      {editingStoreImageUrl ? (
+                        <img
+                          src={editingStoreImageUrl}
+                          alt={editingStore.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-600 to-purple-600">
+                          <StoreIcon className="h-10 w-10 text-white" />
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isEditingStoreImageBusy}
+                      onClick={() => {
+                        setStoreImageError('');
+                        setStoreImageSuccess('');
+                        setStoreImageMenuOpenId((current) => (current === editingStore.id ? null : editingStore.id));
+                      }}
+                      className="absolute -bottom-2 -left-2 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      <ImagePlus className="h-5 w-5" />
+                    </button>
+
+                    {storeImageMenuOpenId === editingStore.id && (
+                      <div className="absolute left-0 top-full z-20 mt-3 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
+                        <button
+                          type="button"
+                          disabled={isEditingStoreImageBusy}
+                          onClick={() => {
+                            const input = document.getElementById(`store-image-edit-input-${editingStore.id}`) as HTMLInputElement | null;
+                            input?.click();
+                          }}
+                          className="flex w-full items-center gap-2 px-4 py-3 text-right text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+                        >
+                          <ImagePlus className="h-4 w-4 text-blue-600" />
+                          <span>{editingStoreImageUrl ? 'تعديل الصورة' : 'إضافة صورة'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isEditingStoreImageBusy || !editingStoreImageUrl}
+                          onClick={() => {
+                            setStoreImageMenuOpenId(null);
+                            if (window.confirm('هل أنت متأكد من حذف صورة المتجر؟')) {
+                              void handleStoreImageDelete(editingStore as StoreImageRecord);
+                            }
+                          }}
+                          className="flex w-full items-center gap-2 px-4 py-3 text-right text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>حذف الصورة</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {(storeImageError || storeImageSuccess) && (
+                  <div className="mt-4">
+                    {storeImageError && (
+                      <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {storeImageError}
+                      </div>
+                    )}
+                    {!storeImageError && storeImageSuccess && (
+                      <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                        {storeImageSuccess}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <EditStoreModal
+            isOpen={true}
+            storeId={editingStoreId}
+            onClose={() => {
+              setEditingStoreId(null);
+              setStoreImageMenuOpenId(null);
+            }}
+            onSuccess={async () => {
+              setStoreImageMenuOpenId(null);
+              await fetchDashboardData();
+            }}
+            onDelete={async () => {
+              setStoreImageMenuOpenId(null);
+              await fetchDashboardData();
+            }}
+          />
+        </>
       )}
 
       {editingProductId && (
