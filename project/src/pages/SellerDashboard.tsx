@@ -258,6 +258,8 @@ const getSellerDashboardPath = (tab: SellerDashboardTab) => {
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
+  const profileId = profile?.id ?? null;
+  const profileName = profile?.name ?? '';
 
   const [activeTab, setActiveTab] = useState<SellerDashboardTab>('overview');
   const [hasRestoredDashboardCache, setHasRestoredDashboardCache] = useState(false);
@@ -389,14 +391,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   useEffect(() => {
-    if (!profile?.id || typeof window === 'undefined') {
+    if (!profileId || typeof window === 'undefined') {
       setHasRestoredDashboardCache(false);
       setHasCachedDashboardData(false);
       return;
     }
 
     try {
-      const rawCache = sessionStorage.getItem(getSellerDashboardCacheKey(profile.id));
+      const rawCache = sessionStorage.getItem(getSellerDashboardCacheKey(profileId));
       if (!rawCache) {
         setHasCachedDashboardData(false);
         return;
@@ -409,7 +411,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         Date.now() - parsedCache.cachedAt <= SELLER_DASHBOARD_CACHE_TTL_MS;
 
       if (!isCacheValid) {
-        sessionStorage.removeItem(getSellerDashboardCacheKey(profile.id));
+        sessionStorage.removeItem(getSellerDashboardCacheKey(profileId));
         setHasCachedDashboardData(false);
         return;
       }
@@ -436,7 +438,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         parsedCache.verificationForm && typeof parsedCache.verificationForm === 'object'
           ? parsedCache.verificationForm
           : {
-              full_name: profile.name ?? '',
+              full_name: profileName,
               identity_type: 'national_id',
               identity_number: '',
               date_of_birth: '',
@@ -448,7 +450,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           ? parsedCache.bankAccountForm
           : {
               bank_name: '',
-              account_holder_name: profile.name ?? '',
+              account_holder_name: profileName,
               iban: '',
             }
       );
@@ -471,10 +473,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     } finally {
       setHasRestoredDashboardCache(true);
     }
-  }, [profile?.id, profile?.name]);
+  }, [profileId, profileName]);
 
   useEffect(() => {
-    if (!profile || !hasRestoredDashboardCache) return;
+    if (!profileId || !hasRestoredDashboardCache) return;
 
     fetchDashboardData({ showLoader: !hasCachedDashboardData });
     fetchIdentityVerification();
@@ -483,10 +485,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     fetchWithdrawalLimitData();
     fetchOrdersData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, hasRestoredDashboardCache]);
+  }, [profileId, hasRestoredDashboardCache]);
 
   useEffect(() => {
-    if (!profile?.id || typeof window === 'undefined' || !hasRestoredDashboardCache) return;
+    if (!profileId || typeof window === 'undefined' || !hasRestoredDashboardCache) return;
 
     try {
       const payload = {
@@ -510,12 +512,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         sellerOrders,
       };
 
-      sessionStorage.setItem(getSellerDashboardCacheKey(profile.id), JSON.stringify(payload));
+      sessionStorage.setItem(getSellerDashboardCacheKey(profileId), JSON.stringify(payload));
     } catch (error) {
       console.error('Error caching seller dashboard state:', error);
     }
   }, [
-    profile?.id,
+    profileId,
     hasRestoredDashboardCache,
     activeTab,
     stores,
