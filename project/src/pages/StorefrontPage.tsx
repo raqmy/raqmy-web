@@ -9,6 +9,10 @@ import {
   Share2,
   Search,
   ChevronLeft,
+  Mail,
+  FileText,
+  Shield,
+  RefreshCcw,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,11 +51,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
       const description = String(product.description || '').toLowerCase();
       const category = String(product.category || '').toLowerCase();
 
-      return (
-        title.includes(query) ||
-        description.includes(query) ||
-        category.includes(query)
-      );
+      return title.includes(query) || description.includes(query) || category.includes(query);
     });
   }, [products, searchQuery]);
 
@@ -82,7 +82,9 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
   }, [store, storeSlug, storeImageUrl]);
 
   const updateMetaTag = (attribute: 'name' | 'property', key: string, content: string) => {
-    let element = document.head.querySelector(`meta[${attribute}="${key}"]`) as HTMLMetaElement | null;
+    let element = document.head.querySelector(
+      `meta[${attribute}="${key}"]`
+    ) as HTMLMetaElement | null;
 
     if (!element) {
       element = document.createElement('meta');
@@ -398,10 +400,6 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 تصفح منتجات المتجر وابحث فيها بسهولة
               </p>
             </div>
-
-            <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-600">
-              <span>{filteredProducts.length} نتيجة</span>
-            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4 mb-6">
@@ -449,9 +447,9 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 <div
                   key={product.id}
                   onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
-                  className="group bg-white rounded-[24px] border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer"
+                  className="group bg-white rounded-[24px] border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer max-w-[340px] w-full mx-auto"
                 >
-                  <div className="relative aspect-square overflow-hidden bg-gray-50">
+                  <div className="relative aspect-[4/3] overflow-hidden bg-gray-50">
                     {product.thumbnail_url ? (
                       <img
                         src={product.thumbnail_url}
@@ -501,15 +499,98 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
             </div>
           )}
         </section>
-
-        <section className="mt-6 bg-[#0f172a] rounded-3xl border border-[#1e293b] shadow-sm p-6 md:p-8">
-          <div className="text-white/85 text-base leading-8 whitespace-pre-line">
-            {store.description && String(store.description).trim() !== ''
-              ? store.description
-              : 'لا يوجد وصف مضاف لهذا المتجر حالياً.'}
-          </div>
-        </section>
       </main>
+
+      <footer className="mt-12 bg-[#08152f] text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+            <div className="text-right">
+              <div className="flex items-center gap-3 justify-start mb-4">
+                <div className="w-12 h-12 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+                  {storeImageUrl ? (
+                    <img
+                      src={storeImageUrl}
+                      alt={store?.name || 'صورة المتجر'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <StoreIcon className="w-6 h-6 text-white" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold">{store.name}</h3>
+                  <p className="text-sm text-white/60">{store.category || 'متجر رقمي'}</p>
+                </div>
+              </div>
+
+              <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                {store.description && String(store.description).trim() !== ''
+                  ? store.description
+                  : 'متجر رقمي يعرض منتجات رقمية بشكل واضح وسهل.'}
+              </p>
+
+              {store.email && (
+                <div className="mt-4 flex items-center gap-2 text-sm text-white/70 justify-start">
+                  <Mail className="w-4 h-4" />
+                  <span dir="ltr">{store.email}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="text-right">
+              <h4 className="text-lg font-bold mb-4">روابط سريعة</h4>
+              <div className="space-y-3 text-white/75 text-sm">
+                <button
+                  onClick={() => onNavigate('home')}
+                  className="block hover:text-white transition-colors"
+                >
+                  الرئيسية
+                </button>
+                <button
+                  onClick={() => onNavigate('marketplace')}
+                  className="block hover:text-white transition-colors"
+                >
+                  المتجر العام
+                </button>
+                <button
+                  onClick={() => onNavigate('plans')}
+                  className="block hover:text-white transition-colors"
+                >
+                  الباقات
+                </button>
+                <button
+                  onClick={() => onNavigate('support')}
+                  className="block hover:text-white transition-colors"
+                >
+                  الدعم
+                </button>
+              </div>
+            </div>
+
+            <div className="text-right">
+              <h4 className="text-lg font-bold mb-4">قانوني</h4>
+              <div className="space-y-3 text-white/75 text-sm">
+                <div className="flex items-center gap-2 justify-start">
+                  <Shield className="w-4 h-4" />
+                  <span>سياسة الخصوصية</span>
+                </div>
+                <div className="flex items-center gap-2 justify-start">
+                  <FileText className="w-4 h-4" />
+                  <span>الشروط والأحكام</span>
+                </div>
+                <div className="flex items-center gap-2 justify-start">
+                  <RefreshCcw className="w-4 h-4" />
+                  <span>سياسة الاسترجاع</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-10 pt-6 border-t border-white/10 text-center text-sm text-white/50">
+            © 2026 رقمي - جميع الحقوق محفوظة
+          </div>
+        </div>
+      </footer>
 
       {showAuthModal && (
         <StorefrontAuthModal
