@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase, UserProfile } from '../lib/supabase';
 
@@ -33,6 +33,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const userRef = useRef<User | null>(null);
+  const profileRef = useRef<UserProfile | null>(null);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   const refreshUserSubscriptionStatus = async (userId: string) => {
     try {
@@ -97,42 +108,89 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const applyAuthState = async (
+    nextUser: User | null,
+    options?: {
+      skipProfileRefresh?: boolean;
+    }
+  ) => {
+    setUser(nextUser);
+
+    if (!nextUser) {
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
+
+    if (options?.skipProfileRefresh) {
+      setLoading(false);
+      return;
+    }
+
+    const profileData = await fetchProfile(nextUser.id);
+    setProfile(profileData);
+    await syncAuthMetadataWithProfile(profileData);
+    setLoading(false);
+  };
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      (async () => {
-        setUser(session?.user ?? null);
+    let isMounted = true;
 
-        if (session?.user) {
-          const profileData = await fetchProfile(session.user.id);
-          setProfile(profileData);
-          await syncAuthMetadataWithProfile(profileData);
-        } else {
-          setProfile(null);
-        }
+    const bootstrapAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
 
+        if (!isMounted) return;
+
+        await applyAuthState(session?.user ?? null);
+      } catch (error) {
+        console.error('Error bootstrapping auth state:', error);
+        if (!isMounted) return;
+        setUser(null);
+        setProfile(null);
         setLoading(false);
-      })();
-    });
+      }
+    };
+
+    bootstrapAuth();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      (async () => {
-        setUser(session?.user ?? null);
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
 
-        if (session?.user) {
-          const profileData = await fetchProfile(session.user.id);
-          setProfile(profileData);
-          await syncAuthMetadataWithProfile(profileData);
-        } else {
-          setProfile(null);
-        }
+      const nextUser = session?.user ?? null;
+      const currentUser = userRef.current;
+      const currentProfile = profileRef.current;
 
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setProfile(null);
         setLoading(false);
-      })();
+        return;
+      }
+
+      const isSameUser = Boolean(
+        nextUser &&
+        currentUser &&
+        nextUser.id === currentUser.id
+      );
+
+      const shouldSkipProfileRefresh =
+        isSameUser &&
+        !!currentProfile &&
+        currentProfile.id === nextUser?.id &&
+        (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN');
+
+      await applyAuthState(nextUser, {
+        skipProfileRefresh: shouldSkipProfileRefresh,
+      });
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string, name: string, role: 'customer' | 'seller') => {
