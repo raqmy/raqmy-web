@@ -15,6 +15,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const AUTH_CACHE_KEY = 'raqmy_auth_cache_v1';
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) throw new Error('useAuth must be used within AuthProvider');
@@ -28,14 +30,65 @@ const normalizeRole = (role: any): 'customer' | 'seller' | 'admin' => {
   return 'customer';
 };
 
+type CachedAuthState = {
+  user: Pick<User, 'id' | 'email' | 'user_metadata' | 'app_metadata'> | null;
+  profile: UserProfile | null;
+};
+
+const readCachedAuthState = (): CachedAuthState | null => {
+  try {
+    const raw = sessionStorage.getItem(AUTH_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedAuthState = (user: User | null, profile: UserProfile | null) => {
+  try {
+    const payload: CachedAuthState = {
+      user: user
+        ? {
+            id: user.id,
+            email: user.email ?? null,
+            user_metadata: user.user_metadata ?? {},
+            app_metadata: user.app_metadata ?? {},
+          }
+        : null,
+      profile,
+    };
+
+    sessionStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore cache write errors
+  }
+};
+
+const clearCachedAuthState = () => {
+  try {
+    sessionStorage.removeItem(AUTH_CACHE_KEY);
+  } catch {
+    // ignore
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cachedState = readCachedAuthState();
+
+  const [user, setUser] = useState<User | null>(
+    cachedState?.user ? (cachedState.user as User) : null
+  );
+  const [profile, setProfile] = useState<UserProfile | null>(cachedState?.profile ?? null);
+  const [loading, setLoading] = useState(!cachedState);
 
   const mountedRef = useRef(true);
-  const currentUserIdRef = useRef<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(cachedState?.user?.id ?? null);
   const profileRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    writeCachedAuthState(user, profile);
+  }, [user, profile]);
 
   const refreshUserSubscriptionStatus = async (userId: string) => {
     try {
@@ -81,6 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       currentUserIdRef.current = null;
       setUser(null);
       setProfile(null);
+      clearCachedAuthState();
       setLoading(false);
       return;
     }
@@ -122,13 +176,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (!mountedRef.current) return;
 
-        await loadProfileForUser(session?.user ?? null);
+        const sessionUser = session?.user ?? null;
+
+        if (!sessionUser) {
+          currentUserIdRef.current = null;
+          setUser(null);
+          setProfile(null);
+          clearCachedAuthState();
+          setLoading(false);
+          return;
+        }
+
+        const cachedUserId = currentUserIdRef.current;
+        const isSameCachedUser = cachedUserId && cachedUserId === sessionUser.id;
+
+        setUser(sessionUser);
+
+        if (isSameCachedUser && cachedState?.profile) {
+          setLoading(false);
+          void loadProfileForUser(sessionUser);
+          return;
+        }
+
+        await loadProfileForUser(sessionUser);
       } catch (error) {
         console.error('Error bootstrapping auth state:', error);
 
         if (!mountedRef.current) return;
         setUser(null);
         setProfile(null);
+        clearCachedAuthState();
         setLoading(false);
       }
     };
@@ -146,25 +223,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentUserIdRef.current = null;
         setUser(null);
         setProfile(null);
+        clearCachedAuthState();
         setLoading(false);
         return;
       }
 
       const currentUserId = currentUserIdRef.current;
       const nextUserId = nextUser?.id ?? null;
-      const isSameUser = currentUserId && nextUserId && currentUserId === nextUserId;
+      const isSameUser = !!currentUserId && !!nextUserId && currentUserId === nextUserId;
 
       setUser(nextUser);
 
       if (!nextUser) {
         setProfile(null);
+        clearCachedAuthState();
         setLoading(false);
         return;
       }
 
       if (
         isSameUser &&
-        (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')
+        (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') &&
+        profile
       ) {
         setLoading(false);
         return;
@@ -227,7 +307,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const profileData = await fetchProfile(data.user.id);
     if (mountedRef.current) {
+      setUser(data.user);
       setProfile(profileData);
+      setLoading(false);
     }
   };
 
@@ -239,6 +321,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+
+    clearCachedAuthState();
+    setUser(null);
+    setProfile(null);
+    setLoading(false);
   };
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
