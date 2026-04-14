@@ -9,6 +9,8 @@ import {
   Share2,
   Search,
   ChevronLeft,
+  Star,
+  Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -294,213 +296,197 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
   }
 
   return (
-    <div className="min-h-screen bg-[#f6f7fb]">
-      <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center min-h-[72px] gap-4">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-11 h-11 rounded-2xl overflow-hidden bg-gray-100 flex items-center justify-center shadow-sm shrink-0 border border-gray-200">
-                {storeImageUrl ? (
-                  <img
-                    src={storeImageUrl}
-                    alt={store?.name || 'صورة المتجر'}
-                    className="w-full h-full object-cover"
-                  />
+    <div className="min-h-screen flex flex-col bg-[#08152f]">
+      <div className="bg-[#f6f7fb]">
+        <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center min-h-[72px] gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-11 h-11 rounded-2xl overflow-hidden bg-gray-100 flex items-center justify-center shadow-sm shrink-0 border border-gray-200">
+                  {storeImageUrl ? (
+                    <img
+                      src={storeImageUrl}
+                      alt={store?.name || 'صورة المتجر'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <StoreIcon className="w-6 h-6 text-gray-700" />
+                  )}
+                </div>
+
+                <div className="min-w-0">
+                  <h1 className="text-lg md:text-xl font-bold text-gray-900 truncate">{store.name}</h1>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span>{store.category || 'متجر رقمي'}</span>
+                    <span className="w-1 h-1 rounded-full bg-gray-300" />
+                    <span>{filteredProducts.length} منتج</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 md:gap-3 shrink-0">
+                <button
+                  onClick={handleShareStore}
+                  className="flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">مشاركة</span>
+                </button>
+
+                {user && profile ? (
+                  <>
+                    <button
+                      onClick={() => onNavigate('cart')}
+                      className="flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
+                    >
+                      <ShoppingCart className="w-4 h-4" />
+                      <span className="hidden sm:inline">السلة</span>
+                    </button>
+
+                    <button
+                      onClick={() => onNavigate('profile')}
+                      className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-xl transition-colors"
+                    >
+                      <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center shrink-0">
+                        <User className="w-4 h-4 text-white" />
+                      </div>
+                      <span className="hidden md:inline text-sm font-semibold text-gray-900 max-w-[120px] truncate">
+                        {profile.name}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={handleSignOut}
+                      className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                      title="تسجيل الخروج"
+                    >
+                      <LogOut className="w-5 h-5" />
+                    </button>
+                  </>
                 ) : (
-                  <StoreIcon className="w-6 h-6 text-gray-700" />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setAuthMode('login');
+                        setShowAuthModal(true);
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                    >
+                      تسجيل الدخول
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAuthMode('signup');
+                        setShowAuthModal(true);
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors"
+                    >
+                      إنشاء حساب
+                    </button>
+                  </div>
                 )}
               </div>
+            </div>
+          </div>
+        </nav>
 
-              <div className="min-w-0">
-                <h1 className="text-lg md:text-xl font-bold text-gray-900 truncate">{store.name}</h1>
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <span>{store.category || 'متجر رقمي'}</span>
-                  <span className="w-1 h-1 rounded-full bg-gray-300" />
-                  <span>{filteredProducts.length} منتج</span>
-                </div>
+        <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+          <section className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-6">
+            <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between mb-6">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900">المنتجات المتاحة</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  تصفح منتجات المتجر وابحث فيها بسهولة
+                </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 md:gap-3 shrink-0">
-              <button
-                onClick={handleShareStore}
-                className="flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
-              >
-                <Share2 className="w-4 h-4" />
-                <span className="hidden sm:inline">مشاركة</span>
-              </button>
-
-              {user && profile ? (
-                <>
-                  <button
-                    onClick={() => onNavigate('cart')}
-                    className="flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
-                  >
-                    <ShoppingCart className="w-4 h-4" />
-                    <span className="hidden sm:inline">السلة</span>
-                  </button>
-
-                  <button
-                    onClick={() => onNavigate('profile')}
-                    className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-xl transition-colors"
-                  >
-                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center shrink-0">
-                      <User className="w-4 h-4 text-white" />
-                    </div>
-                    <span className="hidden md:inline text-sm font-semibold text-gray-900 max-w-[120px] truncate">
-                      {profile.name}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={handleSignOut}
-                    className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-                    title="تسجيل الخروج"
-                  >
-                    <LogOut className="w-5 h-5" />
-                  </button>
-                </>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setAuthMode('login');
-                      setShowAuthModal(true);
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
-                  >
-                    تسجيل الدخول
-                  </button>
-                  <button
-                    onClick={() => {
-                      setAuthMode('signup');
-                      setShowAuthModal(true);
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors"
-                  >
-                    إنشاء حساب
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <section className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-6">
-          <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between mb-6">
-            <div>
-              <h3 className="text-2xl font-bold text-gray-900">المنتجات المتاحة</h3>
-              <p className="text-sm text-gray-500 mt-1">
-                تصفح منتجات المتجر وابحث فيها بسهولة
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4 mb-8">
-            <div className="relative">
-              <Search className="w-5 h-5 text-gray-400 absolute right-4 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ابحث عن منتج داخل المتجر..."
-                className="w-full h-14 rounded-2xl border border-gray-200 bg-gray-50 pr-12 pl-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl border border-gray-200 bg-gray-50 flex items-center justify-center shrink-0">
-                <Filter className="w-5 h-5 text-gray-500" />
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4 mb-8">
+              <div className="relative">
+                <Search className="w-5 h-5 text-gray-400 absolute right-4 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="ابحث عن منتج داخل المتجر..."
+                  className="w-full h-14 rounded-2xl border border-gray-200 bg-gray-50 pr-12 pl-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
               </div>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-14 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="newest">الأحدث</option>
-                <option value="popular">الأكثر مبيعاً</option>
-                <option value="price_low">السعر: من الأقل للأعلى</option>
-                <option value="price_high">السعر: من الأعلى للأقل</option>
-              </select>
-            </div>
-          </div>
 
-          {filteredProducts.length === 0 ? (
-            <div className="text-center py-16 rounded-3xl bg-gray-50 border border-dashed border-gray-200">
-              <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد منتجات مطابقة</h3>
-              <p className="text-gray-500">
-                {products.length === 0
-                  ? 'لا يوجد منتجات في هذا المتجر حالياً'
-                  : 'جرّب تغيير البحث أو الترتيب لعرض نتائج أخرى'}
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {filteredProducts.map((product) => (
-                <div
-                  key={product.id}
-                  onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
-                  className="group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden cursor-pointer"
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl border border-gray-200 bg-gray-50 flex items-center justify-center shrink-0">
+                  <Filter className="w-5 h-5 text-gray-500" />
+                </div>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="w-full h-14 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <div className="relative aspect-square overflow-hidden bg-gray-50">
-                    {product.thumbnail_url ? (
-                      <img
-                        src={product.thumbnail_url}
-                        alt={product.display_name}
-                        className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Package className="w-14 h-14 text-blue-500" />
-                      </div>
-                    )}
-                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-purple-500" />
-                  </div>
+                  <option value="newest">الأحدث</option>
+                  <option value="popular">الأكثر مبيعاً</option>
+                  <option value="price_low">السعر: من الأقل للأعلى</option>
+                  <option value="price_high">السعر: من الأعلى للأقل</option>
+                </select>
+              </div>
+            </div>
 
-                  <div className="p-4">
-                    <div className="min-h-[52px] mb-2">
-                      <h3 className="text-xl font-bold text-gray-900 line-clamp-2 leading-snug">
-                        {product.display_name}
-                      </h3>
-                    </div>
-
-                    <p className="text-gray-500 text-sm leading-6 line-clamp-1 min-h-[24px] mb-4">
-                      {product.description || 'منتج رقمي'}
-                    </p>
-
-                    <div className="flex items-end justify-between gap-3 mb-4">
-                      <div>
-                        <div className="text-xs text-gray-400 mb-1">السعر</div>
-                        <div className="text-[18px] md:text-[20px] font-extrabold text-blue-600 leading-none">
-                          {product.price} {product.currency}
-                        </div>
-                      </div>
-
-                      {Number(product.sales_count || 0) > 0 && (
-                        <div className="text-xs px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-gray-600">
-                          تم بيع {product.sales_count}
-                        </div>
+            {filteredProducts.length === 0 ? (
+              <div className="text-center py-16 rounded-3xl bg-gray-50 border border-dashed border-gray-200">
+                <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد منتجات مطابقة</h3>
+                <p className="text-gray-500">
+                  {products.length === 0
+                    ? 'لا يوجد منتجات في هذا المتجر حالياً'
+                    : 'جرّب تغيير البحث أو الترتيب لعرض نتائج أخرى'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {filteredProducts.map((product) => (
+                  <div
+                    key={product.id}
+                    className="bg-white rounded-xl overflow-hidden shadow cursor-pointer hover:shadow-lg transition-shadow border border-gray-100"
+                    onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
+                  >
+                    <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden">
+                      {product.thumbnail_url ? (
+                        <img
+                          src={product.thumbnail_url}
+                          alt={product.display_name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Download className="w-12 h-12 text-gray-400" />
                       )}
                     </div>
 
-                    <button className="w-full h-12 rounded-2xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                      <span>عرض التفاصيل</span>
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
+                    <div className="p-4">
+                      <h3 className="font-bold text-lg text-gray-900 line-clamp-1 mb-2">
+                        {product.display_name}
+                      </h3>
 
-      <footer className="mt-12 bg-[#08152f] text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-          <div className="text-right">
+                      <div className="flex items-center justify-between">
+                        <div className="text-blue-600 font-bold text-xl">
+                          {Number(product.price ?? 0)} {product.currency || 'ريال'}
+                        </div>
+
+                        <div className="flex items-center gap-1 text-sm text-gray-500">
+                          <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                          <span>4.8</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+
+      <footer className="mt-12 bg-[#08152f] text-white flex-1">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 min-h-[260px] flex items-start">
+          <div className="text-right w-full">
             <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
               {store.description && String(store.description).trim() !== ''
                 ? store.description
