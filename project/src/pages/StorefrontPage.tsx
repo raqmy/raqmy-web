@@ -8,7 +8,6 @@ import {
   Filter,
   Share2,
   Search,
-  ChevronLeft,
   Star,
   Download,
 } from 'lucide-react';
@@ -441,14 +440,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 content-start">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 content-start">
                 {filteredProducts.map((product) => (
                   <div
                     key={product.id}
                     className="bg-white rounded-xl overflow-hidden shadow cursor-pointer hover:shadow-lg transition-shadow border border-gray-100"
                     onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
                   >
-                    <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                    <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden">
                       {product.thumbnail_url ? (
                         <img
                           src={product.thumbnail_url}
