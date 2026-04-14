@@ -166,19 +166,51 @@ interface AdminFinancialStats {
   withdrawalsCount: number;
 }
 
+type AdminDashboardTab =
+  | 'overview'
+  | 'users'
+  | 'stores'
+  | 'products'
+  | 'financial-transactions'
+  | 'payment-settings'
+  | 'merchant-verifications'
+  | 'bank-account-verifications';
+
+const ADMIN_DASHBOARD_BASE_PATH = '/admin-dashboard';
+const ADMIN_DASHBOARD_AFFILIATE_PATH = `${ADMIN_DASHBOARD_BASE_PATH}/affiliate`;
+const ADMIN_DASHBOARD_TAB_PATHS: Record<AdminDashboardTab, string> = {
+  overview: ADMIN_DASHBOARD_BASE_PATH,
+  users: `${ADMIN_DASHBOARD_BASE_PATH}/users`,
+  stores: `${ADMIN_DASHBOARD_BASE_PATH}/stores`,
+  products: `${ADMIN_DASHBOARD_BASE_PATH}/products`,
+  'financial-transactions': `${ADMIN_DASHBOARD_BASE_PATH}/financial-transactions`,
+  'payment-settings': `${ADMIN_DASHBOARD_BASE_PATH}/payment-settings`,
+  'merchant-verifications': `${ADMIN_DASHBOARD_BASE_PATH}/merchant-verifications`,
+  'bank-account-verifications': `${ADMIN_DASHBOARD_BASE_PATH}/bank-account-verifications`,
+};
+
+const normalizeAdminDashboardPath = (path: string) => {
+  const normalized = path.replace(/\/+$/, '');
+  return normalized === '' ? '/' : normalized;
+};
+
+const getAdminDashboardTabFromPath = (pathname: string): AdminDashboardTab | null => {
+  const normalizedPath = normalizeAdminDashboardPath(pathname);
+  const matchedEntry = Object.entries(ADMIN_DASHBOARD_TAB_PATHS).find(([, path]) => {
+    return normalizeAdminDashboardPath(path) === normalizedPath;
+  });
+
+  return (matchedEntry?.[0] as AdminDashboardTab | undefined) || null;
+};
+
+const getAdminDashboardPath = (tab: AdminDashboardTab) => {
+  return ADMIN_DASHBOARD_TAB_PATHS[tab] || ADMIN_DASHBOARD_BASE_PATH;
+};
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<
-    | 'overview'
-    | 'users'
-    | 'stores'
-    | 'products'
-    | 'financial-transactions'
-    | 'payment-settings'
-    | 'merchant-verifications'
-    | 'bank-account-verifications'
-  >('overview');
+  const [activeTab, setActiveTab] = useState<AdminDashboardTab>('overview');
 
   const [stats, setStats] = useState<Stats>({
     totalUsers: 0,
@@ -250,6 +282,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     withdrawalsPendingTotal: 0,
     withdrawalsCount: 0,
   });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const syncTabFromPath = () => {
+      const resolvedTab = getAdminDashboardTabFromPath(window.location.pathname);
+      if (resolvedTab && resolvedTab !== activeTab) {
+        setActiveTab(resolvedTab);
+      }
+    };
+
+    syncTabFromPath();
+    window.addEventListener('popstate', syncTabFromPath);
+
+    return () => {
+      window.removeEventListener('popstate', syncTabFromPath);
+    };
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const targetPath = normalizeAdminDashboardPath(getAdminDashboardPath(activeTab));
+    const currentPath = normalizeAdminDashboardPath(window.location.pathname);
+
+    if (currentPath !== targetPath) {
+      window.history.replaceState(window.history.state, '', targetPath);
+    }
+  }, [activeTab]);
+
+  const handleTabChange = (tab: AdminDashboardTab) => {
+    setActiveTab(tab);
+
+    if (typeof window === 'undefined') return;
+
+    const targetPath = normalizeAdminDashboardPath(getAdminDashboardPath(tab));
+    const currentPath = normalizeAdminDashboardPath(window.location.pathname);
+
+    if (currentPath !== targetPath) {
+      window.history.pushState(window.history.state, '', targetPath);
+    }
+  };
+
+  const handleAffiliatePageNavigate = () => {
+    if (typeof window !== 'undefined') {
+      const targetPath = normalizeAdminDashboardPath(ADMIN_DASHBOARD_AFFILIATE_PATH);
+      const currentPath = normalizeAdminDashboardPath(window.location.pathname);
+
+      if (currentPath !== targetPath) {
+        window.history.pushState(window.history.state, '', targetPath);
+      }
+    }
+
+    onNavigate('admin-affiliate-management');
+  };
 
   useEffect(() => {
     if (profile?.role === 'admin' || profile?.role === 'superadmin') {
@@ -1944,7 +2031,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         <div className="bg-white rounded-xl shadow-sm mb-8">
           <div className="flex items-center gap-2 p-2 overflow-x-auto">
             <button
-              onClick={() => setActiveTab('overview')}
+              onClick={() => handleTabChange('overview')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'overview' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -1954,7 +2041,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </button>
 
             <button
-              onClick={() => setActiveTab('users')}
+              onClick={() => handleTabChange('users')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'users' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -1964,7 +2051,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </button>
 
             <button
-              onClick={() => setActiveTab('stores')}
+              onClick={() => handleTabChange('stores')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'stores' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -1974,7 +2061,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </button>
 
             <button
-              onClick={() => setActiveTab('products')}
+              onClick={() => handleTabChange('products')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'products' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -1984,7 +2071,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </button>
 
             <button
-              onClick={() => setActiveTab('financial-transactions')}
+              onClick={() => handleTabChange('financial-transactions')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'financial-transactions' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -1994,7 +2081,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </button>
 
             <button
-              onClick={() => setActiveTab('merchant-verifications')}
+              onClick={() => handleTabChange('merchant-verifications')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'merchant-verifications' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2015,7 +2102,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </button>
 
             <button
-              onClick={() => setActiveTab('bank-account-verifications')}
+              onClick={() => handleTabChange('bank-account-verifications')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'bank-account-verifications' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2036,7 +2123,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </button>
 
             <button
-  onClick={() => onNavigate('admin-affiliate-management')}
+  onClick={handleAffiliatePageNavigate}
   className="flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap text-gray-600 hover:bg-gray-100"
 >
   <Megaphone className="w-5 h-5" />
@@ -2096,7 +2183,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <button
-  onClick={() => onNavigate('admin-affiliate-management')}
+  onClick={handleAffiliatePageNavigate}
   className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
 >
   <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
@@ -2118,7 +2205,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
               </button>
 
               <button
-                onClick={() => setActiveTab('financial-transactions')}
+                onClick={() => handleTabChange('financial-transactions')}
                 className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
               >
                 <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
@@ -2129,7 +2216,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
               </button>
 
               <button
-                onClick={() => setActiveTab('merchant-verifications')}
+                onClick={() => handleTabChange('merchant-verifications')}
                 className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
               >
                 <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center mb-4">
@@ -2147,7 +2234,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
               </button>
 
               <button
-                onClick={() => setActiveTab('bank-account-verifications')}
+                onClick={() => handleTabChange('bank-account-verifications')}
                 className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow text-right"
               >
                 <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mb-4">
