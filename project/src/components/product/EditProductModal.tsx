@@ -59,7 +59,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
   useEffect(() => {
     if (isOpen && productId) {
-      // reset transient states on open
       setError('');
       setLoading(false);
       setDeleting(false);
@@ -94,7 +93,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
       setProduct(data);
 
-      const dbName = (data as any)?.name ?? (data as any)?.title ?? '';
+      const dbName = (data as any)?.title ?? (data as any)?.name ?? '';
       const dbCurrency = (data as any)?.currency ?? 'SAR';
       const dbVisibility = (data as any)?.visibility ?? 'marketplace';
 
@@ -108,7 +107,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         is_active: Boolean((data as any)?.is_active),
       });
 
-      // Fetch product images
       const { data: imagesData, error: imagesError } = await supabase
         .from('product_images')
         .select('*')
@@ -117,7 +115,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
       if (imagesError) {
         console.error('fetch product_images error:', imagesError);
-        // لا نوقف المودال عشان الصور فشلت
         setImages([]);
         setExistingImageIds([]);
       } else if (imagesData) {
@@ -135,7 +132,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         setExistingImageIds([]);
       }
 
-      // Fetch product attachments
       const { data: attachmentsData, error: attachmentsError } = await supabase
         .from('product_attachments')
         .select('*')
@@ -164,7 +160,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         setExistingAttachmentIds([]);
       }
 
-      // Fetch linked coupon (optional)
       const { data: couponLink, error: couponLinkError } = await supabase
         .from('coupon_products')
         .select('coupon_id')
@@ -172,7 +167,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         .maybeSingle();
 
       if (couponLinkError) {
-        // لا نوقف المودال
         console.error('fetch coupon_products error:', couponLinkError);
         setSelectedCouponId('');
       } else if (couponLink?.coupon_id) {
@@ -189,6 +183,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const fetchStores = async () => {
     try {
       if (!profile) return;
+
       const { data, error } = await supabase
         .from('stores')
         .select('*')
@@ -199,6 +194,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         console.error('fetchStores error:', error);
         return;
       }
+
       if (data) setStores(data);
     } catch (e) {
       console.error('fetchStores unexpected error:', e);
@@ -220,6 +216,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         console.error('fetchCoupons error:', error);
         return;
       }
+
       if (data) setCoupons(data);
     } catch (e) {
       console.error('fetchCoupons unexpected error:', e);
@@ -255,26 +252,24 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     setLoading(true);
 
     try {
-      // 1) Update product
-      // ✅ name يمكن يكون title في بعض السكيمات، لكن هنا نفترض name موجود (مثل بقية مشروعك)
-      // ولو ما كان موجود، سيظهر خطأ schema وسيتم عرضه للمستخدم بدل شاشة بيضاء.
+      const productUpdatePayload: Record<string, any> = {
+        title: safeStr(formData.name),
+        description: safeStr(formData.description) ? safeStr(formData.description) : null,
+        price,
+        currency: safeStr(formData.currency) || 'SAR',
+        store_id: safeStr(formData.store_id) ? safeStr(formData.store_id) : null,
+        visibility: safeStr(formData.visibility) || 'marketplace',
+        is_active: Boolean(formData.is_active),
+        updated_at: new Date().toISOString(),
+      };
+
       const { error: updateError } = await supabase
         .from('products')
-        .update({
-          name: safeStr(formData.name),
-          description: safeStr(formData.description) ? safeStr(formData.description) : null,
-          price,
-          currency: safeStr(formData.currency) || 'SAR',
-          store_id: safeStr(formData.store_id) ? safeStr(formData.store_id) : null,
-          visibility: safeStr(formData.visibility) || 'marketplace',
-          is_active: Boolean(formData.is_active),
-          updated_at: new Date().toISOString(),
-        } as any)
+        .update(productUpdatePayload)
         .eq('id', productId);
 
       if (updateError) throw updateError;
 
-      // 2) Update product images
       const currentImageIds = images.filter((img) => img.id).map((img) => img.id!);
       const imagesToDelete = existingImageIds.filter((id) => !currentImageIds.includes(id));
 
@@ -291,6 +286,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             display_order: Number(img.display_order ?? 0),
           })
           .eq('id', img.id!);
+
         if (updImgErr) console.error('update image error:', updImgErr);
       }
 
@@ -307,17 +303,15 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         if (insImgErr) console.error('insert images error:', insImgErr);
       }
 
-      // 3) Update product attachments
       const currentAttachmentIds = attachments.filter((att) => att.id).map((att) => att.id!);
-      const attachmentsToDelete = existingAttachmentIds.filter(
-        (id) => !currentAttachmentIds.includes(id)
-      );
+      const attachmentsToDelete = existingAttachmentIds.filter((id) => !currentAttachmentIds.includes(id));
 
       if (attachmentsToDelete.length > 0) {
         const { error: delAttErr } = await supabase
           .from('product_attachments')
           .delete()
           .in('id', attachmentsToDelete);
+
         if (delAttErr) console.error('delete attachments error:', delAttErr);
       }
 
@@ -329,6 +323,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             display_order: Number(att.display_order ?? 0),
           })
           .eq('id', att.id!);
+
         if (updAttErr) console.error('update attachment error:', updAttErr);
       }
 
@@ -348,7 +343,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         if (insAttErr) console.error('insert attachments error:', insAttErr);
       }
 
-      // 4) Update coupon link
       const { error: delCouponLinkErr } = await supabase
         .from('coupon_products')
         .delete()
@@ -445,7 +439,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
           )}
 
-          {/* 1. معلومات المنتج الأساسية */}
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">1. معلومات المنتج الأساسية</h3>
@@ -507,7 +500,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
           </div>
 
-          {/* 2. صور المنتج */}
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">2. صور المنتج</h3>
@@ -517,7 +509,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             <ProductImagesManager images={images} onChange={setImages} maxImages={8} />
           </div>
 
-          {/* 3. مرفقات المنتج الرقمي */}
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">3. مرفقات المنتج الرقمي</h3>
@@ -527,7 +518,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             <ProductAttachmentsManager attachments={attachments} onChange={setAttachments} />
           </div>
 
-          {/* 4. التسعير والظهور */}
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">4. التسعير والظهور</h3>
@@ -577,7 +567,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
           </div>
 
-          {/* 5. كوبونات الخصم */}
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">5. كوبونات الخصم</h3>
@@ -604,7 +593,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
           </div>
 
-          {/* Validation Messages */}
           {!isFormValid() && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-sm font-medium text-blue-900 mb-2">لحفظ التغييرات، يجب:</p>
@@ -617,7 +605,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             </div>
           )}
 
-          {/* Actions */}
           <div className="flex items-center gap-4 pt-6 border-t border-gray-200">
             <button
               type="button"
