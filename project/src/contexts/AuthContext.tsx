@@ -21,11 +21,10 @@ export const useAuth = () => {
   return context;
 };
 
-// 1) Normalize role coming from DB/auth (some setups use "merchant")
 const normalizeRole = (role: any): 'customer' | 'seller' | 'admin' => {
   if (role === 'merchant') return 'seller';
   if (role === 'seller') return 'seller';
-  if (role === 'admin') return 'admin';
+  if (role === 'admin' || role === 'superadmin') return 'admin';
   return 'customer';
 };
 
@@ -34,16 +33,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const userRef = useRef<User | null>(null);
-  const profileRef = useRef<UserProfile | null>(null);
-
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
-
-  useEffect(() => {
-    profileRef.current = profile;
-  }, [profile]);
+  const mountedRef = useRef(true);
+  const currentUserIdRef = useRef<string | null>(null);
+  const profileRequestIdRef = useRef(0);
 
   const refreshUserSubscriptionStatus = async (userId: string) => {
     try {
@@ -59,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
     await refreshUserSubscriptionStatus(userId);
 
     const { data, error } = await supabase
@@ -75,77 +67,66 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (!data) return null;
 
-    // normalize role to UI format
-    const normalized = { ...data, role: normalizeRole((data as any).role) } as any;
-    return normalized as UserProfile;
+    return {
+      ...(data as any),
+      role: normalizeRole((data as any).role),
+    } as UserProfile;
   };
 
-  // Keep auth metadata in sync with DB profile (fix: showing "عميل" even when seller)
-  const syncAuthMetadataWithProfile = async (p: UserProfile | null) => {
-    try {
-      if (!p) return;
-      const currentUser = (await supabase.auth.getUser()).data.user;
-      if (!currentUser) return;
-
-      const metaRole = normalizeRole((currentUser.user_metadata as any)?.role);
-      const metaName = (currentUser.user_metadata as any)?.name;
-
-      const desiredRole = normalizeRole((p as any).role);
-      const desiredName = (p as any).name ?? metaName;
-
-      // Update only if different to avoid extra calls
-      if (metaRole !== desiredRole || (desiredName && metaName !== desiredName)) {
-        const { error } = await supabase.auth.updateUser({
-          data: {
-            role: desiredRole,
-            name: desiredName,
-          },
-        });
-        if (error) console.warn('Could not sync auth metadata:', error);
-      }
-    } catch (e) {
-      console.warn('syncAuthMetadataWithProfile failed:', e);
-    }
-  };
-
-  const applyAuthState = async (
-    nextUser: User | null,
-    options?: {
-      skipProfileRefresh?: boolean;
-    }
-  ) => {
-    setUser(nextUser);
+  const loadProfileForUser = async (nextUser: User | null) => {
+    const requestId = ++profileRequestIdRef.current;
 
     if (!nextUser) {
+      if (!mountedRef.current) return;
+      currentUserIdRef.current = null;
+      setUser(null);
       setProfile(null);
       setLoading(false);
       return;
     }
 
-    if (options?.skipProfileRefresh) {
-      setLoading(false);
-      return;
-    }
+    currentUserIdRef.current = nextUser.id;
+    setUser(nextUser);
 
-    const profileData = await fetchProfile(nextUser.id);
-    setProfile(profileData);
-    await syncAuthMetadataWithProfile(profileData);
-    setLoading(false);
+    try {
+      const profileData = await fetchProfile(nextUser.id);
+
+      if (!mountedRef.current) return;
+      if (profileRequestIdRef.current !== requestId) return;
+      if (currentUserIdRef.current !== nextUser.id) return;
+
+      setProfile(profileData);
+    } catch (error) {
+      console.error('Error loading profile:', error);
+
+      if (!mountedRef.current) return;
+      if (profileRequestIdRef.current !== requestId) return;
+
+      setProfile(null);
+    } finally {
+      if (!mountedRef.current) return;
+      if (profileRequestIdRef.current !== requestId) return;
+
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    let isMounted = true;
+    mountedRef.current = true;
 
     const bootstrapAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        if (!isMounted) return;
+        if (!mountedRef.current) return;
 
-        await applyAuthState(session?.user ?? null);
+        await loadProfileForUser(session?.user ?? null);
       } catch (error) {
         console.error('Error bootstrapping auth state:', error);
-        if (!isMounted) return;
+
+        if (!mountedRef.current) return;
         setUser(null);
         setProfile(null);
         setLoading(false);
@@ -156,47 +137,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!isMounted) return;
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mountedRef.current) return;
 
       const nextUser = session?.user ?? null;
-      const currentUser = userRef.current;
-      const currentProfile = profileRef.current;
 
       if (event === 'SIGNED_OUT') {
+        currentUserIdRef.current = null;
         setUser(null);
         setProfile(null);
         setLoading(false);
         return;
       }
 
-      const isSameUser = Boolean(
-        nextUser &&
-        currentUser &&
-        nextUser.id === currentUser.id
-      );
+      const currentUserId = currentUserIdRef.current;
+      const nextUserId = nextUser?.id ?? null;
+      const isSameUser = currentUserId && nextUserId && currentUserId === nextUserId;
 
-      const shouldSkipProfileRefresh =
+      setUser(nextUser);
+
+      if (!nextUser) {
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      if (
         isSameUser &&
-        !!currentProfile &&
-        currentProfile.id === nextUser?.id &&
-        (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN');
+        (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')
+      ) {
+        setLoading(false);
+        return;
+      }
 
-      await applyAuthState(nextUser, {
-        skipProfileRefresh: shouldSkipProfileRefresh,
-      });
+      void loadProfileForUser(nextUser);
     });
 
     return () => {
-      isMounted = false;
+      mountedRef.current = false;
       subscription.unsubscribe();
     };
   }, []);
 
-  const signUp = async (email: string, password: string, name: string, role: 'customer' | 'seller') => {
+  const signUp = async (
+    email: string,
+    password: string,
+    name: string,
+    role: 'customer' | 'seller'
+  ) => {
     const normalizedRole = normalizeRole(role);
 
-    // 1) Create auth user + set metadata
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -211,7 +201,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (error) throw error;
     if (!data.user) throw new Error('No user returned');
 
-    // 2) Insert/Upsert profile in DB (same role)
     const { error: profileError } = await supabase
       .from('users_profile')
       .upsert(
@@ -225,24 +214,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (profileError) throw profileError;
 
-    // 3) Force metadata sync (some setups don’t persist signup metadata immediately)
     const { error: metaError } = await supabase.auth.updateUser({
       data: {
         name,
         role: normalizedRole,
       },
     });
-    if (metaError) console.warn('Signup metadata update warning:', metaError);
 
-    // 4) Refresh profile in state
+    if (metaError) {
+      console.warn('Signup metadata update warning:', metaError);
+    }
+
     const profileData = await fetchProfile(data.user.id);
-    setProfile(profileData);
+    if (mountedRef.current) {
+      setProfile(profileData);
+    }
   };
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    // onAuthStateChange will refresh profile
   };
 
   const signOut = async () => {
@@ -253,13 +244,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) throw new Error('No user logged in');
 
-    // If role is being updated, normalize it
     const updatesForDb: any = { ...updates };
+
     if ('role' in updatesForDb) {
-      updatesForDb.role = normalizeRole((updatesForDb as any).role);
+      updatesForDb.role = normalizeRole(updatesForDb.role);
     }
 
-    // 1) Update DB profile
     const { error } = await supabase
       .from('users_profile')
       .update(updatesForDb)
@@ -267,29 +257,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (error) throw error;
 
-    // 2) Update auth metadata too (THIS fixes "عميل" showing in header after upgrading)
     const metaPayload: any = {};
     if (updatesForDb.role) metaPayload.role = updatesForDb.role;
     if (updatesForDb.name) metaPayload.name = updatesForDb.name;
 
     if (Object.keys(metaPayload).length > 0) {
-      const { error: metaError } = await supabase.auth.updateUser({ data: metaPayload });
-      if (metaError) console.warn('Metadata update warning:', metaError);
+      const { error: metaError } = await supabase.auth.updateUser({
+        data: metaPayload,
+      });
+
+      if (metaError) {
+        console.warn('Metadata update warning:', metaError);
+      }
     }
 
-    // 3) Refresh profile state
     const updatedProfile = await fetchProfile(user.id);
-    setProfile(updatedProfile);
+    if (mountedRef.current) {
+      setProfile(updatedProfile);
+    }
   };
 
   const refreshProfile = async () => {
     if (!user) return;
 
     const updatedProfile = await fetchProfile(user.id);
-    setProfile(updatedProfile);
+    if (mountedRef.current) {
+      setProfile(updatedProfile);
+    }
   };
 
-  const value = { user, profile, loading, signUp, signIn, signOut, updateProfile, refreshProfile };
+  const value: AuthContextType = {
+    user,
+    profile,
+    loading,
+    signUp,
+    signIn,
+    signOut,
+    updateProfile,
+    refreshProfile,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
