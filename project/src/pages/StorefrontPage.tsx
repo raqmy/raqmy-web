@@ -1,5 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { Store as StoreIcon, User, LogOut, ShoppingCart, Home, Package, Filter, Share2 } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Store as StoreIcon,
+  User,
+  LogOut,
+  ShoppingCart,
+  Package,
+  Filter,
+  Share2,
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -22,6 +30,8 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeSlug, sortBy]);
 
+  const storeImageUrl = useMemo(() => getStoreImageUrl(store), [store]);
+
   useEffect(() => {
     if (!store) return;
 
@@ -39,8 +49,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
     updateMetaTag('name', 'twitter:card', 'summary_large_image');
     updateMetaTag('name', 'twitter:title', pageTitle);
     updateMetaTag('name', 'twitter:description', pageDescription);
+
+    if (storeImageUrl) {
+      updateMetaTag('property', 'og:image', storeImageUrl);
+      updateMetaTag('name', 'twitter:image', storeImageUrl);
+    }
+
     updateCanonicalUrl(canonicalUrl);
-  }, [store, storeSlug]);
+  }, [store, storeSlug, storeImageUrl]);
 
   const updateMetaTag = (attribute: 'name' | 'property', key: string, content: string) => {
     let element = document.head.querySelector(`meta[${attribute}="${key}"]`) as HTMLMetaElement | null;
@@ -180,6 +196,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
       const enrichedProducts = rawProducts.map((product: any) => ({
         ...product,
+        display_name: product.title || product.name || 'منتج رقمي',
         thumbnail_url:
           product.thumbnail_url && String(product.thumbnail_url).trim() !== ''
             ? product.thumbnail_url
@@ -246,7 +263,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
             onClick={() => onNavigate('marketplace')}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
           >
-            العودة إلى المتجر العام
+            العودة
           </button>
         </div>
       </div>
@@ -260,29 +277,21 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-8">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                  <StoreIcon className="w-6 h-6 text-white" />
+                <div className="w-10 h-10 rounded-lg overflow-hidden bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+                  {storeImageUrl ? (
+                    <img
+                      src={storeImageUrl}
+                      alt={store?.name || 'صورة المتجر'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <StoreIcon className="w-6 h-6 text-white" />
+                  )}
                 </div>
                 <div>
                   <h1 className="text-xl font-bold text-gray-900">{store.name}</h1>
                   <p className="text-xs text-gray-500">{store.category}</p>
                 </div>
-              </div>
-
-              <div className="hidden md:flex items-center gap-6">
-                <button
-                  onClick={() => onNavigate('home')}
-                  className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1"
-                >
-                  <Home className="w-4 h-4" />
-                  <span>المنصة الرئيسية</span>
-                </button>
-                <button
-                  onClick={() => onNavigate('marketplace')}
-                  className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                >
-                  المتجر العام
-                </button>
               </div>
             </div>
 
@@ -349,24 +358,39 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-8 mb-8 text-white">
-          <h1 className="text-4xl font-bold mb-2">{store.name}</h1>
-          {store.description && <p className="text-lg text-blue-50 mb-4">{store.description}</p>}
-          <div className="flex flex-wrap items-center gap-4">
-            <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm">
-              {products.length} منتج
-            </span>
-            <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm" dir="ltr">
-              /s/{storeSlug}
-            </span>
-            {store.email && (
-              <a
-                href={`mailto:${store.email}`}
-                className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm hover:bg-white/30"
-              >
-                تواصل معنا
-              </a>
-            )}
+        <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-8 mb-8 text-white overflow-hidden">
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-8">
+            <div className="flex-1 text-right w-full">
+              <h1 className="text-4xl font-bold mb-2">{store.name}</h1>
+              {store.description && <p className="text-lg text-blue-50 mb-4">{store.description}</p>}
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm">
+                  {products.length} منتج
+                </span>
+                {store.email && (
+                  <a
+                    href={`mailto:${store.email}`}
+                    className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm hover:bg-white/30"
+                  >
+                    تواصل معنا
+                  </a>
+                )}
+              </div>
+            </div>
+
+            <div className="shrink-0">
+              <div className="w-32 h-32 md:w-40 md:h-40 rounded-2xl overflow-hidden bg-white/15 backdrop-blur-sm border border-white/20 shadow-lg flex items-center justify-center">
+                {storeImageUrl ? (
+                  <img
+                    src={storeImageUrl}
+                    alt={store?.name || 'صورة المتجر'}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <StoreIcon className="w-16 h-16 md:w-20 md:h-20 text-white" />
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -398,16 +422,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
             {products.map((product) => (
               <div
                 key={product.id}
-                onClick={() =>
-                  onNavigate(`product-slug-${product.slug || product.id}`)
-                }
+                onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
                 className="bg-white rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden group"
               >
                 <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center overflow-hidden">
                   {product.thumbnail_url ? (
                     <img
                       src={product.thumbnail_url}
-                      alt={product.name}
+                      alt={product.display_name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
                   ) : (
@@ -415,7 +437,9 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                   )}
                 </div>
                 <div className="p-6">
-                  <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2">{product.name}</h3>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2">
+                    {product.display_name}
+                  </h3>
                   <p className="text-gray-600 text-sm mb-4 line-clamp-2">
                     {product.description || 'منتج رقمي'}
                   </p>
@@ -432,8 +456,10 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                       /p/{product.slug}
                     </div>
                   )}
-                  {product.sales_count > 0 && (
-                    <div className="mt-2 text-sm text-gray-500">تم بيع {product.sales_count} مرة</div>
+                  {Number(product.sales_count || 0) > 0 && (
+                    <div className="mt-2 text-sm text-gray-500">
+                      تم بيع {product.sales_count} مرة
+                    </div>
                   )}
                 </div>
               </div>
@@ -456,6 +482,27 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
     </div>
   );
 };
+
+function getStoreImageUrl(storeRecord: any): string | null {
+  if (!storeRecord) return null;
+
+  const candidates = [
+    storeRecord.store_image_url,
+    storeRecord.image_url,
+    storeRecord.logo_url,
+    storeRecord.thumbnail_url,
+    storeRecord.avatar_url,
+    storeRecord.cover_image_url,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
 
 interface StorefrontAuthModalProps {
   mode: 'login' | 'signup';
