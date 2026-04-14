@@ -391,7 +391,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
         </nav>
 
         <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-          <section className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-6">
+          <section className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-6 min-h-[980px] lg:min-h-[860px]">
             <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between mb-6">
               <div>
                 <h3 className="text-2xl font-bold text-gray-900">المنتجات المتاحة</h3>
@@ -441,14 +441,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 content-start">
                 {filteredProducts.map((product) => (
                   <div
                     key={product.id}
                     className="bg-white rounded-xl overflow-hidden shadow cursor-pointer hover:shadow-lg transition-shadow border border-gray-100"
                     onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
                   >
-                    <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden">
+                    <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
                       {product.thumbnail_url ? (
                         <img
                           src={product.thumbnail_url}
