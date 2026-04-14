@@ -230,6 +230,14 @@ const SELLER_DASHBOARD_TAB_PATHS: Record<SellerDashboardTab, string> = {
   settings: `${SELLER_DASHBOARD_BASE_PATH}/settings`,
 };
 
+const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
+const SELLER_DASHBOARD_CACHE_VERSION = 1;
+const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
+
+const getSellerDashboardCacheKey = (profileId: string) => {
+  return `${SELLER_DASHBOARD_CACHE_PREFIX}:${profileId}`;
+};
+
 const normalizeBrowserPath = (path: string) => {
   const normalized = path.replace(/\/+$/, '');
   return normalized === '' ? '/' : normalized;
@@ -252,6 +260,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const { profile } = useAuth();
 
   const [activeTab, setActiveTab] = useState<SellerDashboardTab>('overview');
+  const [hasRestoredDashboardCache, setHasRestoredDashboardCache] = useState(false);
+  const [hasCachedDashboardData, setHasCachedDashboardData] = useState(false);
 
   const [stores, setStores] = useState<Store[]>([]);
   const [products, setProducts] = useState<NormalizedProduct[]>([]);
@@ -379,16 +389,151 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   useEffect(() => {
-    if (profile) {
-      fetchDashboardData();
-      fetchIdentityVerification();
-      fetchBankAccountData();
-      fetchEarningsData();
-      fetchWithdrawalLimitData();
-      fetchOrdersData();
+    if (!profile?.id || typeof window === 'undefined') {
+      setHasRestoredDashboardCache(false);
+      setHasCachedDashboardData(false);
+      return;
     }
+
+    try {
+      const rawCache = sessionStorage.getItem(getSellerDashboardCacheKey(profile.id));
+      if (!rawCache) {
+        setHasCachedDashboardData(false);
+        return;
+      }
+
+      const parsedCache = JSON.parse(rawCache);
+      const isCacheValid =
+        parsedCache?.version === SELLER_DASHBOARD_CACHE_VERSION &&
+        typeof parsedCache?.cachedAt === 'number' &&
+        Date.now() - parsedCache.cachedAt <= SELLER_DASHBOARD_CACHE_TTL_MS;
+
+      if (!isCacheValid) {
+        sessionStorage.removeItem(getSellerDashboardCacheKey(profile.id));
+        setHasCachedDashboardData(false);
+        return;
+      }
+
+      if (parsedCache.activeTab) {
+        setActiveTab(parsedCache.activeTab as SellerDashboardTab);
+      }
+
+      setStores(Array.isArray(parsedCache.stores) ? parsedCache.stores : []);
+      setProducts(Array.isArray(parsedCache.products) ? parsedCache.products : []);
+      setStats(
+        parsedCache.stats && typeof parsedCache.stats === 'object'
+          ? parsedCache.stats
+          : {
+              totalRevenue: 0,
+              totalSales: 0,
+              totalViews: 0,
+              activeProducts: 0,
+            }
+      );
+      setAffiliateLinks(Array.isArray(parsedCache.affiliateLinks) ? parsedCache.affiliateLinks : []);
+      setIdentityVerification(parsedCache.identityVerification ?? null);
+      setVerificationForm(
+        parsedCache.verificationForm && typeof parsedCache.verificationForm === 'object'
+          ? parsedCache.verificationForm
+          : {
+              full_name: profile.name ?? '',
+              identity_type: 'national_id',
+              identity_number: '',
+              date_of_birth: '',
+            }
+      );
+      setBankAccountData(parsedCache.bankAccountData ?? null);
+      setBankAccountForm(
+        parsedCache.bankAccountForm && typeof parsedCache.bankAccountForm === 'object'
+          ? parsedCache.bankAccountForm
+          : {
+              bank_name: '',
+              account_holder_name: profile.name ?? '',
+              iban: '',
+            }
+      );
+      setWalletData(parsedCache.walletData ?? null);
+      setWalletLedger(Array.isArray(parsedCache.walletLedger) ? parsedCache.walletLedger : []);
+      setWithdrawalRequests(Array.isArray(parsedCache.withdrawalRequests) ? parsedCache.withdrawalRequests : []);
+      setWithdrawalLimitStatus(parsedCache.withdrawalLimitStatus ?? null);
+      setWithdrawalLimitSettings(parsedCache.withdrawalLimitSettings ?? null);
+      setEarningsOrderMeta(
+        parsedCache.earningsOrderMeta && typeof parsedCache.earningsOrderMeta === 'object'
+          ? parsedCache.earningsOrderMeta
+          : {}
+      );
+      setSellerOrders(Array.isArray(parsedCache.sellerOrders) ? parsedCache.sellerOrders : []);
+      setHasCachedDashboardData(true);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error restoring seller dashboard cache:', error);
+      setHasCachedDashboardData(false);
+    } finally {
+      setHasRestoredDashboardCache(true);
+    }
+  }, [profile?.id, profile?.name]);
+
+  useEffect(() => {
+    if (!profile || !hasRestoredDashboardCache) return;
+
+    fetchDashboardData({ showLoader: !hasCachedDashboardData });
+    fetchIdentityVerification();
+    fetchBankAccountData();
+    fetchEarningsData();
+    fetchWithdrawalLimitData();
+    fetchOrdersData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile]);
+  }, [profile, hasRestoredDashboardCache]);
+
+  useEffect(() => {
+    if (!profile?.id || typeof window === 'undefined' || !hasRestoredDashboardCache) return;
+
+    try {
+      const payload = {
+        version: SELLER_DASHBOARD_CACHE_VERSION,
+        cachedAt: Date.now(),
+        activeTab,
+        stores,
+        products,
+        stats,
+        affiliateLinks,
+        identityVerification,
+        verificationForm,
+        bankAccountData,
+        bankAccountForm,
+        walletData,
+        walletLedger,
+        withdrawalRequests,
+        withdrawalLimitStatus,
+        withdrawalLimitSettings,
+        earningsOrderMeta,
+        sellerOrders,
+      };
+
+      sessionStorage.setItem(getSellerDashboardCacheKey(profile.id), JSON.stringify(payload));
+    } catch (error) {
+      console.error('Error caching seller dashboard state:', error);
+    }
+  }, [
+    profile?.id,
+    hasRestoredDashboardCache,
+    activeTab,
+    stores,
+    products,
+    stats,
+    affiliateLinks,
+    identityVerification,
+    verificationForm,
+    bankAccountData,
+    bankAccountForm,
+    walletData,
+    walletLedger,
+    withdrawalRequests,
+    withdrawalLimitStatus,
+    withdrawalLimitSettings,
+    earningsOrderMeta,
+    sellerOrders,
+  ]);
 
 
   const normalizeProduct = (row: any): NormalizedProduct => {
@@ -733,11 +878,15 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     return Array.from(candidates);
   };
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (options?: { showLoader?: boolean }) => {
     if (!profile) return;
 
+    const showLoader = options?.showLoader !== false;
+
     try {
-      setLoading(true);
+      if (showLoader) {
+        setLoading(true);
+      }
 
       const { data: storesData, error: storesErr } = await supabase
         .from('stores')
@@ -2258,7 +2407,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     onNavigate(`store-detail-${store.id}`);
   };
 
-  if (loading) {
+  if (loading && !hasCachedDashboardData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
