@@ -47,6 +47,29 @@ import { MerchantBankDetailsPage } from './pages/MerchantBankDetailsPage';
 import { supabase } from './lib/supabase';
 import { handleAffiliateTracking } from './lib/affiliate';
 
+const SELLER_DASHBOARD_TABS = new Set([
+  'overview',
+  'products',
+  'stores',
+  'marketing',
+  'orders',
+  'earnings',
+  'bank-account',
+  'identity',
+  'settings',
+]);
+
+const ADMIN_DASHBOARD_TABS = new Set([
+  'overview',
+  'users',
+  'stores',
+  'products',
+  'financial-transactions',
+  'payment-settings',
+  'merchant-verifications',
+  'bank-account-verifications',
+]);
+
 const parsePathToPage = (pathname: string) => {
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   const segments = normalizedPath.split('/').filter(Boolean);
@@ -95,13 +118,52 @@ const parsePathToPage = (pathname: string) => {
     return `payment-failed-${decodeURIComponent(segments[1])}`;
   }
 
+  if (segments[0] === 'profile') {
+    if (segments[1] === 'orders') return 'orders';
+    if (segments[1] === 'favorites') return 'favorites';
+    if (segments[1] === 'viewed-products') return 'viewed-products';
+    return 'profile';
+  }
+
+  if (segments[0] === 'seller-dashboard') {
+    const tab = segments[1];
+
+    if (!tab || tab === 'overview') {
+      return 'seller-dashboard';
+    }
+
+    if (SELLER_DASHBOARD_TABS.has(tab)) {
+      return `seller-dashboard-${tab}`;
+    }
+
+    return 'seller-dashboard';
+  }
+
+  if (segments[0] === 'admin-dashboard') {
+    const tab = segments[1];
+
+    if (!tab || tab === 'overview') {
+      return 'admin-dashboard';
+    }
+
+    if (tab === 'affiliate') {
+      return 'admin-affiliate-management';
+    }
+
+    if (ADMIN_DASHBOARD_TABS.has(tab)) {
+      return `admin-dashboard-${tab}`;
+    }
+
+    return 'admin-dashboard';
+  }
+
   const staticRoutes: Record<string, string> = {
     auth: 'auth',
     pricing: 'pricing',
     marketplace: 'marketplace',
     'seller-dashboard': 'seller-dashboard',
     'user-dashboard': 'user-dashboard',
-    admin: 'admin',
+    admin: 'admin-dashboard',
     'admin-affiliate-management': 'admin-affiliate-management',
     'affiliate-dashboard': 'affiliate-dashboard',
     'coupons-management': 'coupons-management',
@@ -311,6 +373,31 @@ const getPublicPathFromPage = (page: string) => {
     return `/payment/${orderId}`;
   }
 
+  if (page === 'profile') return '/profile';
+  if (page === 'orders') return '/profile/orders';
+  if (page === 'favorites') return '/profile/favorites';
+  if (page === 'viewed-products') return '/profile/viewed-products';
+
+  if (page === 'seller-dashboard') return '/seller-dashboard';
+  if (page === 'seller-dashboard-overview') return '/seller-dashboard';
+  if (page.startsWith('seller-dashboard-')) {
+    const tab = page.replace('seller-dashboard-', '');
+    return tab === 'overview' ? '/seller-dashboard' : `/seller-dashboard/${encodeURIComponent(tab)}`;
+  }
+
+  if (page === 'admin' || page === 'admin-dashboard' || page === 'admin-dashboard-overview') {
+    return '/admin-dashboard';
+  }
+
+  if (page === 'admin-affiliate-management') {
+    return '/admin-dashboard/affiliate';
+  }
+
+  if (page.startsWith('admin-dashboard-')) {
+    const tab = page.replace('admin-dashboard-', '');
+    return tab === 'overview' ? '/admin-dashboard' : `/admin-dashboard/${encodeURIComponent(tab)}`;
+  }
+
   const publicRoutes: Record<string, string> = {
     home: '/',
     auth: '/auth',
@@ -323,6 +410,21 @@ const getPublicPathFromPage = (page: string) => {
     'merchant-agreement': '/merchant-agreement',
     privacy: '/privacy',
     terms: '/terms',
+    'affiliate-dashboard': '/affiliate-dashboard',
+    'coupons-management': '/coupons-management',
+    'affiliate-management': '/affiliate-management',
+    'orders-management': '/orders-management',
+    'payment-settings': '/payment-settings',
+    'bank-account': '/bank-account',
+    'withdrawal-requests': '/withdrawal-requests',
+    'admin-withdrawals': '/admin-withdrawals',
+    transactions: '/transactions',
+    'admin-management': '/admin-management',
+    'admin-verification-apis': '/admin-verification-apis',
+    'merchant-withdraw': '/merchant-withdraw',
+    'admin-announcements': '/admin-announcements',
+    'verify-phone': '/verify-phone',
+    'merchant-bank-details': '/merchant-bank-details',
   };
 
   return publicRoutes[page] || null;
@@ -727,7 +829,7 @@ function AppContent() {
 
       if (currentPage === 'auth') {
         if (profile.role === 'admin' || profile.role === 'superadmin') {
-          setCurrentPage('admin');
+          setCurrentPage('admin-dashboard');
         } else if (profile.role === 'seller') {
           setCurrentPage('seller-dashboard');
         } else if (storeSlug) {
@@ -845,6 +947,31 @@ function AppContent() {
       return <PaymentPage orderId={orderId} onNavigate={navigateWithContext} />;
     }
 
+    if (
+      currentPage === 'seller-dashboard' ||
+      currentPage === 'seller-dashboard-overview' ||
+      currentPage.startsWith('seller-dashboard-')
+    ) {
+      return profile?.role === 'seller' || profile?.role === 'admin' ? (
+        <SellerDashboard onNavigate={navigateWithContext} />
+      ) : (
+        <HomePage onNavigate={navigateWithContext} />
+      );
+    }
+
+    if (
+      currentPage === 'admin' ||
+      currentPage === 'admin-dashboard' ||
+      currentPage === 'admin-dashboard-overview' ||
+      currentPage.startsWith('admin-dashboard-')
+    ) {
+      return profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+        <AdminDashboard onNavigate={navigateWithContext} />
+      ) : (
+        <HomePage onNavigate={navigateWithContext} />
+      );
+    }
+
     switch (currentPage) {
       case 'home':
         return <HomePage onNavigate={navigateWithContext} />;
@@ -870,22 +997,8 @@ function AppContent() {
       case 'marketplace':
         return <MarketplacePage onNavigate={navigateWithContext} />;
 
-      case 'seller-dashboard':
-        return profile?.role === 'seller' || profile?.role === 'admin' ? (
-          <SellerDashboard onNavigate={navigateWithContext} />
-        ) : (
-          <HomePage onNavigate={navigateWithContext} />
-        );
-
       case 'user-dashboard':
         return <ProfilePage onNavigate={navigateWithContext} />;
-
-      case 'admin':
-        return profile?.role === 'admin' || profile?.role === 'superadmin' ? (
-          <AdminDashboard onNavigate={navigateWithContext} />
-        ) : (
-          <HomePage onNavigate={navigateWithContext} />
-        );
 
       case 'admin-affiliate-management':
         return profile?.role === 'admin' || profile?.role === 'superadmin' ? (
