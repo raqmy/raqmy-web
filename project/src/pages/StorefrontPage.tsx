@@ -7,6 +7,19 @@ import {
   Package,
   Filter,
   Share2,
+  Search,
+  Mail,
+  MessageCircle,
+  Instagram,
+  Send,
+  ExternalLink,
+  ChevronLeft,
+  Shield,
+  FileText,
+  RotateCcw,
+  BadgeCheck,
+  Sparkles,
+  Grid3X3,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,12 +31,15 @@ interface StorefrontPageProps {
 
 export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNavigate }) => {
   const { user, profile, signOut } = useAuth();
+
   const [store, setStore] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+
   const [sortBy, setSortBy] = useState('newest');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     fetchStoreAndProducts();
@@ -31,6 +47,64 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
   }, [storeSlug, sortBy]);
 
   const storeImageUrl = useMemo(() => getStoreImageUrl(store), [store]);
+
+  const filteredProducts = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    if (!query) return products;
+
+    return products.filter((product) => {
+      const title = String(product.display_name || '').toLowerCase();
+      const description = String(product.description || '').toLowerCase();
+      const category = String(product.category || '').toLowerCase();
+      return (
+        title.includes(query) ||
+        description.includes(query) ||
+        category.includes(query)
+      );
+    });
+  }, [products, searchQuery]);
+
+  const totalSalesCount = useMemo(() => {
+    return products.reduce((sum, product) => sum + Number(product.sales_count || 0), 0);
+  }, [products]);
+
+  const contactItems = useMemo(() => {
+    if (!store) return [];
+
+    const items = [
+      {
+        key: 'email',
+        label: 'البريد الإلكتروني',
+        value: store.email,
+        href: store.email ? `mailto:${store.email}` : null,
+        icon: Mail,
+      },
+      {
+        key: 'twitter',
+        label: 'Twitter / X',
+        value: store.twitter || store.twitter_url || store.x_url,
+        href: normalizeExternalUrl(store.twitter || store.twitter_url || store.x_url),
+        icon: MessageCircle,
+      },
+      {
+        key: 'telegram',
+        label: 'Telegram',
+        value: store.telegram || store.telegram_url,
+        href: normalizeExternalUrl(store.telegram || store.telegram_url),
+        icon: Send,
+      },
+      {
+        key: 'instagram',
+        label: 'Instagram',
+        value: store.instagram || store.instagram_url,
+        href: normalizeExternalUrl(store.instagram || store.instagram_url),
+        icon: Instagram,
+      },
+    ];
+
+    return items.filter((item) => item.value);
+  }, [store]);
 
   useEffect(() => {
     if (!store) return;
@@ -243,7 +317,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-600">جاري تحميل المتجر...</p>
@@ -254,14 +328,16 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
   if (!store) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <StoreIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-sm border border-gray-100 p-8 text-center">
+          <div className="w-20 h-20 mx-auto mb-5 rounded-2xl bg-gray-100 flex items-center justify-center">
+            <StoreIcon className="w-10 h-10 text-gray-400" />
+          </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">المتجر غير موجود</h2>
           <p className="text-gray-600 mb-6">لم نتمكن من العثور على هذا المتجر</p>
           <button
             onClick={() => onNavigate('marketplace')}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
           >
             العودة
           </button>
@@ -271,13 +347,397 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+    <div className="min-h-screen bg-[#f8fafc]">
+      <nav className="bg-white/95 backdrop-blur border-b border-gray-200 sticky top-0 z-50 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-8">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg overflow-hidden bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+          <div className="flex justify-between items-center min-h-[72px] gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-2xl overflow-hidden bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center shadow-sm shrink-0">
+                {storeImageUrl ? (
+                  <img
+                    src={storeImageUrl}
+                    alt={store?.name || 'صورة المتجر'}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <StoreIcon className="w-6 h-6 text-white" />
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <h1 className="text-lg md:text-xl font-extrabold text-gray-900 truncate">{store.name}</h1>
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <span>{store.category || 'متجر رقمي'}</span>
+                  <span className="w-1 h-1 rounded-full bg-gray-300" />
+                  <span>{filteredProducts.length} منتج</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 md:gap-3 shrink-0">
+              <button
+                onClick={handleShareStore}
+                className="flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
+              >
+                <Share2 className="w-4 h-4" />
+                <span className="hidden sm:inline">مشاركة</span>
+              </button>
+
+              {user && profile ? (
+                <>
+                  <button
+                    onClick={() => onNavigate('cart')}
+                    className="flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    <span className="hidden sm:inline">السلة</span>
+                  </button>
+
+                  <button
+                    onClick={() => onNavigate('profile')}
+                    className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-xl transition-colors"
+                  >
+                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center shrink-0">
+                      <User className="w-4 h-4 text-white" />
+                    </div>
+                    <span className="hidden md:inline text-sm font-semibold text-gray-900 max-w-[120px] truncate">
+                      {profile.name}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={handleSignOut}
+                    className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                    title="تسجيل الخروج"
+                  >
+                    <LogOut className="w-5 h-5" />
+                  </button>
+                </>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setAuthMode('login');
+                      setShowAuthModal(true);
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                  >
+                    تسجيل الدخول
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAuthMode('signup');
+                      setShowAuthModal(true);
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors"
+                  >
+                    إنشاء حساب
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10">
+        <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 text-white shadow-[0_20px_60px_rgba(37,99,235,0.18)] mb-8">
+          <div className="absolute inset-0 opacity-20">
+            <div className="absolute -top-20 -left-20 w-72 h-72 bg-white rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -right-24 w-80 h-80 bg-white rounded-full blur-3xl" />
+          </div>
+
+          <div className="relative px-6 py-8 md:px-10 md:py-12 lg:px-12">
+            <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_340px] gap-8 items-center">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/15 border border-white/15 text-sm mb-5">
+                  <Sparkles className="w-4 h-4" />
+                  <span>واجهة متجر مستقلة</span>
+                </div>
+
+                <h1 className="text-3xl md:text-5xl font-extrabold leading-tight mb-3">
+                  {store.name}
+                </h1>
+
+                <p className="text-white/85 text-base md:text-lg leading-8 max-w-3xl mb-6">
+                  {store.description && String(store.description).trim() !== ''
+                    ? store.description
+                    : 'متجر رقمي متخصص يعرض منتجات رقمية منظمة وواضحة مع تجربة تصفح بسيطة واحترافية.'}
+                </p>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="px-4 py-2.5 rounded-2xl bg-white/12 border border-white/15 backdrop-blur-sm">
+                    <div className="text-xs text-white/75 mb-1">عدد المنتجات</div>
+                    <div className="font-bold text-lg">{products.length}</div>
+                  </div>
+
+                  <div className="px-4 py-2.5 rounded-2xl bg-white/12 border border-white/15 backdrop-blur-sm">
+                    <div className="text-xs text-white/75 mb-1">إجمالي المبيعات</div>
+                    <div className="font-bold text-lg">{totalSalesCount}</div>
+                  </div>
+
+                  <div className="px-4 py-2.5 rounded-2xl bg-white/12 border border-white/15 backdrop-blur-sm">
+                    <div className="text-xs text-white/75 mb-1">التصنيف</div>
+                    <div className="font-bold text-lg">{store.category || 'متجر رقمي'}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-center lg:justify-end">
+                <div className="w-full max-w-[340px] rounded-[28px] bg-white/10 border border-white/15 backdrop-blur-md p-5 shadow-xl">
+                  <div className="aspect-[4/3] rounded-3xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center">
+                    {storeImageUrl ? (
+                      <img
+                        src={storeImageUrl}
+                        alt={store?.name || 'صورة المتجر'}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <StoreIcon className="w-20 h-20 text-white/90" />
+                    )}
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm text-white/70 mb-1">اسم المتجر</div>
+                      <div className="font-bold text-lg truncate">{store.name}</div>
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-400/15 text-emerald-100 border border-emerald-300/20 text-sm">
+                      <BadgeCheck className="w-4 h-4" />
+                      <span>نشط</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-8">
+          <div className="space-y-8">
+            <div className="bg-white rounded-[26px] border border-gray-100 shadow-sm p-4 md:p-5">
+              <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between mb-5">
+                <div>
+                  <h2 className="text-2xl font-extrabold text-gray-900">المنتجات المتاحة</h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    تصفح منتجات المتجر وابحث فيها ورتبها بالطريقة المناسبة لك
+                  </p>
+                </div>
+
+                <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-sm text-gray-600">
+                  <Grid3X3 className="w-4 h-4" />
+                  <span>{filteredProducts.length} نتيجة</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4 mb-6">
+                <div className="relative">
+                  <Search className="w-5 h-5 text-gray-400 absolute right-4 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="ابحث عن منتج داخل المتجر..."
+                    className="w-full h-14 rounded-2xl border border-gray-200 bg-gray-50 pr-12 pl-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl border border-gray-200 bg-gray-50 flex items-center justify-center shrink-0">
+                    <Filter className="w-5 h-5 text-gray-500" />
+                  </div>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="w-full h-14 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="newest">الأحدث</option>
+                    <option value="popular">الأكثر مبيعاً</option>
+                    <option value="price_low">السعر: من الأقل للأعلى</option>
+                    <option value="price_high">السعر: من الأعلى للأقل</option>
+                  </select>
+                </div>
+              </div>
+
+              {filteredProducts.length === 0 ? (
+                <div className="text-center py-16 rounded-[22px] bg-gray-50 border border-dashed border-gray-200">
+                  <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد منتجات مطابقة</h3>
+                  <p className="text-gray-500">
+                    {products.length === 0
+                      ? 'لا يوجد منتجات في هذا المتجر حالياً'
+                      : 'جرّب تغيير البحث أو الترتيب لعرض نتائج أخرى'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6">
+                  {filteredProducts.map((product) => (
+                    <div
+                      key={product.id}
+                      onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
+                      className="group bg-white rounded-[24px] border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden cursor-pointer"
+                    >
+                      <div className="relative aspect-[4/3] overflow-hidden bg-gradient-to-br from-blue-50 to-purple-50">
+                        {product.thumbnail_url ? (
+                          <img
+                            src={product.thumbnail_url}
+                            alt={product.display_name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Package className="w-16 h-16 text-blue-500" />
+                          </div>
+                        )}
+
+                        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-purple-500" />
+                      </div>
+
+                      <div className="p-5">
+                        <div className="mb-3">
+                          <h3 className="text-xl font-extrabold text-gray-900 mb-2 line-clamp-2">
+                            {product.display_name}
+                          </h3>
+                          <p className="text-gray-500 text-sm leading-7 line-clamp-2 min-h-[56px]">
+                            {product.description || 'منتج رقمي'}
+                          </p>
+                        </div>
+
+                        <div className="flex items-end justify-between gap-3 mb-4">
+                          <div>
+                            <div className="text-xs text-gray-400 mb-1">السعر</div>
+                            <div className="text-3xl font-extrabold text-blue-600">
+                              {product.price} {product.currency}
+                            </div>
+                          </div>
+
+                          {Number(product.sales_count || 0) > 0 && (
+                            <div className="text-xs px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-gray-600">
+                              تم بيع {product.sales_count}
+                            </div>
+                          )}
+                        </div>
+
+                        <button className="w-full h-12 rounded-2xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                          <span>عرض التفاصيل</span>
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <aside className="space-y-6">
+            <div className="bg-white rounded-[26px] border border-gray-100 shadow-sm p-6">
+              <h3 className="text-xl font-extrabold text-gray-900 mb-4">عن المتجر</h3>
+              <p className="text-gray-600 leading-8 text-sm">
+                {store.description && String(store.description).trim() !== ''
+                  ? store.description
+                  : 'هذا المتجر يعرض منتجات رقمية داخل واجهة مستقلة ومنظمة لتسهيل الوصول للمنتجات واستعراضها بشكل واضح.'}
+              </p>
+
+              <div className="mt-5 grid grid-cols-1 gap-3">
+                <div className="rounded-2xl bg-gray-50 border border-gray-100 px-4 py-3">
+                  <div className="text-xs text-gray-400 mb-1">اسم المتجر</div>
+                  <div className="font-bold text-gray-900">{store.name}</div>
+                </div>
+
+                <div className="rounded-2xl bg-gray-50 border border-gray-100 px-4 py-3">
+                  <div className="text-xs text-gray-400 mb-1">التصنيف</div>
+                  <div className="font-bold text-gray-900">{store.category || 'متجر رقمي'}</div>
+                </div>
+
+                <div className="rounded-2xl bg-gray-50 border border-gray-100 px-4 py-3">
+                  <div className="text-xs text-gray-400 mb-1">عدد المنتجات</div>
+                  <div className="font-bold text-gray-900">{products.length}</div>
+                </div>
+              </div>
+            </div>
+
+            {contactItems.length > 0 && (
+              <div className="bg-white rounded-[26px] border border-gray-100 shadow-sm p-6">
+                <h3 className="text-xl font-extrabold text-gray-900 mb-4">وسائل التواصل</h3>
+
+                <div className="space-y-3">
+                  {contactItems.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <a
+                        key={item.key}
+                        href={item.href || '#'}
+                        target={item.href?.startsWith('http') ? '_blank' : undefined}
+                        rel={item.href?.startsWith('http') ? 'noreferrer' : undefined}
+                        className="flex items-center justify-between gap-3 rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 hover:bg-gray-100 transition-colors"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs text-gray-400 mb-1">{item.label}</div>
+                          <div className="text-sm font-semibold text-gray-900 truncate">
+                            {String(item.value)}
+                          </div>
+                        </div>
+
+                        <div className="w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center shrink-0">
+                          {item.href?.startsWith('http') ? (
+                            <ExternalLink className="w-4 h-4 text-gray-600" />
+                          ) : (
+                            <Icon className="w-4 h-4 text-gray-600" />
+                          )}
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="bg-white rounded-[26px] border border-gray-100 shadow-sm p-6">
+              <h3 className="text-xl font-extrabold text-gray-900 mb-4">معلومات مهمة</h3>
+
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 rounded-2xl bg-gray-50 border border-gray-100 px-4 py-4">
+                  <Shield className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="font-bold text-gray-900 text-sm mb-1">سياسة الخصوصية</div>
+                    <div className="text-sm text-gray-500 leading-6">
+                      يتم التعامل مع بيانات الطلبات والتواصل بشكل منظم وآمن داخل المتجر.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 rounded-2xl bg-gray-50 border border-gray-100 px-4 py-4">
+                  <FileText className="w-5 h-5 text-purple-600 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="font-bold text-gray-900 text-sm mb-1">الشروط والأحكام</div>
+                    <div className="text-sm text-gray-500 leading-6">
+                      شراء المنتجات يعني الموافقة على وصف المنتج وطريقة استخدامه كما هو موضح.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 rounded-2xl bg-gray-50 border border-gray-100 px-4 py-4">
+                  <RotateCcw className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="font-bold text-gray-900 text-sm mb-1">الاسترجاع والدعم</div>
+                    <div className="text-sm text-gray-500 leading-6">
+                      في حال وجود مشكلة في المنتج أو الوصول إليه يمكن التواصل عبر الوسائل المتاحة في المتجر.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </section>
+      </main>
+
+      <footer className="mt-16 bg-[#0f172a] text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-11 h-11 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center">
                   {storeImageUrl ? (
                     <img
                       src={storeImageUrl}
@@ -289,184 +749,44 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                   )}
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold text-gray-900">{store.name}</h1>
-                  <p className="text-xs text-gray-500">{store.category}</p>
+                  <div className="font-extrabold text-lg">{store.name}</div>
+                  <div className="text-sm text-white/60">{store.category || 'متجر رقمي'}</div>
                 </div>
+              </div>
+
+              <p className="text-sm text-white/70 leading-8">
+                {store.description && String(store.description).trim() !== ''
+                  ? store.description
+                  : 'واجهة متجر مستقلة لعرض المنتجات الرقمية بشكل احترافي وسهل وواضح.'}
+              </p>
+            </div>
+
+            <div>
+              <h4 className="font-bold text-lg mb-4">روابط مهمة</h4>
+              <div className="space-y-3 text-sm text-white/70">
+                <div>سياسة الخصوصية</div>
+                <div>الشروط والأحكام</div>
+                <div>سياسة الاسترجاع</div>
+                <div>الدعم والتواصل</div>
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
-              <button
-                onClick={handleShareStore}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
-              >
-                <Share2 className="w-4 h-4" />
-                <span>مشاركة</span>
-              </button>
-
-              {user && profile ? (
-                <>
-                  <button
-                    onClick={() => onNavigate('cart')}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
-                  >
-                    <ShoppingCart className="w-4 h-4" />
-                    <span>السلة</span>
-                  </button>
-                  <button
-                    onClick={() => onNavigate('profile')}
-                    className="flex items-center gap-3 px-4 py-2 hover:bg-gray-100 rounded-lg"
-                  >
-                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-                      <User className="w-5 h-5 text-white" />
-                    </div>
-                    <span className="text-sm font-semibold text-gray-900">{profile.name}</span>
-                  </button>
-                  <button
-                    onClick={handleSignOut}
-                    className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                    title="تسجيل الخروج"
-                  >
-                    <LogOut className="w-5 h-5" />
-                  </button>
-                </>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => {
-                      setAuthMode('login');
-                      setShowAuthModal(true);
-                    }}
-                    className="px-6 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg"
-                  >
-                    تسجيل الدخول
-                  </button>
-                  <button
-                    onClick={() => {
-                      setAuthMode('signup');
-                      setShowAuthModal(true);
-                    }}
-                    className="px-6 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
-                  >
-                    إنشاء حساب
-                  </button>
-                </div>
-              )}
+            <div>
+              <h4 className="font-bold text-lg mb-4">وصف المتجر</h4>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70 leading-8">
+                {store.description && String(store.description).trim() !== ''
+                  ? store.description
+                  : 'يمكن للتاجر إضافة وصف احترافي يعبر عن هوية المتجر ونوعية المنتجات التي يقدمها ليظهر هنا بشكل جميل وواضح.'}
+              </div>
             </div>
+          </div>
+
+          <div className="mt-8 pt-6 border-t border-white/10 flex flex-col md:flex-row items-center justify-between gap-3 text-sm text-white/50">
+            <div>© {new Date().getFullYear()} {store.name}</div>
+            <div>متجر رقمي مستقل بواجهة احترافية ومنظمة</div>
           </div>
         </div>
-      </nav>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-8 mb-8 text-white overflow-hidden">
-          <div className="flex flex-col lg:flex-row items-center justify-between gap-8">
-            <div className="flex-1 text-right w-full">
-              <h1 className="text-4xl font-bold mb-2">{store.name}</h1>
-              {store.description && <p className="text-lg text-blue-50 mb-4">{store.description}</p>}
-              <div className="flex flex-wrap items-center gap-4">
-                <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm">
-                  {products.length} منتج
-                </span>
-                {store.email && (
-                  <a
-                    href={`mailto:${store.email}`}
-                    className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-sm hover:bg-white/30"
-                  >
-                    تواصل معنا
-                  </a>
-                )}
-              </div>
-            </div>
-
-            <div className="shrink-0">
-              <div className="w-32 h-32 md:w-40 md:h-40 rounded-2xl overflow-hidden bg-white/15 backdrop-blur-sm border border-white/20 shadow-lg flex items-center justify-center">
-                {storeImageUrl ? (
-                  <img
-                    src={storeImageUrl}
-                    alt={store?.name || 'صورة المتجر'}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <StoreIcon className="w-16 h-16 md:w-20 md:h-20 text-white" />
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">المنتجات المتاحة</h2>
-          <div className="flex items-center gap-2">
-            <Filter className="w-5 h-5 text-gray-600" />
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="newest">الأحدث</option>
-              <option value="popular">الأكثر مبيعاً</option>
-              <option value="price_low">السعر: من الأقل للأعلى</option>
-              <option value="price_high">السعر: من الأعلى للأقل</option>
-            </select>
-          </div>
-        </div>
-
-        {products.length === 0 ? (
-          <div className="text-center py-16 bg-white rounded-xl">
-            <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد منتجات متاحة</h3>
-            <p className="text-gray-600">لا يوجد منتجات في هذا المتجر حالياً</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {products.map((product) => (
-              <div
-                key={product.id}
-                onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
-                className="bg-white rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden group"
-              >
-                <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center overflow-hidden">
-                  {product.thumbnail_url ? (
-                    <img
-                      src={product.thumbnail_url}
-                      alt={product.display_name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                    />
-                  ) : (
-                    <Package className="w-16 h-16 text-blue-600 group-hover:scale-110 transition-transform" />
-                  )}
-                </div>
-                <div className="p-6">
-                  <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2">
-                    {product.display_name}
-                  </h3>
-                  <p className="text-gray-600 text-sm mb-4 line-clamp-2">
-                    {product.description || 'منتج رقمي'}
-                  </p>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-2xl font-bold text-blue-600">
-                      {product.price} {product.currency}
-                    </span>
-                    <button className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors">
-                      عرض التفاصيل
-                    </button>
-                  </div>
-                  {product.slug && (
-                    <div className="mt-3 text-xs text-gray-500" dir="ltr">
-                      /p/{product.slug}
-                    </div>
-                  )}
-                  {Number(product.sales_count || 0) > 0 && (
-                    <div className="mt-2 text-sm text-gray-500">
-                      تم بيع {product.sales_count} مرة
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      </footer>
 
       {showAuthModal && (
         <StorefrontAuthModal
@@ -482,6 +802,17 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
     </div>
   );
 };
+
+function normalizeExternalUrl(value?: string | null): string | null {
+  if (!value || String(value).trim() === '') return null;
+
+  const raw = String(value).trim();
+  if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('mailto:')) {
+    return raw;
+  }
+
+  return `https://${raw}`;
+}
 
 function getStoreImageUrl(storeRecord: any): string | null {
   if (!storeRecord) return null;
