@@ -9,7 +9,6 @@ import {
   Share2,
   Search,
   ChevronLeft,
-  Mail,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -444,30 +443,31 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 <div
                   key={product.id}
                   onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
-                  className="group bg-white rounded-[22px] border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer"
+                  className="group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden cursor-pointer"
                 >
                   <div className="relative aspect-square overflow-hidden bg-gray-50">
                     {product.thumbnail_url ? (
                       <img
                         src={product.thumbnail_url}
                         alt={product.display_name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
                         <Package className="w-14 h-14 text-blue-500" />
                       </div>
                     )}
-
                     <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-purple-500" />
                   </div>
 
                   <div className="p-4">
-                    <h3 className="text-[28px] md:text-[30px] font-bold text-gray-900 mb-2 line-clamp-2 leading-tight">
-                      {product.display_name}
-                    </h3>
+                    <div className="min-h-[52px] mb-2">
+                      <h3 className="text-xl font-bold text-gray-900 line-clamp-2 leading-snug">
+                        {product.display_name}
+                      </h3>
+                    </div>
 
-                    <p className="text-gray-500 text-sm leading-6 line-clamp-2 min-h-[44px] mb-4">
+                    <p className="text-gray-500 text-sm leading-6 line-clamp-1 min-h-[24px] mb-4">
                       {product.description || 'منتج رقمي'}
                     </p>
 
@@ -499,18 +499,196 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
       </main>
 
       <footer className="mt-12 bg-[#08152f] text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="grid grid-cols-1 gap-10">
-            <div className="text-right">
-              <h3 className="text-2xl font-bold mb-2">{store.name}</h3>
-              <p className="text-sm text-white/60 mb-4">{store.category || 'متجر رقمي'}</p>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          <div className="text-right">
+            <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+              {store.description && String(store.description).trim() !== ''
+                ? store.description
+                : 'لا يوجد وصف مضاف لهذا المتجر حالياً.'}
+            </p>
+          </div>
+        </div>
+      </footer>
 
-              <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
-                {store.description && String(store.description).trim() !== ''
-                  ? store.description
-                  : 'لا يوجد وصف مضاف لهذا المتجر حالياً.'}
-              </p>
+      {showAuthModal && (
+        <StorefrontAuthModal
+          mode={authMode}
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={() => {
+            setShowAuthModal(false);
+            fetchStoreAndProducts();
+          }}
+          onSwitchMode={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+        />
+      )}
+    </div>
+  );
+};
 
-              {store.email && (
-                <div className="mt-4 flex items-center gap-2 text-sm text-white/70 justify-start">
-                  <Mail className="w-4 h-4"
+function getStoreImageUrl(storeRecord: any): string | null {
+  if (!storeRecord) return null;
+
+  const candidates = [
+    storeRecord.store_image_url,
+    storeRecord.image_url,
+    storeRecord.logo_url,
+    storeRecord.thumbnail_url,
+    storeRecord.avatar_url,
+    storeRecord.cover_image_url,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+interface StorefrontAuthModalProps {
+  mode: 'login' | 'signup';
+  onClose: () => void;
+  onSuccess: () => void;
+  onSwitchMode: () => void;
+}
+
+const StorefrontAuthModal: React.FC<StorefrontAuthModalProps> = ({
+  mode,
+  onClose,
+  onSuccess,
+  onSwitchMode,
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    password: '',
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      if (mode === 'signup') {
+        const { data: authData, error: signUpError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+        });
+
+        if (signUpError) throw signUpError;
+
+        if (authData.user) {
+          const { error: profileError } = await supabase.from('users_profile').insert({
+            id: authData.user.id,
+            name: formData.name,
+            email: formData.email,
+            role: 'customer',
+          });
+
+          if (profileError) throw profileError;
+        }
+
+        onSuccess();
+      } else {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        });
+
+        if (signInError) throw signInError;
+
+        onSuccess();
+      }
+    } catch (err: any) {
+      console.error('Auth error:', err);
+      setError(err.message || 'حدث خطأ أثناء المعالجة');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl max-w-md w-full p-8">
+        <h2 className="text-2xl font-bold text-gray-900 mb-6">
+          {mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب جديد'}
+        </h2>
+
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'signup' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
+            <input
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+              dir="ltr"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">كلمة المرور</label>
+            <input
+              type="password"
+              value={formData.password}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+              dir="ltr"
+            />
+          </div>
+
+          <div className="flex gap-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? 'جاري المعالجة...' : mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب'}
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button
+            onClick={onSwitchMode}
+            className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+          >
+            {mode === 'login' ? 'ليس لديك حساب؟ سجل الآن' : 'لديك حساب؟ سجل الدخول'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
