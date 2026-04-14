@@ -97,6 +97,19 @@ const productMatchesScope = (product: any, scope: ScopeInfo | null) => {
   return (product?.merchant_id || product?.user_id) === scope.merchantUserId;
 };
 
+const normalizeBrowserPath = (path: string) => {
+  const normalized = path.replace(/\/+$/, '');
+  return normalized === '' ? '/' : normalized;
+};
+
+const buildProfilePath = (scopeInfo: ScopeInfo | null) => {
+  if (scopeInfo?.slug) {
+    return `/s/${scopeInfo.slug}/profile`;
+  }
+
+  return '/profile';
+};
+
 const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   const slug = getActiveStoreScopeSlug();
   if (!slug) return null;
@@ -231,6 +244,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     loadScope();
   }, []);
+
+  useEffect(() => {
+    if (scopeLoading || typeof window === 'undefined') return;
+
+    const targetPath = normalizeBrowserPath(buildProfilePath(scopeInfo));
+    const currentPath = normalizeBrowserPath(window.location.pathname);
+
+    if (currentPath !== targetPath) {
+      window.history.replaceState(window.history.state, '', targetPath);
+    }
+  }, [scopeLoading, scopeInfo]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
