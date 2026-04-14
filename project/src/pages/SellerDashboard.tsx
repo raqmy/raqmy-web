@@ -203,25 +203,55 @@ type NormalizedProduct = Product & {
 };
 
 type StoreImageRecord = Store & Record<string, any>;
+type SellerDashboardTab =
+  | 'overview'
+  | 'products'
+  | 'stores'
+  | 'marketing'
+  | 'settings'
+  | 'orders'
+  | 'earnings'
+  | 'verification'
+  | 'bankAccount';
 
 const FALLBACK_MIN_WITHDRAWAL_AMOUNT = 10;
 const WITHDRAWAL_PROOFS_BUCKET = 'withdrawal-proofs';
 const STORE_IMAGES_BUCKET = 'store-images';
+const SELLER_DASHBOARD_BASE_PATH = '/seller-dashboard';
+const SELLER_DASHBOARD_TAB_PATHS: Record<SellerDashboardTab, string> = {
+  overview: SELLER_DASHBOARD_BASE_PATH,
+  products: `${SELLER_DASHBOARD_BASE_PATH}/products`,
+  stores: `${SELLER_DASHBOARD_BASE_PATH}/stores`,
+  marketing: `${SELLER_DASHBOARD_BASE_PATH}/marketing`,
+  orders: `${SELLER_DASHBOARD_BASE_PATH}/orders`,
+  earnings: `${SELLER_DASHBOARD_BASE_PATH}/earnings`,
+  bankAccount: `${SELLER_DASHBOARD_BASE_PATH}/bank-account`,
+  verification: `${SELLER_DASHBOARD_BASE_PATH}/verification`,
+  settings: `${SELLER_DASHBOARD_BASE_PATH}/settings`,
+};
+
+const normalizeBrowserPath = (path: string) => {
+  const normalized = path.replace(/\/+$/, '');
+  return normalized === '' ? '/' : normalized;
+};
+
+const getSellerDashboardTabFromPath = (pathname: string): SellerDashboardTab | null => {
+  const normalizedPath = normalizeBrowserPath(pathname);
+  const matchedEntry = Object.entries(SELLER_DASHBOARD_TAB_PATHS).find(([, path]) => {
+    return normalizeBrowserPath(path) === normalizedPath;
+  });
+
+  return (matchedEntry?.[0] as SellerDashboardTab | undefined) || null;
+};
+
+const getSellerDashboardPath = (tab: SellerDashboardTab) => {
+  return SELLER_DASHBOARD_TAB_PATHS[tab] || SELLER_DASHBOARD_BASE_PATH;
+};
 
 export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<
-    | 'overview'
-    | 'products'
-    | 'stores'
-    | 'marketing'
-    | 'settings'
-    | 'orders'
-    | 'earnings'
-    | 'verification'
-    | 'bankAccount'
-  >('overview');
+  const [activeTab, setActiveTab] = useState<SellerDashboardTab>('overview');
 
   const [stores, setStores] = useState<Store[]>([]);
   const [products, setProducts] = useState<NormalizedProduct[]>([]);
@@ -305,6 +335,48 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [withdrawalProofUrl, setWithdrawalProofUrl] = useState<string | null>(null);
   const [withdrawalProofLoading, setWithdrawalProofLoading] = useState(false);
   const [withdrawalProofError, setWithdrawalProofError] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const syncTabFromPath = () => {
+      const resolvedTab = getSellerDashboardTabFromPath(window.location.pathname);
+      if (resolvedTab && resolvedTab !== activeTab) {
+        setActiveTab(resolvedTab);
+      }
+    };
+
+    syncTabFromPath();
+    window.addEventListener('popstate', syncTabFromPath);
+
+    return () => {
+      window.removeEventListener('popstate', syncTabFromPath);
+    };
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const targetPath = normalizeBrowserPath(getSellerDashboardPath(activeTab));
+    const currentPath = normalizeBrowserPath(window.location.pathname);
+
+    if (currentPath !== targetPath) {
+      window.history.replaceState(window.history.state, '', targetPath);
+    }
+  }, [activeTab]);
+
+  const handleTabChange = (tab: SellerDashboardTab) => {
+    setActiveTab(tab);
+
+    if (typeof window === 'undefined') return;
+
+    const targetPath = normalizeBrowserPath(getSellerDashboardPath(tab));
+    const currentPath = normalizeBrowserPath(window.location.pathname);
+
+    if (currentPath !== targetPath) {
+      window.history.pushState(window.history.state, '', targetPath);
+    }
+  };
 
   useEffect(() => {
     if (profile) {
@@ -2208,7 +2280,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         <div className="bg-white rounded-xl shadow-sm mb-8">
           <div className="flex items-center gap-2 p-2 overflow-x-auto">
             <button
-              onClick={() => setActiveTab('overview')}
+              onClick={() => handleTabChange('overview')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'overview' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2218,7 +2290,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
-              onClick={() => setActiveTab('products')}
+              onClick={() => handleTabChange('products')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'products' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2228,7 +2300,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
-              onClick={() => setActiveTab('stores')}
+              onClick={() => handleTabChange('stores')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'stores' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2238,7 +2310,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
-              onClick={() => setActiveTab('marketing')}
+              onClick={() => handleTabChange('marketing')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'marketing' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2248,7 +2320,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
-              onClick={() => setActiveTab('orders')}
+              onClick={() => handleTabChange('orders')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'orders' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2258,7 +2330,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
-              onClick={() => setActiveTab('earnings')}
+              onClick={() => handleTabChange('earnings')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'earnings' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2268,7 +2340,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
-              onClick={() => setActiveTab('bankAccount')}
+              onClick={() => handleTabChange('bankAccount')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'bankAccount' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2278,7 +2350,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
-              onClick={() => setActiveTab('verification')}
+              onClick={() => handleTabChange('verification')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'verification' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2288,7 +2360,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </button>
 
             <button
-              onClick={() => setActiveTab('settings')}
+              onClick={() => handleTabChange('settings')}
               className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
                 activeTab === 'settings' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
@@ -2454,7 +2526,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       <p className="text-sm text-gray-600">ترتيب سريع لأكثر المنتجات نشاطاً بحسب المبيعات ثم المشاهدات.</p>
                     </div>
                     <button
-                      onClick={() => setActiveTab('products')}
+                      onClick={() => handleTabChange('products')}
                       className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors"
                     >
                       عرض كل المنتجات
