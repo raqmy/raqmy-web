@@ -10,9 +10,6 @@ import {
   Search,
   ChevronLeft,
   Mail,
-  FileText,
-  Shield,
-  RefreshCcw,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -402,7 +399,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4 mb-6">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4 mb-8">
             <div className="relative">
               <Search className="w-5 h-5 text-gray-400 absolute right-4 top-1/2 -translate-y-1/2" />
               <input
@@ -442,152 +439,101 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-              {filteredProducts.map((product) => (
-                <div
-                  key={product.id}
-                  onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
-                  className="group bg-white rounded-[24px] border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer max-w-[340px] w-full mx-auto"
-                >
-                  <div className="relative aspect-[4/3] overflow-hidden bg-gray-50">
-                    {product.thumbnail_url ? (
-                      <img
-                        src={product.thumbnail_url}
-                        alt={product.display_name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Package className="w-16 h-16 text-blue-500" />
-                      </div>
-                    )}
-
-                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-purple-500" />
-                  </div>
-
-                  <div className="p-5">
-                    <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2">
-                      {product.display_name}
-                    </h3>
-
-                    <p className="text-gray-500 text-sm leading-7 line-clamp-2 min-h-[56px] mb-4">
-                      {product.description || 'منتج رقمي'}
-                    </p>
-
-                    <div className="flex items-end justify-between gap-3 mb-4">
-                      <div>
-                        <div className="text-xs text-gray-400 mb-1">السعر</div>
-                        <div className="text-3xl font-extrabold text-blue-600">
-                          {product.price} {product.currency}
-                        </div>
-                      </div>
-
-                      {Number(product.sales_count || 0) > 0 && (
-                        <div className="text-xs px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-gray-600">
-                          تم بيع {product.sales_count}
+            <div className="max-w-5xl mx-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+                {filteredProducts.map((product) => (
+                  <div
+                    key={product.id}
+                    onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
+                    className="group bg-white rounded-[24px] border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer w-full"
+                  >
+                    <div className="relative aspect-square overflow-hidden bg-gray-50">
+                      {product.thumbnail_url ? (
+                        <img
+                          src={product.thumbnail_url}
+                          alt={product.display_name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Package className="w-16 h-16 text-blue-500" />
                         </div>
                       )}
+
+                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-purple-500" />
                     </div>
 
-                    <button className="w-full h-12 rounded-2xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                      <span>عرض التفاصيل</span>
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
+                    <div className="p-6">
+                      <h3 className="text-2xl font-bold text-gray-900 mb-2 line-clamp-2">
+                        {product.display_name}
+                      </h3>
+
+                      <p className="text-gray-500 text-sm leading-7 line-clamp-2 min-h-[56px] mb-5">
+                        {product.description || 'منتج رقمي'}
+                      </p>
+
+                      <div className="flex items-end justify-between gap-3 mb-5">
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">السعر</div>
+                          <div className="text-4xl font-extrabold text-blue-600 leading-none">
+                            {product.price} {product.currency}
+                          </div>
+                        </div>
+
+                        {Number(product.sales_count || 0) > 0 && (
+                          <div className="text-xs px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-gray-600">
+                            تم بيع {product.sales_count}
+                          </div>
+                        )}
+                      </div>
+
+                      <button className="w-full h-14 rounded-2xl bg-blue-600 text-white text-base font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                        <span>عرض التفاصيل</span>
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </section>
       </main>
 
       <footer className="mt-12 bg-[#08152f] text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-            <div className="text-right">
-              <div className="flex items-center gap-3 justify-start mb-4">
-                <div className="w-12 h-12 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
-                  {storeImageUrl ? (
-                    <img
-                      src={storeImageUrl}
-                      alt={store?.name || 'صورة المتجر'}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <StoreIcon className="w-6 h-6 text-white" />
-                  )}
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold">{store.name}</h3>
-                  <p className="text-sm text-white/60">{store.category || 'متجر رقمي'}</p>
-                </div>
-              </div>
-
-              <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
-                {store.description && String(store.description).trim() !== ''
-                  ? store.description
-                  : 'متجر رقمي يعرض منتجات رقمية بشكل واضح وسهل.'}
-              </p>
-
-              {store.email && (
-                <div className="mt-4 flex items-center gap-2 text-sm text-white/70 justify-start">
-                  <Mail className="w-4 h-4" />
-                  <span dir="ltr">{store.email}</span>
-                </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          <div className="flex flex-col items-center text-center gap-4">
+            <div className="w-14 h-14 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+              {storeImageUrl ? (
+                <img
+                  src={storeImageUrl}
+                  alt={store?.name || 'صورة المتجر'}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <StoreIcon className="w-7 h-7 text-white" />
               )}
             </div>
 
-            <div className="text-right">
-              <h4 className="text-lg font-bold mb-4">روابط سريعة</h4>
-              <div className="space-y-3 text-white/75 text-sm">
-                <button
-                  onClick={() => onNavigate('home')}
-                  className="block hover:text-white transition-colors"
-                >
-                  الرئيسية
-                </button>
-                <button
-                  onClick={() => onNavigate('marketplace')}
-                  className="block hover:text-white transition-colors"
-                >
-                  المتجر العام
-                </button>
-                <button
-                  onClick={() => onNavigate('plans')}
-                  className="block hover:text-white transition-colors"
-                >
-                  الباقات
-                </button>
-                <button
-                  onClick={() => onNavigate('support')}
-                  className="block hover:text-white transition-colors"
-                >
-                  الدعم
-                </button>
-              </div>
+            <div>
+              <h3 className="text-2xl font-bold">{store.name}</h3>
+              <p className="text-sm text-white/60 mt-1">{store.category || 'متجر رقمي'}</p>
             </div>
 
-            <div className="text-right">
-              <h4 className="text-lg font-bold mb-4">قانوني</h4>
-              <div className="space-y-3 text-white/75 text-sm">
-                <div className="flex items-center gap-2 justify-start">
-                  <Shield className="w-4 h-4" />
-                  <span>سياسة الخصوصية</span>
-                </div>
-                <div className="flex items-center gap-2 justify-start">
-                  <FileText className="w-4 h-4" />
-                  <span>الشروط والأحكام</span>
-                </div>
-                <div className="flex items-center gap-2 justify-start">
-                  <RefreshCcw className="w-4 h-4" />
-                  <span>سياسة الاسترجاع</span>
-                </div>
-              </div>
+            <div className="max-w-3xl w-full rounded-2xl bg-white/5 border border-white/10 px-5 py-4">
+              <p className="text-sm md:text-base leading-8 text-white/80 whitespace-pre-line">
+                {store.description && String(store.description).trim() !== ''
+                  ? store.description
+                  : 'لا يوجد وصف مضاف لهذا المتجر حالياً.'}
+              </p>
             </div>
-          </div>
 
-          <div className="mt-10 pt-6 border-t border-white/10 text-center text-sm text-white/50">
-            © 2026 رقمي - جميع الحقوق محفوظة
+            {store.email && (
+              <div className="mt-1 flex items-center gap-2 text-sm text-white/70">
+                <Mail className="w-4 h-4" />
+                <span dir="ltr">{store.email}</span>
+              </div>
+            )}
           </div>
         </div>
       </footer>
