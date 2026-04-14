@@ -390,40 +390,6 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <section className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-6 mb-8">
-          <div className="flex flex-col md:flex-row items-center md:items-start gap-5">
-            <div className="w-24 h-24 md:w-28 md:h-28 rounded-2xl overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center shrink-0">
-              {storeImageUrl ? (
-                <img
-                  src={storeImageUrl}
-                  alt={store?.name || 'صورة المتجر'}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <StoreIcon className="w-12 h-12 text-gray-500" />
-              )}
-            </div>
-
-            <div className="flex-1 text-center md:text-right">
-              <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">{store.name}</h2>
-              <p className="text-gray-600 text-base leading-8 max-w-3xl">
-                {store.description && String(store.description).trim() !== ''
-                  ? store.description
-                  : 'متجر رقمي يعرض منتجات رقمية بشكل بسيط وواضح.'}
-              </p>
-
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 mt-4">
-                <span className="px-4 py-2 rounded-xl bg-gray-100 text-sm font-medium text-gray-700">
-                  {products.length} منتج
-                </span>
-                <span className="px-4 py-2 rounded-xl bg-gray-100 text-sm font-medium text-gray-700">
-                  {store.category || 'متجر رقمي'}
-                </span>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-6">
           <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between mb-6">
             <div>
@@ -478,14 +444,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
               {filteredProducts.map((product) => (
                 <div
                   key={product.id}
                   onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
                   className="group bg-white rounded-[24px] border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer"
                 >
-                  <div className="relative aspect-[4/3] overflow-hidden bg-gray-50">
+                  <div className="relative aspect-square overflow-hidden bg-gray-50">
                     {product.thumbnail_url ? (
                       <img
                         src={product.thumbnail_url}
@@ -534,6 +500,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
               ))}
             </div>
           )}
+        </section>
+
+        <section className="mt-6 bg-[#0f172a] rounded-3xl border border-[#1e293b] shadow-sm p-6 md:p-8">
+          <div className="text-white/85 text-base leading-8 whitespace-pre-line">
+            {store.description && String(store.description).trim() !== ''
+              ? store.description
+              : 'لا يوجد وصف مضاف لهذا المتجر حالياً.'}
+          </div>
         </section>
       </main>
 
