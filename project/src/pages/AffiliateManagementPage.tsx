@@ -242,19 +242,21 @@ const buildAffiliateOfferUrl = (campaign: UnifiedCampaignRow) => {
   }
 
   if (campaign.link.apply_to === 'product') {
-    const productSlug = campaign.link.product?.slug || campaign.rule?.product?.slug;
+    const productSlugOrId =
+      campaign.link.product?.slug ||
+      campaign.rule?.product?.slug ||
+      campaign.link.product_id ||
+      campaign.rule?.product_id ||
+      '';
+
     const storeSlug = campaign.link.store?.slug || campaign.rule?.store?.slug;
 
-    if (productSlug && storeSlug) {
-      return `${origin}/p/${encodeURIComponent(productSlug)}?store=${encodeURIComponent(storeSlug)}&ref=${refCode}`;
+    if (productSlugOrId && storeSlug) {
+      return `${origin}/p/${encodeURIComponent(productSlugOrId)}?store=${encodeURIComponent(storeSlug)}&ref=${refCode}`;
     }
 
-    if (productSlug) {
-      return `${origin}/p/${encodeURIComponent(productSlug)}?ref=${refCode}`;
-    }
-
-    if (campaign.link.product_id) {
-      return `${origin}/marketplace?product_id=${encodeURIComponent(campaign.link.product_id)}&ref=${refCode}`;
+    if (productSlugOrId) {
+      return `${origin}/p/${encodeURIComponent(productSlugOrId)}?ref=${refCode}`;
     }
   }
 
