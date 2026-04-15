@@ -224,6 +224,56 @@ const buildRuleName = (marketerName: string, scopeType: string) => {
   return `قاعدة ${marketerName || 'أفلييت'} - ${scopeLabel}`;
 };
 
+const buildAffiliateOfferUrl = (campaign: UnifiedCampaignRow) => {
+  if (typeof window === 'undefined' || !campaign.link) return '';
+
+  const origin = window.location.origin;
+  const refCode = encodeURIComponent(campaign.link.code);
+
+  if (campaign.link.apply_to === 'store') {
+    const storeSlug = campaign.link.store?.slug || campaign.rule?.store?.slug;
+    if (storeSlug) {
+      return `${origin}/s/${encodeURIComponent(storeSlug)}?ref=${refCode}`;
+    }
+
+    if (campaign.link.store_id) {
+      return `${origin}/marketplace?store_id=${encodeURIComponent(campaign.link.store_id)}&ref=${refCode}`;
+    }
+  }
+
+  if (campaign.link.apply_to === 'product') {
+    const productSlug = campaign.link.product?.slug || campaign.rule?.product?.slug;
+    const storeSlug = campaign.link.store?.slug || campaign.rule?.store?.slug;
+
+    if (productSlug && storeSlug) {
+      return `${origin}/p/${encodeURIComponent(productSlug)}?store=${encodeURIComponent(storeSlug)}&ref=${refCode}`;
+    }
+
+    if (productSlug) {
+      return `${origin}/p/${encodeURIComponent(productSlug)}?ref=${refCode}`;
+    }
+
+    if (campaign.link.product_id) {
+      return `${origin}/marketplace?product_id=${encodeURIComponent(campaign.link.product_id)}&ref=${refCode}`;
+    }
+  }
+
+  const sellerId = campaign.link.seller_id || campaign.link.user_id || campaign.marketer?.seller_id;
+  if (sellerId) {
+    return `${origin}/marketplace?seller=${encodeURIComponent(sellerId)}&ref=${refCode}`;
+  }
+
+  return `${origin}/marketplace?ref=${refCode}`;
+};
+
+const getAffiliateOfferLinkHint = (campaign: UnifiedCampaignRow) => {
+  const scope = getCampaignScopeValue(campaign);
+
+  if (scope === 'store') return 'هذا الرابط يفتح المتجر مباشرة مع حفظ كود الأفلييت.';
+  if (scope === 'product') return 'هذا الرابط يفتح المنتج مباشرة مع حفظ كود الأفلييت.';
+  return 'هذا الرابط يفتح السوق العام مع إظهار منتجات هذا التاجر فقط مع حفظ كود الأفلييت.';
+};
+
 const matchRuleForLink = (link: AffiliateLinkRow, rules: AffiliateRuleRow[]) => {
   if (!link.marketer_id) return null;
 
@@ -1108,11 +1158,17 @@ const UnifiedCampaignsList: React.FC<{
 
                     <div className="space-y-2">
                       {campaign.link && (
-                        <CopyLinkButton
-                          url={`${window.location.origin}?ref=${campaign.link.code}`}
-                          label="نسخ رابط العرض"
-                          variant="minimal"
-                        />
+                        <>
+                          <CopyLinkButton
+                            url={buildAffiliateOfferUrl(campaign)}
+                            label="نسخ رابط العرض"
+                            variant="minimal"
+                          />
+
+                          <p className="text-[11px] leading-5 text-gray-500 text-center px-2">
+                            {getAffiliateOfferLinkHint(campaign)}
+                          </p>
+                        </>
                       )}
 
                       {campaign.link?.report_token && (
@@ -1894,7 +1950,7 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
 
         <SectionCard
           title="الرابط التسويقي"
-          subtitle="أنشئ كود ورابط تسويق خاص بمنتج أو متجر أو كل منتجاتك"
+          subtitle="أنشئ كود ورابط تسويق يفتح المنتج أو المتجر مباشرة، أو يفتح السوق العام بمنتجاتك فقط"
           icon={<LinkIcon className="w-5 h-5" />}
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
