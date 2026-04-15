@@ -140,16 +140,11 @@ type UnifiedAffiliateForm = {
   marketer_notes: string;
   marketer_is_active: boolean;
 
-  link_code: string;
   link_apply_to: 'product' | 'store' | 'all';
   link_product_id: string;
   link_store_id: string;
-  link_description: string;
   link_is_active: boolean;
 
-  rule_scope_type: 'product' | 'store' | 'all';
-  rule_product_id: string;
-  rule_store_id: string;
   rule_commission_type: 'percentage' | 'fixed';
   rule_commission_value: string;
   rule_priority: string;
@@ -205,6 +200,36 @@ const conversionRate = (clicks?: number | null, sales?: number | null) => {
 };
 
 const createLocalTierId = () => Math.random().toString(36).slice(2, 10);
+
+const sanitizeAffiliateCodePart = (value?: string | null) =>
+  (value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 8);
+
+const getScopeCodePrefix = (scope: 'product' | 'store' | 'all') => {
+  if (scope === 'product') return 'PRD';
+  if (scope === 'store') return 'STR';
+  return 'AFF';
+};
+
+const buildGeneratedAffiliateCode = (
+  marketerName: string,
+  scope: 'product' | 'store' | 'all',
+  seed?: string
+) => {
+  const cleanName = sanitizeAffiliateCodePart(marketerName);
+  const namePart = cleanName || 'AFF';
+  const suffix = (seed || Math.random().toString(36).slice(2, 6))
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 4) || '0001';
+
+  return `${getScopeCodePrefix(scope)}-${namePart}-${suffix}`;
+};
+
 
 const uniqueIds = (values: Array<string | null | undefined>) =>
   [...new Set(values.filter((value): value is string => Boolean(value)))];
@@ -374,16 +399,11 @@ const buildInitialFormData = (campaign?: UnifiedCampaignRow | null): UnifiedAffi
   marketer_notes: campaign?.marketer?.notes || '',
   marketer_is_active: campaign?.marketer?.is_active ?? true,
 
-  link_code: campaign?.link?.code || '',
   link_apply_to: (campaign?.link?.apply_to as 'product' | 'store' | 'all') || 'all',
-  link_product_id: campaign?.link?.product_id || '',
-  link_store_id: campaign?.link?.store_id || '',
-  link_description: campaign?.link?.description || '',
+  link_product_id: campaign?.link?.product_id || campaign?.rule?.product_id || '',
+  link_store_id: campaign?.link?.store_id || campaign?.rule?.store_id || '',
   link_is_active: campaign?.link?.is_active ?? true,
 
-  rule_scope_type: (campaign?.rule?.scope_type as 'product' | 'store' | 'all') || 'all',
-  rule_product_id: campaign?.rule?.product_id || '',
-  rule_store_id: campaign?.rule?.store_id || '',
   rule_commission_type:
     (campaign?.rule?.commission_type as 'percentage' | 'fixed') || 'percentage',
   rule_commission_value:
@@ -1453,6 +1473,21 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
   const [tiers, setTiers] = useState<TierDraft[]>(() => buildInitialTierDrafts(campaign));
   const [formData, setFormData] = useState<UnifiedAffiliateForm>(() => buildInitialFormData(campaign));
 
+  const selectedExistingMarketer = useMemo(
+    () => marketers.find((item) => item.id === formData.existing_marketer_id) || null,
+    [marketers, formData.existing_marketer_id]
+  );
+
+  const activeMarketerName =
+    formData.marketer_mode === 'existing'
+      ? selectedExistingMarketer?.name || ''
+      : formData.marketer_name;
+
+  const generatedLinkCodePreview = useMemo(() => {
+    if (campaign?.link?.code) return campaign.link.code;
+    return buildGeneratedAffiliateCode(activeMarketerName, formData.link_apply_to, 'AUTO');
+  }, [campaign?.link?.code, activeMarketerName, formData.link_apply_to]);
+
   useEffect(() => {
     setTiers(buildInitialTierDrafts(campaign));
     setFormData(buildInitialFormData(campaign));
@@ -1608,11 +1643,39 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
     return data.id as string;
   };
 
+  const generateUniqueAffiliateCode = async (
+    marketerName: string,
+    scope: 'product' | 'store' | 'all',
+    excludeLinkId?: string
+  ) => {
+    let attempts = 0;
+
+    while (attempts < 10) {
+      const seed = Math.random().toString(36).slice(2, 6).toUpperCase();
+      const candidate = buildGeneratedAffiliateCode(marketerName, scope, seed);
+
+      let query = supabase
+        .from('affiliate_links')
+        .select('id')
+        .eq('code', candidate);
+
+      if (excludeLinkId) {
+        query = query.neq('id', excludeLinkId);
+      }
+
+      const { data, error } = await query.maybeSingle();
+
+      if (error) throw error;
+      if (!data) return candidate;
+
+      attempts += 1;
+    }
+
+    throw new Error('تعذر توليد كود رابط فريد، حاول مرة أخرى');
+  };
+
   const createOrUpdateLink = async (marketerId: string) => {
     if (!user?.id) throw new Error('المستخدم غير موجود');
-
-    const normalizedCode = formData.link_code.trim().toUpperCase();
-    if (!normalizedCode) throw new Error('كود الرابط مطلوب');
 
     if (formData.link_apply_to === 'product' && !formData.link_product_id) {
       throw new Error('اختر المنتج للرابط');
@@ -1622,17 +1685,14 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
       throw new Error('اختر المتجر للرابط');
     }
 
-    const { data: existingCodeRow, error: existingCodeError } = await supabase
-      .from('affiliate_links')
-      .select('id')
-      .eq('code', normalizedCode)
-      .maybeSingle();
+    const marketerName =
+      formData.marketer_mode === 'existing'
+        ? marketers.find((item) => item.id === marketerId)?.name || 'AFF'
+        : formData.marketer_name.trim() || 'AFF';
 
-    if (existingCodeError) throw existingCodeError;
-
-    if (existingCodeRow && (!campaign?.link || existingCodeRow.id !== campaign.link.id)) {
-      throw new Error('كود الرابط مستخدم بالفعل، اختر كودًا مختلفًا');
-    }
+    const normalizedCode = campaign?.link?.code
+      ? campaign.link.code
+      : await generateUniqueAffiliateCode(marketerName, formData.link_apply_to);
 
     const payload: Record<string, any> = {
       user_id: user.id,
@@ -1642,7 +1702,7 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
       apply_to: formData.link_apply_to,
       product_id: formData.link_apply_to === 'product' ? formData.link_product_id : null,
       store_id: formData.link_apply_to === 'store' ? formData.link_store_id : null,
-      description: formData.link_description.trim() || null,
+      description: null,
       is_active: formData.link_is_active,
     };
 
@@ -1675,12 +1735,12 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
   const createOrUpdateRule = async (marketerId: string) => {
     if (!user?.id) throw new Error('المستخدم غير موجود');
 
-    if (formData.rule_scope_type === 'product' && !formData.rule_product_id) {
-      throw new Error('اختر المنتج للقاعدة');
+    if (formData.link_apply_to === 'product' && !formData.link_product_id) {
+      throw new Error('اختر المنتج للعرض');
     }
 
-    if (formData.rule_scope_type === 'store' && !formData.rule_store_id) {
-      throw new Error('اختر المتجر للقاعدة');
+    if (formData.link_apply_to === 'store' && !formData.link_store_id) {
+      throw new Error('اختر المتجر للعرض');
     }
 
     if (formData.rule_commission_value.trim() === '') {
@@ -1697,10 +1757,10 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
     const payload = {
       seller_id: user.id,
       marketer_id: marketerId,
-      rule_name: buildRuleName(marketerName, formData.rule_scope_type),
-      scope_type: formData.rule_scope_type,
-      product_id: formData.rule_scope_type === 'product' ? formData.rule_product_id : null,
-      store_id: formData.rule_scope_type === 'store' ? formData.rule_store_id : null,
+      rule_name: buildRuleName(marketerName, formData.link_apply_to),
+      scope_type: formData.link_apply_to,
+      product_id: formData.link_apply_to === 'product' ? formData.link_product_id : null,
+      store_id: formData.link_apply_to === 'store' ? formData.link_store_id : null,
       commission_type: formData.rule_commission_type,
       commission_value: Number(formData.rule_commission_value),
       priority: Number(formData.rule_priority || 100),
@@ -1864,7 +1924,7 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
               <select
                 value={formData.existing_marketer_id}
                 onChange={(e) =>
-                  setFormData({ ...formData, existing_marketer_id: e.target.value })
+                  setFormData((prev) => ({ ...prev, existing_marketer_id: e.target.value }))
                 }
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
@@ -1953,115 +2013,102 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
 
         <SectionCard
           title="الرابط التسويقي"
-          subtitle="أنشئ كود ورابط تسويق يفتح المنتج أو المتجر مباشرة، أو يفتح السوق العام بمنتجاتك فقط"
+          subtitle="النظام سيولد الكود والرابط تلقائيًا، وأنت فقط تختار أين يذهب الزائر."
           icon={<LinkIcon className="w-5 h-5" />}
         >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                كود الرابط <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.link_code}
-                onChange={(e) =>
-                  setFormData({ ...formData, link_code: e.target.value.toUpperCase() })
-                }
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
-                placeholder="AFF2024"
-                required
-              />
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              <div className="text-sm font-medium text-blue-900 mb-2">الكود سيُولد تلقائيًا</div>
+              <div className="font-mono text-lg text-blue-700 break-all">{generatedLinkCodePreview}</div>
+              <div className="text-xs text-blue-700/80 mt-2">
+                يتم توليده تلقائيًا من اسم المسوق مع رمز إضافي لتفادي التكرار.
+              </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                نطاق التطبيق <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.link_apply_to}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    link_apply_to: e.target.value as 'product' | 'store' | 'all',
-                    link_product_id: e.target.value === 'product' ? formData.link_product_id : '',
-                    link_store_id: e.target.value === 'store' ? formData.link_store_id : '',
-                    rule_scope_type: e.target.value as 'product' | 'store' | 'all',
-                    rule_product_id: e.target.value === 'product' ? formData.rule_product_id : '',
-                    rule_store_id: e.target.value === 'store' ? formData.rule_store_id : '',
-                  })
-                }
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="product">منتج محدد</option>
-                <option value="store">متجر محدد</option>
-                <option value="all">جميع منتجاتي</option>
-              </select>
-            </div>
-
-            {formData.link_apply_to === 'product' && (
-              <div className="md:col-span-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  اختر المنتج <span className="text-red-500">*</span>
+                  نطاق التطبيق <span className="text-red-500">*</span>
                 </label>
                 <select
-                  value={formData.link_product_id}
+                  value={formData.link_apply_to}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      link_product_id: e.target.value,
-                      rule_product_id: e.target.value,
-                    })
+                    setFormData((prev) => ({
+                      ...prev,
+                      link_apply_to: e.target.value as 'product' | 'store' | 'all',
+                      link_product_id: e.target.value === 'product' ? prev.link_product_id : '',
+                      link_store_id: e.target.value === 'store' ? prev.link_store_id : '',
+                    }))
                   }
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   required
                 >
-                  <option value="">-- اختر منتج --</option>
-                  {products.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {getDisplayName(product)}
-                    </option>
-                  ))}
+                  <option value="product">منتج محدد</option>
+                  <option value="store">متجر محدد</option>
+                  <option value="all">جميع منتجاتي</option>
                 </select>
               </div>
-            )}
 
-            {formData.link_apply_to === 'store' && (
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  اختر المتجر <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={formData.link_store_id}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      link_store_id: e.target.value,
-                      rule_store_id: e.target.value,
-                    })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  required
-                >
-                  <option value="">-- اختر متجر --</option>
-                  {stores.map((store) => (
-                    <option key={store.id} value={store.id}>
-                      {getDisplayName(store)}
-                    </option>
-                  ))}
-                </select>
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <div className="text-sm font-medium text-gray-900 mb-1">وجهة الرابط الحالية</div>
+                <div className="text-sm text-gray-600 leading-7">
+                  {formData.link_apply_to === 'product' && 'سيفتح المنتج المحدد مباشرة.'}
+                  {formData.link_apply_to === 'store' && 'سيفتح المتجر المحدد مباشرة.'}
+                  {formData.link_apply_to === 'all' && 'سيفتح السوق العام مع إظهار منتجات هذا التاجر فقط.'}
+                </div>
               </div>
-            )}
 
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">وصف الرابط</label>
-              <textarea
-                rows={3}
-                value={formData.link_description}
-                onChange={(e) => setFormData({ ...formData, link_description: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="مثال: رابط حملة انستغرام أو تيك توك"
-              />
+              {formData.link_apply_to === 'product' && (
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    اختر المنتج <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.link_product_id}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        link_product_id: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  >
+                    <option value="">-- اختر منتج --</option>
+                    {products.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {getDisplayName(product)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {formData.link_apply_to === 'store' && (
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    اختر المتجر <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.link_store_id}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        link_store_id: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  >
+                    <option value="">-- اختر متجر --</option>
+                    {stores.map((store) => (
+                      <option key={store.id} value={store.id}>
+                        {getDisplayName(store)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2086,7 +2133,7 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
           subtitle="حدد العمولة الأساسية ثم أضف الشرائح الزمنية إذا احتجت"
           icon={<Settings2 className="w-5 h-5" />}
         >
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 نوع العمولة
@@ -2121,18 +2168,6 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">الأولوية</label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={formData.rule_priority}
-                onChange={(e) => setFormData({ ...formData, rule_priority: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="100"
-              />
-            </div>
           </div>
 
           <label className="mt-4 flex items-center gap-3 p-4 rounded-2xl border border-gray-200 bg-gray-50 cursor-pointer">
@@ -2333,7 +2368,7 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
 
                 <div className="rounded-2xl bg-white border border-gray-200 p-4">
                   <div className="font-semibold text-gray-900 mb-1">الرابط</div>
-                  <div className="font-mono">{formData.link_code || '—'}</div>
+                  <div className="font-mono">{generatedLinkCodePreview || '—'}</div>
                   <div className="text-gray-500">{getApplyToLabel(formData.link_apply_to)}</div>
                 </div>
 
@@ -2355,7 +2390,7 @@ const AffiliateCampaignFormModal: React.FC<AffiliateCampaignFormModalProps> = ({
                       ? formData.expiry_date
                       : 'بدون تاريخ انتهاء'}
                   </div>
-                  <div className="text-gray-500">أولوية {formData.rule_priority || '100'}</div>
+                  <div className="text-gray-500">{formData.link_is_active ? 'الرابط مفعل' : 'الرابط غير مفعل'}</div>
                 </div>
               </div>
             </div>
