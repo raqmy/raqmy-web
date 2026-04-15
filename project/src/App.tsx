@@ -300,6 +300,28 @@ const isStoreContextPage = (page: string) =>
   isStoreCustomerScopedPage(page) ||
   isStoreCartFlowPage(page);
 
+const getMarketplaceSearchParamsForSync = () => {
+  if (typeof window === 'undefined') return '';
+
+  const currentPathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (currentPathname !== '/marketplace') return '';
+
+  const params = new URLSearchParams(window.location.search);
+  const nextParams = new URLSearchParams();
+
+  const keysToKeep = ['seller', 'seller_id', 'merchant_id', 'owner_id', 'ref'];
+
+  keysToKeep.forEach((key) => {
+    const value = params.get(key)?.trim();
+    if (value) {
+      nextParams.set(key, value);
+    }
+  });
+
+  const query = nextParams.toString();
+  return query ? `?${query}` : '';
+};
+
 const getPublicPathFromPage = (page: string) => {
   const activeStoreSlug = getActiveStoreSlugFromContext(page);
 
@@ -402,7 +424,7 @@ const getPublicPathFromPage = (page: string) => {
     home: '/',
     auth: '/auth',
     pricing: '/pricing',
-    marketplace: '/marketplace',
+    marketplace: `/marketplace${getMarketplaceSearchParamsForSync()}`,
     support: '/support',
     'privacy-policy': '/privacy-policy',
     'refund-policy': '/refund-policy',
