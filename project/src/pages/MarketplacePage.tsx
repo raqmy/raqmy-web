@@ -16,6 +16,27 @@ interface MarketplacePageProps {
 
 type SortOption = 'newest' | 'popular' | 'price_low' | 'price_high';
 
+const getMarketplaceFiltersFromUrl = () => {
+  if (typeof window === 'undefined') {
+    return {
+      sellerId: '',
+      sellerFilterActive: false,
+    };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+
+  const sellerId =
+    params.get('seller')?.trim() ||
+    params.get('seller_id')?.trim() ||
+    '';
+
+  return {
+    sellerId,
+    sellerFilterActive: !!sellerId,
+  };
+};
+
 export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) => {
   const [products, setProducts] = useState<ProductWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,18 +44,27 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
 
+  const { sellerId, sellerFilterActive } = getMarketplaceFiltersFromUrl();
+
   useEffect(() => {
     fetchProducts();
-  }, []);
+  }, [sellerId]);
 
   const fetchProducts = async () => {
     setLoading(true);
+
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('products')
         .select('*')
         .eq('is_active', true)
         .eq('visibility', 'marketplace');
+
+      if (sellerFilterActive && sellerId) {
+        query = query.or(`merchant_id.eq.${sellerId},user_id.eq.${sellerId}`);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.error('Error fetching marketplace products:', error);
@@ -48,6 +78,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
       }
 
       const productIds = data.map((p: any) => p.id);
+
       const storeIds = Array.from(
         new Set(
           data
@@ -99,7 +130,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
       });
 
       const enrichedProducts: ProductWithDetails[] = data.map((product: any) => {
-        const sellerId = product.user_id ?? product.merchant_id ?? null;
+        const sellerUserId = product.user_id ?? product.merchant_id ?? null;
         const displayName = product.title ?? product.name ?? 'منتج رقمي';
 
         const finalThumbnail =
@@ -110,7 +141,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
         return {
           ...product,
           store: product.store_id ? storeMap.get(product.store_id) ?? null : null,
-          seller: sellerId ? userMap.get(sellerId) ?? null : null,
+          seller: sellerUserId ? userMap.get(sellerUserId) ?? null : null,
           display_name: displayName,
           thumbnail_url: finalThumbnail,
         };
@@ -174,9 +205,13 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
           <div className="flex flex-col gap-4">
             <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">السوق العام</h1>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  {sellerFilterActive ? 'منتجات التاجر' : 'السوق العام'}
+                </h1>
                 <p className="text-sm text-gray-500 mt-1">
-                  ابحث في المنتجات الرقمية واستعرضها بسهولة
+                  {sellerFilterActive
+                    ? 'تم عرض منتجات هذا التاجر فقط من خلال الرابط التسويقي'
+                    : 'ابحث في المنتجات الرقمية واستعرضها بسهولة'}
                 </p>
               </div>
             </div>
@@ -188,7 +223,11 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="ابحث عن منتج، وصف، متجر..."
+                  placeholder={
+                    sellerFilterActive
+                      ? 'ابحث داخل منتجات هذا التاجر...'
+                      : 'ابحث عن منتج، وصف، متجر...'
+                  }
                   className="w-full pr-12 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
               </div>
@@ -217,7 +256,11 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
               <Search className="w-8 h-8 text-gray-400" />
             </div>
             <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد نتائج</h3>
-            <p className="text-gray-500">جرّب تغيير كلمات البحث</p>
+            <p className="text-gray-500">
+              {sellerFilterActive
+                ? 'هذا التاجر لا يملك منتجات ظاهرة في السوق العام حالياً'
+                : 'جرّب تغيير كلمات البحث'}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
