@@ -29,6 +29,8 @@ const getMarketplaceFiltersFromUrl = () => {
   const sellerId =
     params.get('seller')?.trim() ||
     params.get('seller_id')?.trim() ||
+    params.get('merchant_id')?.trim() ||
+    params.get('owner_id')?.trim() ||
     '';
 
   return {
