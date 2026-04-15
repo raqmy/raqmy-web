@@ -262,7 +262,8 @@ const buildAffiliateOfferUrl = (campaign: UnifiedCampaignRow) => {
 
   const sellerId = campaign.link.seller_id || campaign.link.user_id || campaign.marketer?.seller_id;
   if (sellerId) {
-    return `${origin}/marketplace?seller=${encodeURIComponent(sellerId)}&ref=${refCode}`;
+    const encodedSellerId = encodeURIComponent(sellerId);
+    return `${origin}/marketplace?seller=${encodedSellerId}&seller_id=${encodedSellerId}&ref=${refCode}`;
   }
 
   return `${origin}/marketplace?ref=${refCode}`;
