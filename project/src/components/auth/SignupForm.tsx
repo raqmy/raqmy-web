@@ -126,19 +126,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         throw new Error('فشل إنشاء الحساب');
       }
 
-      const { error: profileError } = await supabase.from('users_profile').upsert({
-        id: authData.user.id,
-        name: name.trim(),
-        email: normalizedEmail,
-        role,
-        phone: null,
-        phone_verified: false,
-      });
-
-      if (profileError) {
-        throw new Error(`فشل حفظ بيانات الحساب: ${profileError.message}`);
-      }
-
       setInfoMessage('تم إنشاء الحساب الأساسي. الآن تحقق من بريدك الإلكتروني للمتابعة.');
       setStep('email-verification');
     } catch (err: any) {
@@ -199,7 +186,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
           lowered.includes('not confirmed');
 
         if (stillNotConfirmed) {
-          setInfoMessage('البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.');
+          setInfoMessage(
+            'البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.'
+          );
           return;
         }
 
@@ -207,7 +196,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
       }
 
       if (!data.user?.email_confirmed_at) {
-        setInfoMessage('البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.');
+        setInfoMessage(
+          'البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.'
+        );
         return;
       }
 
@@ -432,7 +423,11 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
                 </div>
 
                 {index < steps.length - 1 && (
-                  <div className={`h-1 flex-1 rounded ${currentIndex > itemIndex ? 'bg-blue-600' : 'bg-gray-200'}`} />
+                  <div
+                    className={`h-1 flex-1 rounded ${
+                      currentIndex > itemIndex ? 'bg-blue-600' : 'bg-gray-200'
+                    }`}
+                  />
                 )}
               </React.Fragment>
             );
