@@ -144,98 +144,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center py-12 px-4">
-      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-8 items-center">
-        <div className="hidden lg:block">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-white border border-gray-200 px-4 py-2 text-sm text-gray-700 shadow-sm">
-            <ShieldCheck className="w-4 h-4 text-blue-600" />
-            نظام دخول أوضح وأكثر ترتيبًا
-          </div>
-
-          <h1 className="text-5xl font-extrabold text-gray-900 leading-tight mb-5">
-            ادخل إلى رقمي
-            <br />
-            أو أنشئ حسابك بخطوات واضحة
-          </h1>
-
-          <p className="text-lg text-gray-600 leading-9 max-w-2xl mb-8">
-            تم ترتيب الواجهة بحيث يكون التسجيل والدخول أوضح:
-            إنشاء الحساب يبدأ بالمعلومات الأساسية،
-            ثم تحقق البريد الإلكتروني،
-            ثم إضافة رقم الجوال والتحقق منه.
-            أما تسجيل الدخول فيبدأ بالبريد وكلمة المرور ثم التحقق المطلوب.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl">
-            <div className="rounded-2xl bg-white border border-gray-200 p-5 shadow-sm">
-              <div className="w-11 h-11 rounded-2xl bg-blue-50 flex items-center justify-center mb-3">
-                <Mail className="w-5 h-5 text-blue-600" />
-              </div>
-              <h3 className="font-bold text-gray-900 mb-2">تحقق البريد</h3>
-              <p className="text-sm text-gray-600 leading-7">
-                خطوة أساسية بعد إنشاء الحساب وقبل إكمال باقي البيانات.
-              </p>
-            </div>
-
-            <div className="rounded-2xl bg-white border border-gray-200 p-5 shadow-sm">
-              <div className="w-11 h-11 rounded-2xl bg-blue-50 flex items-center justify-center mb-3">
-                <Phone className="w-5 h-5 text-blue-600" />
-              </div>
-              <h3 className="font-bold text-gray-900 mb-2">إضافة الجوال</h3>
-              <p className="text-sm text-gray-600 leading-7">
-                بعد تأكيد البريد، يضيف المستخدم رقم الجوال بشكل مستقل وواضح.
-              </p>
-            </div>
-
-            <div className="rounded-2xl bg-white border border-gray-200 p-5 shadow-sm">
-              <div className="w-11 h-11 rounded-2xl bg-blue-50 flex items-center justify-center mb-3">
-                <ShieldCheck className="w-5 h-5 text-blue-600" />
-              </div>
-              <h3 className="font-bold text-gray-900 mb-2">تجربة أنظف</h3>
-              <p className="text-sm text-gray-600 leading-7">
-                ترتيب أفضل للخطوات بدون تعقيد أو تشتيت للمستخدم.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="w-full">
-          <div className="mb-6 lg:hidden text-center">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">{title}</h2>
-            <p className="text-gray-600 leading-7">{subtitle}</p>
-          </div>
-
-          <div className="mb-6 grid grid-cols-2 gap-3 lg:hidden">
-            <button
-              type="button"
-              onClick={() => setMode('login')}
-              className={`h-12 rounded-xl font-semibold transition-all border ${
-                mode === 'login'
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                  : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              تسجيل الدخول
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMode('signup')}
-              className={`h-12 rounded-xl font-semibold transition-all border ${
-                mode === 'signup'
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                  : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              إنشاء حساب
-            </button>
-          </div>
-
-          {mode === 'login' ? (
-            <LoginForm onSwitchToSignup={() => setMode('signup')} />
-          ) : (
-            <SignupForm onSwitchToLogin={() => setMode('login')} />
-          )}
-        </div>
+      <div className="w-full max-w-md mx-auto">
+        {mode === 'login' ? (
+          <LoginForm onSwitchToSignup={() => setMode('signup')} />
+        ) : (
+          <SignupForm onSwitchToLogin={() => setMode('login')} />
+        )}
       </div>
     </div>
   );
