@@ -132,7 +132,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
       const message = err?.message || 'فشل إنشاء الحساب';
 
       if (message.includes('User already registered')) {
-        setError('هذا البريد الإلكتروني مسجل بالفعل');
+        setError(
+          'هذا البريد الإلكتروني مسجل بالفعل. إذا كان تسجيلك غير مكتمل فانتقل إلى تسجيل الدخول لإكمال الخطوات.'
+        );
       } else if (message.toLowerCase().includes('email')) {
         setError('البريد الإلكتروني غير صحيح أو مستخدم بالفعل');
       } else {
@@ -245,6 +247,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         .update({
           phone: formattedPhone,
           phone_verified: false,
+          signup_completed: false,
         })
         .eq('id', session.user.id);
 
@@ -327,6 +330,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         .update({
           phone: phone,
           phone_verified: true,
+          signup_completed: true,
         })
         .eq('id', session.user.id);
 
