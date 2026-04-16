@@ -6,7 +6,12 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-  signUp: (email: string, password: string, name: string, role: 'customer' | 'seller') => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    name: string,
+    role: 'customer' | 'seller'
+  ) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
@@ -30,9 +35,13 @@ const normalizeRole = (role: any): 'customer' | 'seller' | 'admin' => {
   return 'customer';
 };
 
+type ExtendedUserProfile = UserProfile & {
+  signup_completed?: boolean;
+};
+
 type CachedAuthState = {
   user: Pick<User, 'id' | 'email' | 'user_metadata' | 'app_metadata'> | null;
-  profile: UserProfile | null;
+  profile: ExtendedUserProfile | null;
 };
 
 const readCachedAuthState = (): CachedAuthState | null => {
@@ -45,7 +54,10 @@ const readCachedAuthState = (): CachedAuthState | null => {
   }
 };
 
-const writeCachedAuthState = (user: User | null, profile: UserProfile | null) => {
+const writeCachedAuthState = (
+  user: User | null,
+  profile: ExtendedUserProfile | null
+) => {
   try {
     const payload: CachedAuthState = {
       user: user
@@ -73,13 +85,17 @@ const clearCachedAuthState = () => {
   }
 };
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const cachedState = readCachedAuthState();
 
   const [user, setUser] = useState<User | null>(
     cachedState?.user ? (cachedState.user as User) : null
   );
-  const [profile, setProfile] = useState<UserProfile | null>(cachedState?.profile ?? null);
+  const [profile, setProfile] = useState<ExtendedUserProfile | null>(
+    cachedState?.profile ?? null
+  );
   const [loading, setLoading] = useState(!cachedState);
 
   const mountedRef = useRef(true);
@@ -104,7 +120,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
+  const fetchProfile = async (userId: string): Promise<ExtendedUserProfile | null> => {
     await refreshUserSubscriptionStatus(userId);
 
     const { data, error } = await supabase
@@ -123,7 +139,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return {
       ...(data as any),
       role: normalizeRole((data as any).role),
-    } as UserProfile;
+    } as ExtendedUserProfile;
   };
 
   const loadProfileForUser = async (nextUser: User | null) => {
@@ -230,7 +246,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const currentUserId = currentUserIdRef.current;
       const nextUserId = nextUser?.id ?? null;
-      const isSameUser = !!currentUserId && !!nextUserId && currentUserId === nextUserId;
+      const isSameUser =
+        !!currentUserId && !!nextUserId && currentUserId === nextUserId;
 
       setUser(nextUser);
 
@@ -265,10 +282,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     name: string,
     role: 'customer' | 'seller'
   ) => {
+    const normalizedEmail = email.trim().toLowerCase();
     const normalizedRole = normalizeRole(role);
 
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: normalizedEmail,
       password,
       options: {
         data: {
@@ -287,10 +305,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         {
           id: data.user.id,
           name,
-          email: email.trim().toLowerCase(),
+          email: normalizedEmail,
           role: normalizedRole,
           phone: null,
           phone_verified: false,
+          signup_completed: false,
         } as any,
         { onConflict: 'id' }
       );
@@ -318,11 +337,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
       password,
     });
+
     if (error) throw error;
+    if (!data.user) throw new Error('فشل تسجيل الدخول');
+
+    const profileData = await fetchProfile(data.user.id);
+
+    if (!profileData) {
+      await supabase.auth.signOut();
+      throw new Error('تعذر العثور على بيانات الحساب.');
+    }
+
+    if (!profileData.signup_completed || !profileData.phone_verified) {
+      await supabase.auth.signOut();
+      throw new Error(
+        'هذا الحساب لم يكمل خطوات التسجيل بعد. يجب إكمال التحقق من البريد ثم إضافة رقم الجوال وتأكيده قبل تسجيل الدخول.'
+      );
+    }
   };
 
   const signOut = async () => {
@@ -382,7 +419,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const value: AuthContextType = {
     user,
-    profile,
+    profile: profile as UserProfile | null,
     loading,
     signUp,
     signIn,
