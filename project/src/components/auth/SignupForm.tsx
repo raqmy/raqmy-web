@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Mail,
   Lock,
@@ -44,7 +44,12 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [secondaryLoading, setSecondaryLoading] = useState(false);
+
+  const [emailCheckLoading, setEmailCheckLoading] = useState(false);
+  const [emailResendLoading, setEmailResendLoading] = useState(false);
+  const [phoneResendLoading, setPhoneResendLoading] = useState(false);
+
+  const [emailResendCooldown, setEmailResendCooldown] = useState(0);
 
   const normalizeEmail = (value: string): string => value.trim().toLowerCase();
 
@@ -76,6 +81,16 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
     const cleaned = value.replace(/[^\d+]/g, '');
     setPhone(cleaned);
   };
+
+  useEffect(() => {
+    if (emailResendCooldown <= 0) return;
+
+    const timer = window.setTimeout(() => {
+      setEmailResendCooldown((prev) => prev - 1);
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [emailResendCooldown]);
 
   const handleBasicSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,6 +126,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         email: normalizedEmail,
         password,
         options: {
+          emailRedirectTo: `${window.location.origin}/auth/signup`,
           data: {
             name: name.trim(),
             role,
@@ -128,6 +144,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
 
       setInfoMessage('تم إنشاء الحساب الأساسي. الآن تحقق من بريدك الإلكتروني للمتابعة.');
       setStep('email-verification');
+      setEmailResendCooldown(60);
     } catch (err: any) {
       const message = err?.message || 'فشل إنشاء الحساب';
 
@@ -148,28 +165,47 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
   const handleResendEmailVerification = async () => {
     setError('');
     setInfoMessage('');
-    setSecondaryLoading(true);
+
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail) {
+      setError('لا يوجد بريد إلكتروني لإعادة إرسال رابط التحقق.');
+      return;
+    }
+
+    if (emailResendCooldown > 0) {
+      setError(`انتظر ${emailResendCooldown} ثانية ثم حاول مرة أخرى.`);
+      return;
+    }
+
+    setEmailResendLoading(true);
 
     try {
       const { error: resendError } = await supabase.auth.resend({
         type: 'signup',
-        email: normalizeEmail(email),
+        email: normalizedEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/signup`,
+        },
       });
 
-      if (resendError) throw resendError;
+      if (resendError) {
+        throw resendError;
+      }
 
-      setInfoMessage('تم إرسال رابط تحقق جديد إلى بريدك الإلكتروني.');
+      setInfoMessage(`تم إرسال رابط تحقق جديد إلى: ${normalizedEmail}`);
+      setEmailResendCooldown(60);
     } catch (err: any) {
       setError(err?.message || 'فشل إعادة إرسال رابط التحقق');
     } finally {
-      setSecondaryLoading(false);
+      setEmailResendLoading(false);
     }
   };
 
   const handleConfirmEmailAndContinue = async () => {
     setError('');
     setInfoMessage('');
-    setSecondaryLoading(true);
+    setEmailCheckLoading(true);
 
     try {
       const normalizedEmail = normalizeEmail(email);
@@ -210,7 +246,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
     } catch (err: any) {
       setError(err?.message || 'فشل التحقق من البريد الإلكتروني');
     } finally {
-      setSecondaryLoading(false);
+      setEmailCheckLoading(false);
     }
   };
 
@@ -351,7 +387,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
   const handleResendPhoneOtp = async () => {
     setError('');
     setInfoMessage('');
-    setSecondaryLoading(true);
+    setPhoneResendLoading(true);
 
     try {
       const {
@@ -384,7 +420,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
     } catch (err: any) {
       setError(err?.message || 'فشل إعادة إرسال رمز التحقق');
     } finally {
-      setSecondaryLoading(false);
+      setPhoneResendLoading(false);
     }
   };
 
@@ -655,20 +691,24 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
           <button
             type="button"
             onClick={handleConfirmEmailAndContinue}
-            disabled={secondaryLoading}
+            disabled={emailCheckLoading || emailResendLoading}
             className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {secondaryLoading ? 'جاري التحقق...' : 'تم التحقق من البريد'}
+            {emailCheckLoading ? 'جاري التحقق...' : 'تم التحقق من البريد'}
           </button>
 
           <button
             type="button"
             onClick={handleResendEmailVerification}
-            disabled={secondaryLoading}
+            disabled={emailResendLoading || emailCheckLoading || emailResendCooldown > 0}
             className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            <RefreshCw className="w-4 h-4" />
-            إعادة إرسال رابط التحقق
+            <RefreshCw className={`w-4 h-4 ${emailResendLoading ? 'animate-spin' : ''}`} />
+            {emailResendLoading
+              ? 'جاري إعادة الإرسال...'
+              : emailResendCooldown > 0
+              ? `إعادة الإرسال بعد ${emailResendCooldown}ث`
+              : 'إعادة إرسال رابط التحقق'}
           </button>
         </div>
       )}
@@ -745,11 +785,11 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
           <button
             type="button"
             onClick={handleResendPhoneOtp}
-            disabled={secondaryLoading}
+            disabled={phoneResendLoading}
             className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            <RefreshCw className="w-4 h-4" />
-            {secondaryLoading ? 'جاري إعادة الإرسال...' : 'إعادة إرسال الرمز'}
+            <RefreshCw className={`w-4 h-4 ${phoneResendLoading ? 'animate-spin' : ''}`} />
+            {phoneResendLoading ? 'جاري إعادة الإرسال...' : 'إعادة إرسال الرمز'}
           </button>
         </form>
       )}
