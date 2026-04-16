@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { Mail, Lock, AlertCircle, Eye, EyeOff, CheckCircle, RefreshCw } from 'lucide-react';
+import {
+  Mail,
+  Lock,
+  AlertCircle,
+  Eye,
+  EyeOff,
+  CheckCircle,
+  RefreshCw,
+} from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 
@@ -25,6 +33,40 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
 
   const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
+  const isEmailNotConfirmedMessage = (message: string) => {
+    const lowered = String(message || '').toLowerCase();
+
+    return (
+      lowered.includes('email not confirmed') ||
+      lowered.includes('email_not_confirmed') ||
+      lowered.includes('confirm your email') ||
+      lowered.includes('not confirmed')
+    );
+  };
+
+  const ensureSignupCompleted = async (userId: string) => {
+    const { data: profile, error: profileError } = await supabase
+      .from('users_profile')
+      .select('signup_completed, phone_verified')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileError) {
+      throw new Error(`فشل التحقق من حالة الحساب: ${profileError.message}`);
+    }
+
+    const signupCompleted = Boolean(profile?.signup_completed);
+    const phoneVerified = Boolean(profile?.phone_verified);
+
+    if (!signupCompleted || !phoneVerified) {
+      await supabase.auth.signOut();
+
+      throw new Error(
+        'هذا الحساب لم يكمل خطوات التسجيل بعد. يجب إكمال التحقق من البريد ثم إضافة رقم الجوال وتأكيده قبل تسجيل الدخول.'
+      );
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -32,23 +74,43 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
     setLoading(true);
 
     try {
-      await signIn(normalizeEmail(email), password);
-    } catch (err: any) {
-      const message = err?.message || 'فشل تسجيل الدخول';
+      const normalizedEmail = normalizeEmail(email);
 
-      const lowered = String(message).toLowerCase();
-      const isEmailNotConfirmed =
-        lowered.includes('email not confirmed') ||
-        lowered.includes('email_not_confirmed') ||
-        lowered.includes('confirm your email') ||
-        lowered.includes('not confirmed');
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
 
-      if (isEmailNotConfirmed) {
-        setStep('email-verification');
-        setInfoMessage('تم العثور على الحساب، لكن يجب تأكيد البريد الإلكتروني أولًا قبل الدخول.');
-      } else {
-        setError(message);
+      if (signInError) {
+        if (isEmailNotConfirmedMessage(signInError.message || '')) {
+          setStep('email-verification');
+          setInfoMessage(
+            'تم العثور على الحساب، لكن يجب تأكيد البريد الإلكتروني أولًا قبل الدخول.'
+          );
+          return;
+        }
+
+        throw signInError;
       }
+
+      if (!data.user) {
+        throw new Error('فشل تسجيل الدخول');
+      }
+
+      if (!data.user.email_confirmed_at) {
+        await supabase.auth.signOut();
+        setStep('email-verification');
+        setInfoMessage(
+          'تم العثور على الحساب، لكن يجب تأكيد البريد الإلكتروني أولًا قبل الدخول.'
+        );
+        return;
+      }
+
+      await ensureSignupCompleted(data.user.id);
+
+      await signIn(normalizedEmail, password);
+    } catch (err: any) {
+      setError(err?.message || 'فشل تسجيل الدخول');
     } finally {
       setLoading(false);
     }
@@ -81,33 +143,39 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
     setChecking(true);
 
     try {
+      const normalizedEmail = normalizeEmail(email);
+
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizeEmail(email),
+        email: normalizedEmail,
         password,
       });
 
       if (signInError) {
-        const lowered = String(signInError.message || '').toLowerCase();
-        const stillNotConfirmed =
-          lowered.includes('email not confirmed') ||
-          lowered.includes('email_not_confirmed') ||
-          lowered.includes('confirm your email') ||
-          lowered.includes('not confirmed');
-
-        if (stillNotConfirmed) {
-          setInfoMessage('البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.');
+        if (isEmailNotConfirmedMessage(signInError.message || '')) {
+          setInfoMessage(
+            'البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.'
+          );
           return;
         }
 
         throw signInError;
       }
 
-      if (!data.user?.email_confirmed_at) {
-        setInfoMessage('البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.');
+      if (!data.user) {
+        throw new Error('فشل تسجيل الدخول');
+      }
+
+      if (!data.user.email_confirmed_at) {
+        await supabase.auth.signOut();
+        setInfoMessage(
+          'البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.'
+        );
         return;
       }
 
-      await signIn(normalizeEmail(email), password);
+      await ensureSignupCompleted(data.user.id);
+
+      await signIn(normalizedEmail, password);
     } catch (err: any) {
       setError(err?.message || 'فشل التحقق من البريد وتسجيل الدخول');
     } finally {
@@ -282,4 +350,4 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
       </div>
     </div>
   );
-};
+}
