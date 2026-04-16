@@ -287,7 +287,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         {
           id: data.user.id,
           name,
+          email: email.trim().toLowerCase(),
           role: normalizedRole,
+          phone: null,
+          phone_verified: false,
         } as any,
         { onConflict: 'id' }
       );
@@ -306,6 +309,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const profileData = await fetchProfile(data.user.id);
+
     if (mountedRef.current) {
       setUser(data.user);
       setProfile(profileData);
@@ -314,7 +318,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
     if (error) throw error;
   };
 
