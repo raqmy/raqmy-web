@@ -125,6 +125,12 @@ const parsePathToPage = (pathname: string) => {
     return 'profile';
   }
 
+  if (segments[0] === 'auth') {
+    if (segments[1] === 'login') return 'auth-login';
+    if (segments[1] === 'signup') return 'auth-signup';
+    return 'auth-login';
+  }
+
   if (segments[0] === 'seller-dashboard') {
     const tab = segments[1];
 
@@ -158,7 +164,6 @@ const parsePathToPage = (pathname: string) => {
   }
 
   const staticRoutes: Record<string, string> = {
-    auth: 'auth',
     pricing: 'pricing',
     marketplace: 'marketplace',
     'seller-dashboard': 'seller-dashboard',
@@ -241,6 +246,9 @@ const isStorePaymentPage = (page: string) =>
   page.startsWith('payment-success-') ||
   page.startsWith('payment-failed-');
 
+const isAuthRoute = (page: string) =>
+  page === 'auth' || page === 'auth-login' || page === 'auth-signup';
+
 const getActiveStoreSlugFromContext = (page: string): string | null => {
   const directStoreSlug = getStoreSlugFromScopedPage(page);
   if (directStoreSlug) return directStoreSlug;
@@ -251,7 +259,7 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
   const { slug, source, pendingSlug, pendingSource } = getStoredStoreContext();
 
   if (
-    (page === 'auth' ||
+    (isAuthRoute(page) ||
       page.startsWith('product-slug-') ||
       page.startsWith('product-') ||
       page === 'profile' ||
@@ -282,7 +290,7 @@ const isStoreProductPage = (page: string) =>
   (page.startsWith('product-slug-') || page.startsWith('product-')) &&
   !!getActiveStoreSlugFromContext(page);
 
-const isStoreAuthPage = (page: string) => page === 'auth' && !!getActiveStoreSlugFromContext(page);
+const isStoreAuthPage = (page: string) => isAuthRoute(page) && !!getActiveStoreSlugFromContext(page);
 
 const isStoreCustomerScopedPage = (page: string) =>
   page.startsWith('store-profile-') ||
@@ -400,6 +408,9 @@ const getPublicPathFromPage = (page: string) => {
   if (page === 'favorites') return '/profile/favorites';
   if (page === 'viewed-products') return '/profile/viewed-products';
 
+  if (page === 'auth' || page === 'auth-login') return '/auth/login';
+  if (page === 'auth-signup') return '/auth/signup';
+
   if (page === 'seller-dashboard') return '/seller-dashboard';
   if (page === 'seller-dashboard-overview') return '/seller-dashboard';
   if (page.startsWith('seller-dashboard-')) {
@@ -422,7 +433,6 @@ const getPublicPathFromPage = (page: string) => {
 
   const publicRoutes: Record<string, string> = {
     home: '/',
-    auth: '/auth',
     pricing: '/pricing',
     marketplace: `/marketplace${getMarketplaceSearchParamsForSync()}`,
     support: '/support',
@@ -837,7 +847,7 @@ function AppContent() {
       const hasPhoneValue = !!String(profile.phone || '').trim();
 
       if (!profile.phone_verified) {
-        if (currentPage === 'auth') {
+        if (isAuthRoute(currentPage)) {
           if (hasPhoneValue) {
             setCurrentPage('verify-phone');
           }
@@ -860,7 +870,7 @@ function AppContent() {
         return;
       }
 
-      if (currentPage === 'auth') {
+      if (isAuthRoute(currentPage)) {
         if (profile.role === 'admin' || profile.role === 'superadmin') {
           setCurrentPage('admin-dashboard');
         } else if (profile.role === 'seller') {
@@ -1010,11 +1020,23 @@ function AppContent() {
         return <HomePage onNavigate={navigateWithContext} />;
 
       case 'auth':
+      case 'auth-login':
         return (
           <AuthPage
             storeMode={!!storeSlug}
             storeSlug={storeSlug || undefined}
             onNavigate={navigateWithContext}
+            initialMode="login"
+          />
+        );
+
+      case 'auth-signup':
+        return (
+          <AuthPage
+            storeMode={!!storeSlug}
+            storeSlug={storeSlug || undefined}
+            onNavigate={navigateWithContext}
+            initialMode="signup"
           />
         );
 
