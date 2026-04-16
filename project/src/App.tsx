@@ -290,7 +290,8 @@ const isStoreProductPage = (page: string) =>
   (page.startsWith('product-slug-') || page.startsWith('product-')) &&
   !!getActiveStoreSlugFromContext(page);
 
-const isStoreAuthPage = (page: string) => isAuthRoute(page) && !!getActiveStoreSlugFromContext(page);
+const isStoreAuthPage = (page: string) =>
+  isAuthRoute(page) && !!getActiveStoreSlugFromContext(page);
 
 const isStoreCustomerScopedPage = (page: string) =>
   page.startsWith('store-profile-') ||
@@ -418,7 +419,11 @@ const getPublicPathFromPage = (page: string) => {
     return tab === 'overview' ? '/seller-dashboard' : `/seller-dashboard/${encodeURIComponent(tab)}`;
   }
 
-  if (page === 'admin' || page === 'admin-dashboard' || page === 'admin-dashboard-overview') {
+  if (
+    page === 'admin' ||
+    page === 'admin-dashboard' ||
+    page === 'admin-dashboard-overview'
+  ) {
     return '/admin-dashboard';
   }
 
@@ -482,10 +487,18 @@ const hasPotentialPaymobParams = () => {
 
 function AppContent() {
   const { user, profile, loading } = useAuth();
-  const [currentPage, setCurrentPage] = useState(() => parsePathToPage(window.location.pathname));
+  const [currentPage, setCurrentPage] = useState(() =>
+    parsePathToPage(window.location.pathname)
+  );
   const [hasBankDetails, setHasBankDetails] = useState<boolean | null>(null);
   const [isHandlingPaymentReturn, setIsHandlingPaymentReturn] = useState(false);
   const hasInitializedRouteSync = useRef(false);
+
+  const typedProfile = (profile as (typeof profile & { signup_completed?: boolean }) | null);
+  const signupCompleted = !!typedProfile?.signup_completed;
+  const hasVerifiedPhone = !!typedProfile?.phone_verified;
+  const hasPhoneValue = !!String(typedProfile?.phone || '').trim();
+  const isSignupFullyComplete = signupCompleted && hasVerifiedPhone;
 
   const storeSlug = getActiveStoreSlugFromContext(currentPage);
   const isStoreMode = isStoreContextPage(currentPage);
@@ -842,51 +855,73 @@ function AppContent() {
 
   useEffect(() => {
     if (isHandlingPaymentReturn) return;
+    if (!user || loading || !typedProfile) return;
 
-    if (user && !loading && profile) {
-      const hasPhoneValue = !!String(profile.phone || '').trim();
-
-      if (!profile.phone_verified) {
-        if (isAuthRoute(currentPage)) {
-          if (hasPhoneValue) {
-            setCurrentPage('verify-phone');
-          }
-          return;
-        }
-
+    if (!signupCompleted) {
+      if (hasPhoneValue && !hasVerifiedPhone) {
         if (currentPage !== 'verify-phone') {
           setCurrentPage('verify-phone');
-          return;
         }
-      }
-
-      if (
-        profile.phone_verified &&
-        profile.role === 'seller' &&
-        hasBankDetails === false &&
-        currentPage !== 'merchant-bank-details'
-      ) {
-        setCurrentPage('merchant-bank-details');
         return;
       }
 
+      if (currentPage !== 'auth-signup') {
+        setCurrentPage('auth-signup');
+      }
+      return;
+    }
+
+    if (!hasVerifiedPhone) {
       if (isAuthRoute(currentPage)) {
-        if (profile.role === 'admin' || profile.role === 'superadmin') {
-          setCurrentPage('admin-dashboard');
-        } else if (profile.role === 'seller') {
-          setCurrentPage('seller-dashboard');
-        } else if (storeSlug) {
-          setCurrentPage(`store-profile-${storeSlug}`);
-        } else {
-          setCurrentPage('home');
+        if (hasPhoneValue) {
+          setCurrentPage('verify-phone');
         }
+        return;
+      }
+
+      if (currentPage !== 'verify-phone') {
+        setCurrentPage('verify-phone');
+        return;
       }
     }
-  }, [user, profile, loading, currentPage, hasBankDetails, isHandlingPaymentReturn, storeSlug]);
+
+    if (
+      hasVerifiedPhone &&
+      typedProfile.role === 'seller' &&
+      hasBankDetails === false &&
+      currentPage !== 'merchant-bank-details'
+    ) {
+      setCurrentPage('merchant-bank-details');
+      return;
+    }
+
+    if (isAuthRoute(currentPage)) {
+      if (typedProfile.role === 'admin' || typedProfile.role === 'superadmin') {
+        setCurrentPage('admin-dashboard');
+      } else if (typedProfile.role === 'seller') {
+        setCurrentPage('seller-dashboard');
+      } else if (storeSlug) {
+        setCurrentPage(`store-profile-${storeSlug}`);
+      } else {
+        setCurrentPage('home');
+      }
+    }
+  }, [
+    user,
+    typedProfile,
+    signupCompleted,
+    hasVerifiedPhone,
+    hasPhoneValue,
+    loading,
+    currentPage,
+    hasBankDetails,
+    isHandlingPaymentReturn,
+    storeSlug,
+  ]);
 
   useEffect(() => {
     const checkBankDetails = async () => {
-      if (!user || !profile || profile.role !== 'seller') {
+      if (!user || !typedProfile || typedProfile.role !== 'seller') {
         setHasBankDetails(true);
         return;
       }
@@ -895,7 +930,7 @@ function AppContent() {
         const { data, error } = await supabase
           .from('merchant_payout_accounts')
           .select('id')
-          .eq('merchant_id', profile.id)
+          .eq('merchant_id', typedProfile.id)
           .maybeSingle();
 
         if (error) {
@@ -911,10 +946,10 @@ function AppContent() {
       }
     };
 
-    if (user && profile) {
+    if (user && typedProfile && signupCompleted) {
       checkBankDetails();
     }
-  }, [user, profile]);
+  }, [user, typedProfile, signupCompleted]);
 
   if (loading || isHandlingPaymentReturn) {
     return (
@@ -995,7 +1030,7 @@ function AppContent() {
       currentPage === 'seller-dashboard-overview' ||
       currentPage.startsWith('seller-dashboard-')
     ) {
-      return profile?.role === 'seller' || profile?.role === 'admin' ? (
+      return typedProfile?.role === 'seller' || typedProfile?.role === 'admin' ? (
         <SellerDashboard onNavigate={navigateWithContext} />
       ) : (
         <HomePage onNavigate={navigateWithContext} />
@@ -1008,7 +1043,7 @@ function AppContent() {
       currentPage === 'admin-dashboard-overview' ||
       currentPage.startsWith('admin-dashboard-')
     ) {
-      return profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+      return typedProfile?.role === 'admin' || typedProfile?.role === 'superadmin' ? (
         <AdminDashboard onNavigate={navigateWithContext} />
       ) : (
         <HomePage onNavigate={navigateWithContext} />
@@ -1056,28 +1091,34 @@ function AppContent() {
         return <ProfilePage onNavigate={navigateWithContext} />;
 
       case 'admin-affiliate-management':
-        return profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+        return typedProfile?.role === 'admin' || typedProfile?.role === 'superadmin' ? (
           <AdminAffiliateManagementPage onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
 
       case 'affiliate-dashboard':
-        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+        return typedProfile?.role === 'seller' ||
+          typedProfile?.role === 'admin' ||
+          typedProfile?.role === 'superadmin' ? (
           <AffiliateDashboard onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
 
       case 'coupons-management':
-        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+        return typedProfile?.role === 'seller' ||
+          typedProfile?.role === 'admin' ||
+          typedProfile?.role === 'superadmin' ? (
           <CouponsManagementPage onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
 
       case 'affiliate-management':
-        return profile?.role === 'seller' || profile?.role === 'admin' || profile?.role === 'superadmin' ? (
+        return typedProfile?.role === 'seller' ||
+          typedProfile?.role === 'admin' ||
+          typedProfile?.role === 'superadmin' ? (
           <AffiliateManagementPage onNavigate={navigateWithContext} />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
