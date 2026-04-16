@@ -130,7 +130,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                 تصفح المنتجات
               </button>
               <button
-                onClick={() => onNavigate('auth')}
+                onClick={() => onNavigate('auth-signup')}
                 className="w-full sm:w-auto px-8 py-3 bg-transparent text-white border-2 border-white rounded-xl font-semibold hover:bg-white hover:text-blue-600 transition-all"
               >
                 ابدأ البيع الآن
@@ -221,7 +221,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             <h3 className="text-2xl font-bold text-gray-900 mb-2">لا توجد منتجات حالياً</h3>
             <p className="text-gray-600 mb-6">كن أول من ينشر منتج في المتجر العام</p>
             <button
-              onClick={() => onNavigate('auth')}
+              onClick={() => onNavigate('auth-signup')}
               className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all"
             >
               ابدأ البيع الآن
@@ -238,7 +238,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
               انضم إلى آلاف التجار الذين يثقون في منصة رقمي
             </p>
             <button
-              onClick={() => onNavigate('auth')}
+              onClick={() => onNavigate('auth-signup')}
               className="px-8 py-3 bg-white text-blue-600 rounded-xl font-semibold hover:bg-gray-100 transition-all shadow-lg"
             >
               أنشئ متجرك مجاناً
