@@ -68,7 +68,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
     onNavigate('profile');
   };
 
-  const handleAuthNavigate = () => {
+  const handleAuthNavigate = (target: 'login' | 'signup' = 'login') => {
     if (scopedStoreSlug) {
       try {
         sessionStorage.setItem('active_store_slug', scopedStoreSlug);
@@ -78,7 +78,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
       }
     }
 
-    onNavigate('auth');
+    onNavigate(target === 'signup' ? 'auth-signup' : 'auth-login');
   };
 
   const renderProfileAvatar = () => {
@@ -225,14 +225,14 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
             ) : (
               <div className="flex items-center gap-3">
                 <button
-                  onClick={handleAuthNavigate}
+                  onClick={() => handleAuthNavigate('login')}
                   className="px-6 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                 >
                   تسجيل الدخول
                 </button>
 
                 <button
-                  onClick={handleAuthNavigate}
+                  onClick={() => handleAuthNavigate('signup')}
                   className="px-6 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                 >
                   ابدأ الآن
