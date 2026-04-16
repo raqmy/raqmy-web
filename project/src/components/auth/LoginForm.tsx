@@ -1,32 +1,199 @@
 import React, { useState } from 'react';
-import { Mail, Lock, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, AlertCircle, Eye, EyeOff, CheckCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
 
 interface LoginFormProps {
   onSwitchToSignup: () => void;
 }
 
+type LoginStep = 'credentials' | 'email-verification';
+
 export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
   const { signIn } = useAuth();
+
+  const [step, setStep] = useState<LoginStep>('credentials');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [checking, setChecking] = useState(false);
+
+  const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfoMessage('');
     setLoading(true);
 
     try {
-      await signIn(email, password);
+      await signIn(normalizeEmail(email), password);
     } catch (err: any) {
-      setError(err.message || 'فشل تسجيل الدخول');
+      const message = err?.message || 'فشل تسجيل الدخول';
+
+      const lowered = String(message).toLowerCase();
+      const isEmailNotConfirmed =
+        lowered.includes('email not confirmed') ||
+        lowered.includes('email_not_confirmed') ||
+        lowered.includes('confirm your email') ||
+        lowered.includes('not confirmed');
+
+      if (isEmailNotConfirmed) {
+        setStep('email-verification');
+        setInfoMessage('تم العثور على الحساب، لكن يجب تأكيد البريد الإلكتروني أولًا قبل الدخول.');
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  const handleResendVerification = async () => {
+    setError('');
+    setInfoMessage('');
+    setResending(true);
+
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: 'signup',
+        email: normalizeEmail(email),
+      });
+
+      if (resendError) throw resendError;
+
+      setInfoMessage('تم إرسال رابط تحقق جديد إلى بريدك الإلكتروني.');
+    } catch (err: any) {
+      setError(err?.message || 'فشل إعادة إرسال رابط التحقق');
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleCheckEmailThenLogin = async () => {
+    setError('');
+    setInfoMessage('');
+    setChecking(true);
+
+    try {
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: normalizeEmail(email),
+        password,
+      });
+
+      if (signInError) {
+        const lowered = String(signInError.message || '').toLowerCase();
+        const stillNotConfirmed =
+          lowered.includes('email not confirmed') ||
+          lowered.includes('email_not_confirmed') ||
+          lowered.includes('confirm your email') ||
+          lowered.includes('not confirmed');
+
+        if (stillNotConfirmed) {
+          setInfoMessage('البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.');
+          return;
+        }
+
+        throw signInError;
+      }
+
+      if (!data.user?.email_confirmed_at) {
+        setInfoMessage('البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.');
+        return;
+      }
+
+      await signIn(normalizeEmail(email), password);
+    } catch (err: any) {
+      setError(err?.message || 'فشل التحقق من البريد وتسجيل الدخول');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  if (step === 'email-verification') {
+    return (
+      <div className="w-full max-w-md mx-auto bg-white rounded-2xl shadow-xl p-8">
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-50 flex items-center justify-center">
+            <Mail className="w-8 h-8 text-blue-600" />
+          </div>
+          <h2 className="text-3xl font-bold text-gray-900 mb-2">تحقق البريد الإلكتروني</h2>
+          <p className="text-gray-600 leading-7">
+            قبل تسجيل الدخول، يجب تأكيد البريد الإلكتروني لهذا الحساب.
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {infoMessage && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2 text-blue-700">
+            <CheckCircle className="w-5 h-5 flex-shrink-0" />
+            <span>{infoMessage}</span>
+          </div>
+        )}
+
+        <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+          <p className="text-sm text-gray-700 mb-2">البريد المستخدم:</p>
+          <p className="font-semibold text-gray-900 break-all">{normalizeEmail(email)}</p>
+        </div>
+
+        <div className="space-y-4">
+          <button
+            type="button"
+            onClick={handleCheckEmailThenLogin}
+            disabled={checking}
+            className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {checking ? 'جاري التحقق...' : 'تم التحقق من البريد'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResendVerification}
+            disabled={resending}
+            className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            {resending ? 'جاري إعادة الإرسال...' : 'إعادة إرسال رابط التحقق'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setStep('credentials');
+              setError('');
+              setInfoMessage('');
+            }}
+            className="w-full text-gray-600 py-2 font-medium hover:text-gray-800 transition-colors"
+          >
+            الرجوع لتسجيل الدخول
+          </button>
+        </div>
+
+        <div className="mt-6 text-center">
+          <p className="text-gray-600">
+            ليس لديك حساب؟{' '}
+            <button
+              onClick={onSwitchToSignup}
+              className="text-blue-600 font-semibold hover:text-blue-700"
+            >
+              أنشئ حساب جديد
+            </button>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-md mx-auto bg-white rounded-2xl shadow-xl p-8">
@@ -39,6 +206,13 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+
+      {infoMessage && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2 text-blue-700">
+          <CheckCircle className="w-5 h-5 flex-shrink-0" />
+          <span>{infoMessage}</span>
         </div>
       )}
 
