@@ -834,9 +834,20 @@ function AppContent() {
     if (isHandlingPaymentReturn) return;
 
     if (user && !loading && profile) {
-      if (!profile.phone_verified && currentPage !== 'verify-phone') {
-        setCurrentPage('verify-phone');
-        return;
+      const hasPhoneValue = !!String(profile.phone || '').trim();
+
+      if (!profile.phone_verified) {
+        if (currentPage === 'auth') {
+          if (hasPhoneValue) {
+            setCurrentPage('verify-phone');
+          }
+          return;
+        }
+
+        if (currentPage !== 'verify-phone') {
+          setCurrentPage('verify-phone');
+          return;
+        }
       }
 
       if (
