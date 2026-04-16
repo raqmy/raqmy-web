@@ -25,6 +25,11 @@ type SignupStep =
   | 'phone-verification'
   | 'completed';
 
+const PHONE_OTP_DEMO_ENABLED =
+  String(import.meta.env.VITE_PHONE_OTP_DEMO_ENABLED ?? 'true').toLowerCase() !== 'false';
+
+const PHONE_OTP_DEMO_CODE = String(import.meta.env.VITE_PHONE_OTP_DEMO_CODE ?? '000000');
+
 export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
   const { refreshProfile } = useAuth();
 
@@ -55,22 +60,21 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
 
   const validatePhone = (phoneNumber: string): boolean => {
     const cleanedPhone = phoneNumber.trim().replace(/\s+/g, '');
-    const phoneRegex = /^\+?[1-9]\d{10,14}$/;
-    return phoneRegex.test(cleanedPhone);
+    return /^(\+9665\d{8}|05\d{8}|5\d{8})$/.test(cleanedPhone);
   };
 
   const formatPhone = (value: string): string => {
     const cleaned = value.replace(/\D/g, '');
 
-    if (cleaned.startsWith('966')) {
+    if (cleaned.startsWith('9665') && cleaned.length === 12) {
       return '+' + cleaned;
     }
 
-    if (cleaned.startsWith('05')) {
+    if (cleaned.startsWith('05') && cleaned.length === 10) {
       return '+966' + cleaned.substring(1);
     }
 
-    if (cleaned.startsWith('5')) {
+    if (cleaned.startsWith('5') && cleaned.length === 9) {
       return '+966' + cleaned;
     }
 
@@ -263,7 +267,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
     const formattedPhone = formatPhone(phone);
 
     if (!validatePhone(formattedPhone)) {
-      setError('رقم الجوال غير صحيح. يجب أن يبدأ بـ +966 أو 05');
+      setError('رقم الجوال غير صحيح. استخدم رقمًا سعوديًا مثل 0551234567');
       return;
     }
 
@@ -289,6 +293,15 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
 
       if (profileUpdateError) {
         throw new Error(`فشل حفظ رقم الجوال: ${profileUpdateError.message}`);
+      }
+
+      if (PHONE_OTP_DEMO_ENABLED) {
+        setPhone(formattedPhone);
+        setStep('phone-verification');
+        setInfoMessage(
+          `تم الانتقال إلى تحقق الجوال في الوضع التجريبي. استخدم الرمز: ${PHONE_OTP_DEMO_CODE}`
+        );
+        return;
       }
 
       const otpResponse = await fetch(
@@ -340,6 +353,30 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
       if (sessionError) throw sessionError;
       if (!session) throw new Error('الجلسة غير متوفرة. سجّل الدخول ثم حاول مرة أخرى.');
 
+      if (PHONE_OTP_DEMO_ENABLED) {
+        if (otpCode.trim() !== PHONE_OTP_DEMO_CODE) {
+          throw new Error('رمز التحقق التجريبي غير صحيح');
+        }
+
+        const { error: profileError } = await supabase
+          .from('users_profile')
+          .update({
+            phone,
+            phone_verified: true,
+            signup_completed: true,
+          })
+          .eq('id', session.user.id);
+
+        if (profileError) {
+          throw new Error(`تم التحقق لكن فشل تحديث الملف الشخصي: ${profileError.message}`);
+        }
+
+        await refreshProfile();
+        setStep('completed');
+        setInfoMessage('تم إنشاء الحساب والتحقق من البريد والجوال بنجاح.');
+        return;
+      }
+
       const verifyResponse = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-phone-otp`,
         {
@@ -364,7 +401,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
       const { error: profileError } = await supabase
         .from('users_profile')
         .update({
-          phone: phone,
+          phone,
           phone_verified: true,
           signup_completed: true,
         })
@@ -390,6 +427,11 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
     setPhoneResendLoading(true);
 
     try {
+      if (PHONE_OTP_DEMO_ENABLED) {
+        setInfoMessage(`تمت إعادة إرسال الرمز التجريبي. استخدم: ${PHONE_OTP_DEMO_CODE}`);
+        return;
+      }
+
       const {
         data: { session },
         error: sessionError,
