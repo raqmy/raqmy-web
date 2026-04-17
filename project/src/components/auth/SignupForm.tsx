@@ -16,6 +16,11 @@ import { supabase } from '../../lib/supabase';
 
 interface SignupFormProps {
   onSwitchToLogin: () => void;
+  initialData?: {
+    email?: string;
+    password?: string;
+    resumeReason?: 'account-not-found' | 'incomplete-account';
+  };
 }
 
 type SignupStep =
@@ -30,7 +35,10 @@ const PHONE_OTP_DEMO_ENABLED =
 
 const PHONE_OTP_DEMO_CODE = String(import.meta.env.VITE_PHONE_OTP_DEMO_CODE ?? '000000');
 
-export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
+export const SignupForm: React.FC<SignupFormProps> = ({
+  onSwitchToLogin,
+  initialData,
+}) => {
   const { refreshProfile } = useAuth();
 
   const [step, setStep] = useState<SignupStep>('basic-info');
@@ -38,9 +46,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [otpCode, setOtpCode] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [email, setEmail] = useState(initialData?.email ?? '');
+  const [password, setPassword] = useState(initialData?.password ?? '');
+  const [confirmPassword, setConfirmPassword] = useState(initialData?.password ?? '');
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -86,6 +94,148 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
     setPhone(cleaned);
   };
 
+  const isEmailNotConfirmedMessage = (message: string) => {
+    const lowered = String(message || '').toLowerCase();
+
+    return (
+      lowered.includes('email not confirmed') ||
+      lowered.includes('email_not_confirmed') ||
+      lowered.includes('confirm your email') ||
+      lowered.includes('not confirmed')
+    );
+  };
+
+  const isInvalidCredentialsMessage = (message: string) => {
+    const lowered = String(message || '').toLowerCase();
+
+    return (
+      lowered.includes('invalid login credentials') ||
+      lowered.includes('invalid_credentials') ||
+      lowered.includes('invalid credentials')
+    );
+  };
+
+  const ensureProfileForUser = async (authUser: any) => {
+    const { data: existingProfile, error: existingProfileError } = await supabase
+      .from('users_profile')
+      .select('id, name, email, role, phone, phone_verified, signup_completed')
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    if (existingProfileError) {
+      throw new Error(`فشل قراءة بيانات الحساب: ${existingProfileError.message}`);
+    }
+
+    if (existingProfile) {
+      return existingProfile;
+    }
+
+    const fallbackName =
+      authUser.user_metadata?.name ||
+      name.trim() ||
+      authUser.email?.split('@')[0] ||
+      'مستخدم جديد';
+
+    const fallbackRole =
+      authUser.user_metadata?.role === 'seller' ? 'seller' : role;
+
+    const { error: createProfileError } = await supabase
+      .from('users_profile')
+      .upsert(
+        {
+          id: authUser.id,
+          name: fallbackName,
+          email: normalizeEmail(authUser.email || email),
+          role: fallbackRole,
+          phone: null,
+          phone_verified: false,
+          signup_completed: false,
+        } as any,
+        { onConflict: 'id' }
+      );
+
+    if (createProfileError) {
+      throw new Error(`فشل إنشاء بيانات الحساب الناقصة: ${createProfileError.message}`);
+    }
+
+    const { data: createdProfile, error: createdProfileError } = await supabase
+      .from('users_profile')
+      .select('id, name, email, role, phone, phone_verified, signup_completed')
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    if (createdProfileError) {
+      throw new Error(`فشل قراءة بيانات الحساب بعد إنشائها: ${createdProfileError.message}`);
+    }
+
+    return createdProfile;
+  };
+
+  const resumeExistingSignup = async (normalizedEmail: string, currentPassword: string) => {
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password: currentPassword,
+    });
+
+    if (signInError) {
+      if (isEmailNotConfirmedMessage(signInError.message || '')) {
+        setStep('email-verification');
+        setInfoMessage(
+          'هذا الحساب موجود مسبقًا لكنه لم يكمل التحقق من البريد الإلكتروني بعد. أكمل التحقق من البريد للمتابعة.'
+        );
+        setEmailResendCooldown(60);
+        return;
+      }
+
+      if (isInvalidCredentialsMessage(signInError.message || '')) {
+        throw new Error(
+          'هذا البريد الإلكتروني مسجل بالفعل، لكن كلمة المرور غير صحيحة. استخدم كلمة المرور الصحيحة لنفس الحساب لإكمال التسجيل.'
+        );
+      }
+
+      throw signInError;
+    }
+
+    if (!data.user) {
+      throw new Error('تعذر متابعة الحساب الحالي.');
+    }
+
+    if (!data.user.email_confirmed_at) {
+      setStep('email-verification');
+      setInfoMessage(
+        'هذا الحساب موجود مسبقًا لكنه لم يكمل التحقق من البريد الإلكتروني بعد. أكمل التحقق من البريد للمتابعة.'
+      );
+      setEmailResendCooldown(60);
+      return;
+    }
+
+    const profile = await ensureProfileForUser(data.user);
+    await refreshProfile();
+
+    const normalizedPhone = profile?.phone ? String(profile.phone) : '';
+
+    if (profile?.signup_completed && profile?.phone_verified) {
+      setInfoMessage('هذا الحساب مكتمل بالفعل. يمكنك الانتقال إلى تسجيل الدخول الآن.');
+      onSwitchToLogin();
+      return;
+    }
+
+    setPhone(normalizedPhone);
+
+    if (normalizedPhone && !profile?.phone_verified) {
+      setStep('phone-verification');
+      setInfoMessage(
+        'هذا الحساب موجود مسبقًا وتم تأكيد البريد الإلكتروني، وبقي فقط تأكيد رقم الجوال.'
+      );
+      return;
+    }
+
+    setStep('phone-entry');
+    setInfoMessage(
+      'هذا الحساب موجود مسبقًا وتم تأكيد البريد الإلكتروني. أكمل الآن بإضافة رقم الجوال وتأكيده.'
+    );
+  };
+
   useEffect(() => {
     if (emailResendCooldown <= 0) return;
 
@@ -95,6 +245,27 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
 
     return () => window.clearTimeout(timer);
   }, [emailResendCooldown]);
+
+  useEffect(() => {
+    if (typeof initialData?.email === 'string') {
+      setEmail(initialData.email);
+    }
+
+    if (typeof initialData?.password === 'string') {
+      setPassword(initialData.password);
+      setConfirmPassword(initialData.password);
+    }
+
+    if (initialData?.resumeReason === 'incomplete-account') {
+      setInfoMessage(
+        'هذا الحساب موجود لكنه غير مكتمل. أكمل إنشاء الحساب بنفس البريد الإلكتروني وكلمة المرور السابقة.'
+      );
+    }
+
+    if (initialData?.resumeReason === 'account-not-found') {
+      setInfoMessage('أكمل إنشاء حساب جديد باستخدام بياناتك.');
+    }
+  }, [initialData]);
 
   const handleBasicSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,6 +310,13 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
       });
 
       if (signUpError) {
+        const message = signUpError.message || '';
+
+        if (message.includes('User already registered')) {
+          await resumeExistingSignup(normalizedEmail, password);
+          return;
+        }
+
         throw signUpError;
       }
 
@@ -152,12 +330,8 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
     } catch (err: any) {
       const message = err?.message || 'فشل إنشاء الحساب';
 
-      if (message.includes('User already registered')) {
-        setError(
-          'هذا البريد الإلكتروني مسجل بالفعل. إذا كان تسجيلك غير مكتمل فانتقل إلى تسجيل الدخول لإكمال الخطوات.'
-        );
-      } else if (message.toLowerCase().includes('email')) {
-        setError('البريد الإلكتروني غير صحيح أو مستخدم بالفعل');
+      if (message.toLowerCase().includes('email')) {
+        setError(message);
       } else {
         setError(message);
       }
@@ -234,6 +408,12 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
           return;
         }
 
+        if (isInvalidCredentialsMessage(signInError.message || '')) {
+          throw new Error(
+            'تعذر المتابعة لأن كلمة المرور غير صحيحة. استخدم نفس كلمة المرور التي أنشأت بها الحساب.'
+          );
+        }
+
         throw signInError;
       }
 
@@ -244,7 +424,24 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSwitchToLogin }) => {
         return;
       }
 
+      const profile = await ensureProfileForUser(data.user);
       await refreshProfile();
+
+      const normalizedPhone = profile?.phone ? String(profile.phone) : '';
+      setPhone(normalizedPhone);
+
+      if (normalizedPhone && !profile?.phone_verified) {
+        setStep('phone-verification');
+        setInfoMessage('تم تأكيد البريد الإلكتروني بنجاح. بقي فقط تأكيد رقم الجوال.');
+        return;
+      }
+
+      if (profile?.signup_completed && profile?.phone_verified) {
+        setStep('completed');
+        setInfoMessage('هذا الحساب مكتمل بالفعل وتم التحقق من البريد والجوال.');
+        return;
+      }
+
       setStep('phone-entry');
       setInfoMessage('تم تأكيد البريد الإلكتروني بنجاح. الآن أضف رقم الجوال.');
     } catch (err: any) {
