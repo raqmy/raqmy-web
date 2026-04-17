@@ -30,6 +30,16 @@ type SignupStep =
   | 'phone-verification'
   | 'completed';
 
+type AccountStatusResponse =
+  | {
+      success: true;
+      status: 'not_found' | 'email_not_confirmed' | 'signup_incomplete' | 'ready_for_login';
+    }
+  | {
+      success: false;
+      error?: string;
+    };
+
 const PHONE_OTP_DEMO_ENABLED =
   String(import.meta.env.VITE_PHONE_OTP_DEMO_ENABLED ?? 'true').toLowerCase() !== 'false';
 
@@ -115,6 +125,39 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     );
   };
 
+  const isRateLimitMessage = (message: string) => {
+    const lowered = String(message || '').toLowerCase();
+
+    return (
+      lowered.includes('rate limit') ||
+      lowered.includes('rate_limit') ||
+      lowered.includes('email rate limit exceeded')
+    );
+  };
+
+  const checkAccountStatus = async (
+    normalizedEmail: string
+  ): Promise<AccountStatusResponse | null> => {
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        'check-account-status',
+        {
+          body: { email: normalizedEmail },
+        }
+      );
+
+      if (invokeError) {
+        console.error('check-account-status invoke error:', invokeError);
+        return null;
+      }
+
+      return (data as AccountStatusResponse) ?? null;
+    } catch (err) {
+      console.error('check-account-status unexpected error:', err);
+      return null;
+    }
+  };
+
   const ensureProfileForUser = async (authUser: any) => {
     const { data: existingProfile, error: existingProfileError } = await supabase
       .from('users_profile')
@@ -171,14 +214,18 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     return createdProfile;
   };
 
-  const resumeExistingSignup = async (normalizedEmail: string, currentPassword: string) => {
+  const resumeExistingSignup = async (
+    normalizedEmail: string,
+    currentPassword: string,
+    statusHint?: 'email_not_confirmed' | 'signup_incomplete' | 'ready_for_login'
+  ) => {
     const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email: normalizedEmail,
       password: currentPassword,
     });
 
     if (signInError) {
-      if (isEmailNotConfirmedMessage(signInError.message || '')) {
+      if (isEmailNotConfirmedMessage(signInError.message || '') || statusHint === 'email_not_confirmed') {
         setStep('email-verification');
         setInfoMessage(
           'هذا الحساب موجود مسبقًا لكنه لم يكمل التحقق من البريد الإلكتروني بعد. أكمل التحقق من البريد للمتابعة.'
@@ -188,6 +235,12 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       }
 
       if (isInvalidCredentialsMessage(signInError.message || '')) {
+        if (statusHint === 'ready_for_login') {
+          throw new Error(
+            'هذا البريد الإلكتروني مسجل بالفعل، وكلمة المرور غير صحيحة. انتقل إلى تسجيل الدخول واستخدم كلمة المرور الصحيحة.'
+          );
+        }
+
         throw new Error(
           'هذا البريد الإلكتروني مسجل بالفعل، لكن كلمة المرور غير صحيحة. استخدم كلمة المرور الصحيحة لنفس الحساب لإكمال التسجيل.'
         );
@@ -215,9 +268,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     const normalizedPhone = profile?.phone ? String(profile.phone) : '';
 
     if (profile?.signup_completed && profile?.phone_verified) {
-      setInfoMessage('هذا الحساب مكتمل بالفعل. يمكنك الانتقال إلى تسجيل الدخول الآن.');
-      onSwitchToLogin();
-      return;
+      throw new Error(
+        'هذا الحساب مكتمل بالفعل. انتقل إلى تسجيل الدخول واستخدم نفس البريد الإلكتروني وكلمة المرور.'
+      );
     }
 
     setPhone(normalizedPhone);
@@ -297,6 +350,27 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     try {
       const normalizedEmail = normalizeEmail(email);
 
+      const statusResult = await checkAccountStatus(normalizedEmail);
+
+      if (!statusResult || !statusResult.success) {
+        throw new Error('تعذر التحقق من حالة الحساب الآن. حاول مرة أخرى بعد قليل.');
+      }
+
+      if (statusResult.status === 'email_not_confirmed') {
+        await resumeExistingSignup(normalizedEmail, password, 'email_not_confirmed');
+        return;
+      }
+
+      if (statusResult.status === 'signup_incomplete') {
+        await resumeExistingSignup(normalizedEmail, password, 'signup_incomplete');
+        return;
+      }
+
+      if (statusResult.status === 'ready_for_login') {
+        await resumeExistingSignup(normalizedEmail, password, 'ready_for_login');
+        return;
+      }
+
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: normalizedEmail,
         password,
@@ -317,6 +391,12 @@ export const SignupForm: React.FC<SignupFormProps> = ({
           return;
         }
 
+        if (isRateLimitMessage(message)) {
+          throw new Error(
+            'تم تجاوز الحد المؤقت لمحاولات إرسال البريد. انتظر قليلًا ثم حاول مرة أخرى.'
+          );
+        }
+
         throw signUpError;
       }
 
@@ -330,8 +410,8 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     } catch (err: any) {
       const message = err?.message || 'فشل إنشاء الحساب';
 
-      if (message.toLowerCase().includes('email')) {
-        setError(message);
+      if (isRateLimitMessage(message)) {
+        setError('تم تجاوز الحد المؤقت لمحاولات إرسال البريد. انتظر قليلًا ثم حاول مرة أخرى.');
       } else {
         setError(message);
       }
@@ -368,13 +448,24 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       });
 
       if (resendError) {
+        const message = resendError.message || '';
+
+        if (isRateLimitMessage(message)) {
+          throw new Error('تم تجاوز الحد المؤقت لإرسال رسائل التحقق. انتظر قليلًا ثم حاول مرة أخرى.');
+        }
+
         throw resendError;
       }
 
       setInfoMessage(`تم إرسال رابط تحقق جديد إلى: ${normalizedEmail}`);
       setEmailResendCooldown(60);
     } catch (err: any) {
-      setError(err?.message || 'فشل إعادة إرسال رابط التحقق');
+      const message = err?.message || 'فشل إعادة إرسال رابط التحقق';
+      if (isRateLimitMessage(message)) {
+        setError('تم تجاوز الحد المؤقت لإرسال رسائل التحقق. انتظر قليلًا ثم حاول مرة أخرى.');
+      } else {
+        setError(message);
+      }
     } finally {
       setEmailResendLoading(false);
     }
