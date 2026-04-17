@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Mail,
   Lock,
@@ -50,6 +50,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   initialData,
 }) => {
   const { refreshProfile } = useAuth();
+  const autoResumeAttemptedRef = useRef(false);
 
   const [step, setStep] = useState<SignupStep>('basic-info');
 
@@ -225,7 +226,10 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     });
 
     if (signInError) {
-      if (isEmailNotConfirmedMessage(signInError.message || '') || statusHint === 'email_not_confirmed') {
+      if (
+        isEmailNotConfirmedMessage(signInError.message || '') ||
+        statusHint === 'email_not_confirmed'
+      ) {
         setStep('email-verification');
         setInfoMessage(
           'هذا الحساب موجود مسبقًا لكنه لم يكمل التحقق من البريد الإلكتروني بعد. أكمل التحقق من البريد للمتابعة.'
@@ -311,13 +315,58 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
     if (initialData?.resumeReason === 'incomplete-account') {
       setInfoMessage(
-        'هذا الحساب موجود لكنه غير مكتمل. أكمل إنشاء الحساب بنفس البريد الإلكتروني وكلمة المرور السابقة.'
+        'هذا الحساب موجود لكنه غير مكتمل. سيتم نقلك مباشرة إلى الخطوة الناقصة.'
       );
     }
 
     if (initialData?.resumeReason === 'account-not-found') {
       setInfoMessage('أكمل إنشاء حساب جديد باستخدام بياناتك.');
     }
+  }, [initialData]);
+
+  useEffect(() => {
+    const runAutoResume = async () => {
+      if (autoResumeAttemptedRef.current) return;
+      if (initialData?.resumeReason !== 'incomplete-account') return;
+
+      const normalizedEmail = normalizeEmail(initialData?.email || '');
+      const currentPassword = initialData?.password || '';
+
+      if (!normalizedEmail || !currentPassword) return;
+
+      autoResumeAttemptedRef.current = true;
+      setLoading(true);
+      setError('');
+
+      try {
+        const statusResult = await checkAccountStatus(normalizedEmail);
+
+        if (!statusResult || !statusResult.success) {
+          setInfoMessage(
+            'تعذر تحديد الخطوة الناقصة تلقائيًا. أكمل من النموذج أدناه بنفس البيانات السابقة.'
+          );
+          return;
+        }
+
+        if (
+          statusResult.status === 'email_not_confirmed' ||
+          statusResult.status === 'signup_incomplete' ||
+          statusResult.status === 'ready_for_login'
+        ) {
+          await resumeExistingSignup(
+            normalizedEmail,
+            currentPassword,
+            statusResult.status
+          );
+        }
+      } catch (err: any) {
+        setError(err?.message || 'فشل تحديد الخطوة الناقصة للحساب.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void runAutoResume();
   }, [initialData]);
 
   const handleBasicSignup = async (e: React.FormEvent) => {
@@ -451,7 +500,9 @@ export const SignupForm: React.FC<SignupFormProps> = ({
         const message = resendError.message || '';
 
         if (isRateLimitMessage(message)) {
-          throw new Error('تم تجاوز الحد المؤقت لإرسال رسائل التحقق. انتظر قليلًا ثم حاول مرة أخرى.');
+          throw new Error(
+            'تم تجاوز الحد المؤقت لإرسال رسائل التحقق. انتظر قليلًا ثم حاول مرة أخرى.'
+          );
         }
 
         throw resendError;
@@ -848,6 +899,12 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       </div>
 
       {renderStepHeader()}
+
+      {loading && initialData?.resumeReason === 'incomplete-account' && step === 'basic-info' && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-700">
+          جاري تحديد الخطوة الناقصة لهذا الحساب...
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700">
