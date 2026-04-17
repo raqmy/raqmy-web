@@ -87,6 +87,10 @@ const clearCachedAuthState = () => {
   }
 };
 
+const isProfileFullyCompleted = (profile: ExtendedUserProfile | null) => {
+  return Boolean(profile?.signup_completed) && Boolean(profile?.phone_verified);
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
@@ -105,8 +109,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const profileRequestIdRef = useRef(0);
 
   useEffect(() => {
-    writeCachedAuthState(user, profile);
+    if (user && profile) {
+      writeCachedAuthState(user, profile);
+    } else {
+      clearCachedAuthState();
+    }
   }, [user, profile]);
+
+  const applyResolvedAuthState = (
+    authUser: User | null,
+    profileData: ExtendedUserProfile | null
+  ) => {
+    if (!mountedRef.current) return;
+
+    if (authUser && profileData && isProfileFullyCompleted(profileData)) {
+      setUser(authUser);
+      setProfile(profileData);
+      currentUserIdRef.current = authUser.id;
+      return;
+    }
+
+    setUser(null);
+    setProfile(null);
+    clearCachedAuthState();
+  };
 
   const refreshUserSubscriptionStatus = async (userId: string) => {
     try {
@@ -195,7 +221,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
 
     currentUserIdRef.current = nextUser.id;
-    setUser(nextUser);
 
     try {
       const profileData = await ensureUserProfileRecord(nextUser);
@@ -204,14 +229,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       if (profileRequestIdRef.current !== requestId) return;
       if (currentUserIdRef.current !== nextUser.id) return;
 
-      setProfile(profileData);
+      applyResolvedAuthState(nextUser, profileData);
     } catch (error) {
       console.error('Error loading profile:', error);
 
       if (!mountedRef.current) return;
       if (profileRequestIdRef.current !== requestId) return;
 
+      setUser(null);
       setProfile(null);
+      clearCachedAuthState();
     } finally {
       if (!mountedRef.current) return;
       if (profileRequestIdRef.current !== requestId) return;
@@ -239,17 +266,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           setProfile(null);
           clearCachedAuthState();
           setLoading(false);
-          return;
-        }
-
-        const cachedUserId = currentUserIdRef.current;
-        const isSameCachedUser = cachedUserId && cachedUserId === sessionUser.id;
-
-        setUser(sessionUser);
-
-        if (isSameCachedUser && cachedState?.profile) {
-          setLoading(false);
-          void loadProfileForUser(sessionUser);
           return;
         }
 
@@ -283,25 +299,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         return;
       }
 
-      const currentUserId = currentUserIdRef.current;
-      const nextUserId = nextUser?.id ?? null;
-      const isSameUser =
-        !!currentUserId && !!nextUserId && currentUserId === nextUserId;
-
-      setUser(nextUser);
-
       if (!nextUser) {
+        currentUserIdRef.current = null;
+        setUser(null);
         setProfile(null);
         clearCachedAuthState();
-        setLoading(false);
-        return;
-      }
-
-      if (
-        isSameUser &&
-        (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') &&
-        profile
-      ) {
         setLoading(false);
         return;
       }
@@ -369,8 +371,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     const profileData = await ensureUserProfileRecord(data.user);
 
     if (mountedRef.current) {
-      setUser(data.user);
-      setProfile(profileData);
+      applyResolvedAuthState(data.user, profileData);
       setLoading(false);
     }
   };
@@ -399,6 +400,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         'هذا الحساب لم يكمل خطوات التسجيل بعد. يجب إكمال التحقق من البريد ثم إضافة رقم الجوال وتأكيده قبل تسجيل الدخول.'
       );
     }
+
+    if (mountedRef.current) {
+      applyResolvedAuthState(data.user, profileData);
+      setLoading(false);
+    }
   };
 
   const signOut = async () => {
@@ -406,13 +412,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     if (error) throw error;
 
     clearCachedAuthState();
+    currentUserIdRef.current = null;
     setUser(null);
     setProfile(null);
     setLoading(false);
   };
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
-    if (!user) throw new Error('No user logged in');
+    const {
+      data: { user: authUser },
+      error: authUserError,
+    } = await supabase.auth.getUser();
+
+    if (authUserError) throw authUserError;
+    if (!authUser) throw new Error('No user logged in');
 
     const updatesForDb: any = { ...updates };
 
@@ -423,7 +436,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     const { error } = await supabase
       .from('users_profile')
       .update(updatesForDb)
-      .eq('id', user.id);
+      .eq('id', authUser.id);
 
     if (error) throw error;
 
@@ -441,18 +454,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     }
 
-    const updatedProfile = await ensureUserProfileRecord(user);
+    const updatedProfile = await ensureUserProfileRecord(authUser);
+
     if (mountedRef.current) {
-      setProfile(updatedProfile);
+      applyResolvedAuthState(authUser, updatedProfile);
     }
   };
 
   const refreshProfile = async () => {
-    if (!user) return;
+    const {
+      data: { user: authUser },
+      error: authUserError,
+    } = await supabase.auth.getUser();
 
-    const updatedProfile = await ensureUserProfileRecord(user);
+    if (authUserError) {
+      console.error('refreshProfile auth error:', authUserError);
+      return;
+    }
+
+    if (!authUser) {
+      if (mountedRef.current) {
+        setUser(null);
+        setProfile(null);
+        clearCachedAuthState();
+      }
+      return;
+    }
+
+    const updatedProfile = await ensureUserProfileRecord(authUser);
+
     if (mountedRef.current) {
-      setProfile(updatedProfile);
+      applyResolvedAuthState(authUser, updatedProfile);
     }
   };
 
