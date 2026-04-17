@@ -9,12 +9,19 @@ interface AuthPageProps {
   onNavigate?: (page: string) => void;
 }
 
+type SignupPrefillState = {
+  email?: string;
+  password?: string;
+  resumeReason?: 'account-not-found' | 'incomplete-account';
+} | null;
+
 export const AuthPage: React.FC<AuthPageProps> = ({
   storeMode = false,
   storeSlug,
   onNavigate,
 }) => {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [signupPrefill, setSignupPrefill] = useState<SignupPrefillState>(null);
 
   const storeDisplayName = useMemo(() => {
     if (!storeSlug) return 'المتجر';
@@ -26,6 +33,19 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     mode === 'login'
       ? 'أدخل البريد الإلكتروني وكلمة المرور ثم أكمل التحقق المطلوب'
       : 'ابدأ ببيانات الحساب الأساسية ثم أكمل تحقق البريد والجوال';
+
+  const handleSwitchToSignup = (prefill?: {
+    email?: string;
+    password?: string;
+    resumeReason?: 'account-not-found' | 'incomplete-account';
+  }) => {
+    setSignupPrefill(prefill ?? null);
+    setMode('signup');
+  };
+
+  const handleSwitchToLogin = () => {
+    setMode('login');
+  };
 
   if (storeMode) {
     return (
@@ -132,9 +152,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             </div>
 
             {mode === 'login' ? (
-              <LoginForm onSwitchToSignup={() => setMode('signup')} />
+              <LoginForm onSwitchToSignup={handleSwitchToSignup} />
             ) : (
-              <SignupForm onSwitchToLogin={() => setMode('login')} />
+              <SignupForm
+                onSwitchToLogin={handleSwitchToLogin}
+                initialData={signupPrefill ?? undefined}
+              />
             )}
           </div>
         </div>
@@ -146,9 +169,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center py-12 px-4">
       <div className="w-full max-w-md mx-auto">
         {mode === 'login' ? (
-          <LoginForm onSwitchToSignup={() => setMode('signup')} />
+          <LoginForm onSwitchToSignup={handleSwitchToSignup} />
         ) : (
-          <SignupForm onSwitchToLogin={() => setMode('login')} />
+          <SignupForm
+            onSwitchToLogin={handleSwitchToLogin}
+            initialData={signupPrefill ?? undefined}
+          />
         )}
       </div>
     </div>
