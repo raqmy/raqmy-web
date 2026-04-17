@@ -12,7 +12,11 @@ import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 
 interface LoginFormProps {
-  onSwitchToSignup: () => void;
+  onSwitchToSignup: (prefill?: {
+    email?: string;
+    password?: string;
+    resumeReason?: 'account-not-found' | 'incomplete-account';
+  }) => void;
 }
 
 type LoginStep = 'credentials' | 'email-verification';
@@ -30,6 +34,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [showCompleteSignupAction, setShowCompleteSignupAction] = useState(false);
 
   const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
@@ -44,81 +49,110 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
     );
   };
 
-  const ensureSignupCompleted = async (userId: string) => {
-    const { data: profile, error: profileError } = await supabase
+  const isInvalidCredentialsMessage = (message: string) => {
+    const lowered = String(message || '').toLowerCase();
+
+    return (
+      lowered.includes('invalid login credentials') ||
+      lowered.includes('invalid_credentials') ||
+      lowered.includes('invalid credentials')
+    );
+  };
+
+  const isIncompleteSignupMessage = (message: string) => {
+    const lowered = String(message || '').toLowerCase();
+
+    return (
+      lowered.includes('لم يكمل خطوات التسجيل') ||
+      lowered.includes('signup_completed') ||
+      lowered.includes('phone_verified') ||
+      lowered.includes('complete signup')
+    );
+  };
+
+  const inspectAccountByEmail = async (normalizedEmail: string) => {
+    const { data, error } = await supabase
       .from('users_profile')
-      .select('signup_completed, phone_verified')
-      .eq('id', userId)
+      .select('id, email, signup_completed, phone_verified, phone')
+      .eq('email', normalizedEmail)
       .maybeSingle();
 
-    if (profileError) {
-      throw new Error(`فشل التحقق من حالة الحساب: ${profileError.message}`);
+    if (error) {
+      console.error('inspectAccountByEmail error:', error);
+      return null;
     }
 
-    const signupCompleted = Boolean(profile?.signup_completed);
-    const phoneVerified = Boolean(profile?.phone_verified);
+    return data;
+  };
 
-    if (!signupCompleted || !phoneVerified) {
-      await supabase.auth.signOut();
+  const resetMessages = () => {
+    setError('');
+    setInfoMessage('');
+    setShowCompleteSignupAction(false);
+  };
 
-      throw new Error(
-        'هذا الحساب لم يكمل خطوات التسجيل بعد. يجب إكمال التحقق من البريد ثم إضافة رقم الجوال وتأكيده قبل تسجيل الدخول.'
-      );
-    }
+  const handleIncompleteAccount = () => {
+    setError(
+      'هذا الحساب موجود لكنه لم يكمل إنشاء الحساب بعد. يجب الرجوع إلى إنشاء الحساب بنفس البريد الإلكتروني وكلمة المرور السابقة لإكمال الخطوات المتبقية.'
+    );
+    setShowCompleteSignupAction(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setInfoMessage('');
+    resetMessages();
     setLoading(true);
 
     try {
       const normalizedEmail = normalizeEmail(email);
 
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
+      await signIn(normalizedEmail, password);
+    } catch (err: any) {
+      const message = err?.message || 'فشل تسجيل الدخول';
 
-      if (signInError) {
-        if (isEmailNotConfirmedMessage(signInError.message || '')) {
-          setStep('email-verification');
-          setInfoMessage(
-            'تم العثور على الحساب، لكن يجب تأكيد البريد الإلكتروني أولًا قبل الدخول.'
-          );
-          return;
-        }
-
-        throw signInError;
-      }
-
-      if (!data.user) {
-        throw new Error('فشل تسجيل الدخول');
-      }
-
-      if (!data.user.email_confirmed_at) {
-        await supabase.auth.signOut();
+      if (isEmailNotConfirmedMessage(message)) {
         setStep('email-verification');
         setInfoMessage(
-          'تم العثور على الحساب، لكن يجب تأكيد البريد الإلكتروني أولًا قبل الدخول.'
+          'تم العثور على الحساب، لكن البريد الإلكتروني لم يتم تأكيده بعد. افتح رسالة البريد ثم اضغط رابط التحقق.'
         );
+        setShowCompleteSignupAction(false);
         return;
       }
 
-      await ensureSignupCompleted(data.user.id);
+      if (isIncompleteSignupMessage(message)) {
+        handleIncompleteAccount();
+        return;
+      }
 
-      await signIn(normalizedEmail, password);
-    } catch (err: any) {
-      setError(err?.message || 'فشل تسجيل الدخول');
+      if (isInvalidCredentialsMessage(message)) {
+        const normalizedEmail = normalizeEmail(email);
+        const account = await inspectAccountByEmail(normalizedEmail);
+
+        if (!account) {
+          setError('هذا الحساب غير موجود. يجب إنشاء حساب جديد أولًا.');
+          setShowCompleteSignupAction(false);
+          return;
+        }
+
+        if (!account.signup_completed || !account.phone_verified) {
+          handleIncompleteAccount();
+          return;
+        }
+
+        setError('كلمة المرور غير صحيحة. تأكد منها ثم حاول مرة أخرى.');
+        setShowCompleteSignupAction(false);
+        return;
+      }
+
+      setError(message);
+      setShowCompleteSignupAction(false);
     } finally {
       setLoading(false);
     }
   };
 
   const handleResendVerification = async () => {
-    setError('');
-    setInfoMessage('');
+    resetMessages();
     setResending(true);
 
     try {
@@ -138,46 +172,46 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
   };
 
   const handleCheckEmailThenLogin = async () => {
-    setError('');
-    setInfoMessage('');
+    resetMessages();
     setChecking(true);
 
     try {
       const normalizedEmail = normalizeEmail(email);
 
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
+      await signIn(normalizedEmail, password);
+    } catch (err: any) {
+      const message = err?.message || 'فشل التحقق من البريد وتسجيل الدخول';
 
-      if (signInError) {
-        if (isEmailNotConfirmedMessage(signInError.message || '')) {
-          setInfoMessage(
-            'البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.'
-          );
-          return;
-        }
-
-        throw signInError;
-      }
-
-      if (!data.user) {
-        throw new Error('فشل تسجيل الدخول');
-      }
-
-      if (!data.user.email_confirmed_at) {
-        await supabase.auth.signOut();
+      if (isEmailNotConfirmedMessage(message)) {
         setInfoMessage(
           'البريد الإلكتروني لم يتم تأكيده بعد. افتح الرسالة واضغط رابط التحقق ثم جرّب مرة أخرى.'
         );
         return;
       }
 
-      await ensureSignupCompleted(data.user.id);
+      if (isIncompleteSignupMessage(message)) {
+        handleIncompleteAccount();
+        return;
+      }
 
-      await signIn(normalizedEmail, password);
-    } catch (err: any) {
-      setError(err?.message || 'فشل التحقق من البريد وتسجيل الدخول');
+      if (isInvalidCredentialsMessage(message)) {
+        const account = await inspectAccountByEmail(normalizedEmail);
+
+        if (!account) {
+          setError('هذا الحساب غير موجود. يجب إنشاء حساب جديد أولًا.');
+          return;
+        }
+
+        if (!account.signup_completed || !account.phone_verified) {
+          handleIncompleteAccount();
+          return;
+        }
+
+        setError('كلمة المرور غير صحيحة. تأكد منها ثم حاول مرة أخرى.');
+        return;
+      }
+
+      setError(message);
     } finally {
       setChecking(false);
     }
@@ -210,6 +244,22 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
           </div>
         )}
 
+        {showCompleteSignupAction && (
+          <button
+            type="button"
+            onClick={() =>
+              onSwitchToSignup({
+                email: normalizeEmail(email),
+                password,
+                resumeReason: 'incomplete-account',
+              })
+            }
+            className="w-full mb-6 bg-amber-500 text-white py-3 rounded-lg font-semibold hover:bg-amber-600 transition-colors"
+          >
+            إكمال إنشاء الحساب
+          </button>
+        )}
+
         <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
           <p className="text-sm text-gray-700 mb-2">البريد المستخدم:</p>
           <p className="font-semibold text-gray-900 break-all">{normalizeEmail(email)}</p>
@@ -239,8 +289,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
             type="button"
             onClick={() => {
               setStep('credentials');
-              setError('');
-              setInfoMessage('');
+              resetMessages();
             }}
             className="w-full text-gray-600 py-2 font-medium hover:text-gray-800 transition-colors"
           >
@@ -252,7 +301,13 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
           <p className="text-gray-600">
             ليس لديك حساب؟{' '}
             <button
-              onClick={onSwitchToSignup}
+              onClick={() =>
+                onSwitchToSignup({
+                  email: normalizeEmail(email),
+                  password,
+                  resumeReason: 'account-not-found',
+                })
+              }
               className="text-blue-600 font-semibold hover:text-blue-700"
             >
               أنشئ حساب جديد
@@ -282,6 +337,22 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
           <CheckCircle className="w-5 h-5 flex-shrink-0" />
           <span>{infoMessage}</span>
         </div>
+      )}
+
+      {showCompleteSignupAction && (
+        <button
+          type="button"
+          onClick={() =>
+            onSwitchToSignup({
+              email: normalizeEmail(email),
+              password,
+              resumeReason: 'incomplete-account',
+            })
+          }
+          className="w-full mb-6 bg-amber-500 text-white py-3 rounded-lg font-semibold hover:bg-amber-600 transition-colors"
+        >
+          إكمال إنشاء الحساب
+        </button>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -341,7 +412,13 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
         <p className="text-gray-600">
           ليس لديك حساب؟{' '}
           <button
-            onClick={onSwitchToSignup}
+            onClick={() =>
+              onSwitchToSignup({
+                email: normalizeEmail(email),
+                password,
+                resumeReason: 'account-not-found',
+              })
+            }
             className="text-blue-600 font-semibold hover:text-blue-700"
           >
             أنشئ حساب جديد
@@ -350,4 +427,4 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
       </div>
     </div>
   );
-}
+};
