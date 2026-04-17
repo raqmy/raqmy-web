@@ -21,6 +21,16 @@ interface LoginFormProps {
 
 type LoginStep = 'credentials' | 'email-verification';
 
+type AccountStatusResponse =
+  | {
+      success: true;
+      status: 'not_found' | 'email_not_confirmed' | 'signup_incomplete' | 'ready_for_login';
+    }
+  | {
+      success: false;
+      error?: string;
+    };
+
 export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
   const { signIn } = useAuth();
 
@@ -70,21 +80,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
     );
   };
 
-  const inspectAccountByEmail = async (normalizedEmail: string) => {
-    const { data, error } = await supabase
-      .from('users_profile')
-      .select('id, email, signup_completed, phone_verified, phone')
-      .eq('email', normalizedEmail)
-      .maybeSingle();
-
-    if (error) {
-      console.error('inspectAccountByEmail error:', error);
-      return null;
-    }
-
-    return data;
-  };
-
   const resetMessages = () => {
     setError('');
     setInfoMessage('');
@@ -96,6 +91,62 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
       'هذا الحساب موجود لكنه لم يكمل إنشاء الحساب بعد. يجب الرجوع إلى إنشاء الحساب بنفس البريد الإلكتروني وكلمة المرور السابقة لإكمال الخطوات المتبقية.'
     );
     setShowCompleteSignupAction(true);
+  };
+
+  const checkAccountStatus = async (
+    normalizedEmail: string
+  ): Promise<AccountStatusResponse | null> => {
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        'check-account-status',
+        {
+          body: { email: normalizedEmail },
+        }
+      );
+
+      if (invokeError) {
+        console.error('check-account-status invoke error:', invokeError);
+        return null;
+      }
+
+      return (data as AccountStatusResponse) ?? null;
+    } catch (err) {
+      console.error('check-account-status unexpected error:', err);
+      return null;
+    }
+  };
+
+  const resolveInvalidCredentials = async (normalizedEmail: string) => {
+    const statusResult = await checkAccountStatus(normalizedEmail);
+
+    if (!statusResult || !statusResult.success) {
+      setError('تعذر التحقق من حالة الحساب الآن. حاول مرة أخرى بعد قليل.');
+      setShowCompleteSignupAction(false);
+      return;
+    }
+
+    if (statusResult.status === 'not_found') {
+      setError('هذا الحساب غير موجود. يجب إنشاء حساب جديد أولًا.');
+      setShowCompleteSignupAction(false);
+      return;
+    }
+
+    if (
+      statusResult.status === 'email_not_confirmed' ||
+      statusResult.status === 'signup_incomplete'
+    ) {
+      handleIncompleteAccount();
+      return;
+    }
+
+    if (statusResult.status === 'ready_for_login') {
+      setError('كلمة المرور غير صحيحة. تأكد منها ثم حاول مرة أخرى.');
+      setShowCompleteSignupAction(false);
+      return;
+    }
+
+    setError('فشل تسجيل الدخول. حاول مرة أخرى.');
+    setShowCompleteSignupAction(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -126,21 +177,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
 
       if (isInvalidCredentialsMessage(message)) {
         const normalizedEmail = normalizeEmail(email);
-        const account = await inspectAccountByEmail(normalizedEmail);
-
-        if (!account) {
-          setError('هذا الحساب غير موجود. يجب إنشاء حساب جديد أولًا.');
-          setShowCompleteSignupAction(false);
-          return;
-        }
-
-        if (!account.signup_completed || !account.phone_verified) {
-          handleIncompleteAccount();
-          return;
-        }
-
-        setError('كلمة المرور غير صحيحة. تأكد منها ثم حاول مرة أخرى.');
-        setShowCompleteSignupAction(false);
+        await resolveInvalidCredentials(normalizedEmail);
         return;
       }
 
@@ -195,19 +232,8 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
       }
 
       if (isInvalidCredentialsMessage(message)) {
-        const account = await inspectAccountByEmail(normalizedEmail);
-
-        if (!account) {
-          setError('هذا الحساب غير موجود. يجب إنشاء حساب جديد أولًا.');
-          return;
-        }
-
-        if (!account.signup_completed || !account.phone_verified) {
-          handleIncompleteAccount();
-          return;
-        }
-
-        setError('كلمة المرور غير صحيحة. تأكد منها ثم حاول مرة أخرى.');
+        const normalizedEmail = normalizeEmail(email);
+        await resolveInvalidCredentials(normalizedEmail);
         return;
       }
 
