@@ -37,6 +37,8 @@ const normalizeRole = (role: any): 'customer' | 'seller' | 'admin' => {
 
 type ExtendedUserProfile = UserProfile & {
   signup_completed?: boolean;
+  phone_verified?: boolean;
+  phone?: string | null;
 };
 
 type CachedAuthState = {
@@ -142,6 +144,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     } as ExtendedUserProfile;
   };
 
+  const ensureUserProfileRecord = async (authUser: User): Promise<ExtendedUserProfile | null> => {
+    const existingProfile = await fetchProfile(authUser.id);
+
+    if (existingProfile) {
+      return existingProfile;
+    }
+
+    const fallbackName =
+      authUser.user_metadata?.name ||
+      authUser.email?.split('@')[0] ||
+      'مستخدم جديد';
+
+    const fallbackRole = normalizeRole(authUser.user_metadata?.role);
+
+    const { error: createProfileError } = await supabase
+      .from('users_profile')
+      .upsert(
+        {
+          id: authUser.id,
+          name: fallbackName,
+          email: (authUser.email || '').trim().toLowerCase(),
+          role: fallbackRole,
+          phone: null,
+          phone_verified: false,
+          signup_completed: false,
+        } as any,
+        { onConflict: 'id' }
+      );
+
+    if (createProfileError) {
+      console.error('Error creating missing profile:', createProfileError);
+      return null;
+    }
+
+    return await fetchProfile(authUser.id);
+  };
+
   const loadProfileForUser = async (nextUser: User | null) => {
     const requestId = ++profileRequestIdRef.current;
 
@@ -159,7 +198,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setUser(nextUser);
 
     try {
-      const profileData = await fetchProfile(nextUser.id);
+      const profileData = await ensureUserProfileRecord(nextUser);
 
       if (!mountedRef.current) return;
       if (profileRequestIdRef.current !== requestId) return;
@@ -327,7 +366,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       console.warn('Signup metadata update warning:', metaError);
     }
 
-    const profileData = await fetchProfile(data.user.id);
+    const profileData = await ensureUserProfileRecord(data.user);
 
     if (mountedRef.current) {
       setUser(data.user);
@@ -347,11 +386,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     if (error) throw error;
     if (!data.user) throw new Error('فشل تسجيل الدخول');
 
-    const profileData = await fetchProfile(data.user.id);
+    const profileData = await ensureUserProfileRecord(data.user);
 
     if (!profileData) {
       await supabase.auth.signOut();
-      throw new Error('تعذر العثور على بيانات الحساب.');
+      throw new Error('تعذر العثور على بيانات الحساب أو إنشاؤها.');
     }
 
     if (!profileData.signup_completed || !profileData.phone_verified) {
@@ -402,7 +441,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     }
 
-    const updatedProfile = await fetchProfile(user.id);
+    const updatedProfile = await ensureUserProfileRecord(user);
     if (mountedRef.current) {
       setProfile(updatedProfile);
     }
@@ -411,7 +450,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const refreshProfile = async () => {
     if (!user) return;
 
-    const updatedProfile = await fetchProfile(user.id);
+    const updatedProfile = await ensureUserProfileRecord(user);
     if (mountedRef.current) {
       setProfile(updatedProfile);
     }
