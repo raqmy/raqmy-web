@@ -70,6 +70,15 @@ const ADMIN_DASHBOARD_TABS = new Set([
   'bank-account-verifications',
 ]);
 
+const isLoginOrSignupRoute = (page: string) =>
+  page === 'auth' || page === 'auth-login' || page === 'auth-signup';
+
+const isAuthRoute = (page: string) =>
+  page === 'auth' ||
+  page === 'auth-login' ||
+  page === 'auth-signup' ||
+  page === 'auth-reset-password';
+
 const parsePathToPage = (pathname: string) => {
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   const segments = normalizedPath.split('/').filter(Boolean);
@@ -128,6 +137,7 @@ const parsePathToPage = (pathname: string) => {
   if (segments[0] === 'auth') {
     if (segments[1] === 'login') return 'auth-login';
     if (segments[1] === 'signup') return 'auth-signup';
+    if (segments[1] === 'reset-password') return 'auth-reset-password';
     return 'auth-login';
   }
 
@@ -246,9 +256,6 @@ const isStorePaymentPage = (page: string) =>
   page.startsWith('payment-success-') ||
   page.startsWith('payment-failed-');
 
-const isAuthRoute = (page: string) =>
-  page === 'auth' || page === 'auth-login' || page === 'auth-signup';
-
 const getActiveStoreSlugFromContext = (page: string): string | null => {
   const directStoreSlug = getStoreSlugFromScopedPage(page);
   if (directStoreSlug) return directStoreSlug;
@@ -259,7 +266,7 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
   const { slug, source, pendingSlug, pendingSource } = getStoredStoreContext();
 
   if (
-    (isAuthRoute(page) ||
+    (isLoginOrSignupRoute(page) ||
       page.startsWith('product-slug-') ||
       page.startsWith('product-') ||
       page === 'profile' ||
@@ -291,7 +298,7 @@ const isStoreProductPage = (page: string) =>
   !!getActiveStoreSlugFromContext(page);
 
 const isStoreAuthPage = (page: string) =>
-  isAuthRoute(page) && !!getActiveStoreSlugFromContext(page);
+  isLoginOrSignupRoute(page) && !!getActiveStoreSlugFromContext(page);
 
 const isStoreCustomerScopedPage = (page: string) =>
   page.startsWith('store-profile-') ||
@@ -411,6 +418,7 @@ const getPublicPathFromPage = (page: string) => {
 
   if (page === 'auth' || page === 'auth-login') return '/auth/login';
   if (page === 'auth-signup') return '/auth/signup';
+  if (page === 'auth-reset-password') return '/auth/reset-password';
 
   if (page === 'seller-dashboard') return '/seller-dashboard';
   if (page === 'seller-dashboard-overview') return '/seller-dashboard';
@@ -498,7 +506,6 @@ function AppContent() {
   const signupCompleted = !!typedProfile?.signup_completed;
   const hasVerifiedPhone = !!typedProfile?.phone_verified;
   const hasPhoneValue = !!String(typedProfile?.phone || '').trim();
-  const isSignupFullyComplete = signupCompleted && hasVerifiedPhone;
 
   const storeSlug = getActiveStoreSlugFromContext(currentPage);
   const isStoreMode = isStoreContextPage(currentPage);
@@ -855,6 +862,7 @@ function AppContent() {
 
   useEffect(() => {
     if (isHandlingPaymentReturn) return;
+    if (currentPage === 'auth-reset-password') return;
     if (!user || loading || !typedProfile) return;
 
     if (!signupCompleted) {
@@ -895,7 +903,7 @@ function AppContent() {
       return;
     }
 
-    if (isAuthRoute(currentPage)) {
+    if (isAuthRoute(currentPage) && currentPage !== 'auth-reset-password') {
       if (typedProfile.role === 'admin' || typedProfile.role === 'superadmin') {
         setCurrentPage('admin-dashboard');
       } else if (typedProfile.role === 'seller') {
@@ -1072,6 +1080,15 @@ function AppContent() {
             storeSlug={storeSlug || undefined}
             onNavigate={navigateWithContext}
             initialMode="signup"
+          />
+        );
+
+      case 'auth-reset-password':
+        return (
+          <AuthPage
+            storeMode={false}
+            onNavigate={navigateWithContext}
+            initialMode="reset-password"
           />
         );
 
