@@ -77,6 +77,7 @@ const isAuthRoute = (page: string) =>
   page === 'auth' ||
   page === 'auth-login' ||
   page === 'auth-signup' ||
+  page === 'auth-forgot-password' ||
   page === 'auth-reset-password';
 
 const parsePathToPage = (pathname: string) => {
@@ -137,6 +138,7 @@ const parsePathToPage = (pathname: string) => {
   if (segments[0] === 'auth') {
     if (segments[1] === 'login') return 'auth-login';
     if (segments[1] === 'signup') return 'auth-signup';
+    if (segments[1] === 'forgot-password') return 'auth-forgot-password';
     if (segments[1] === 'reset-password') return 'auth-reset-password';
     return 'auth-login';
   }
@@ -280,11 +282,7 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
     return slug;
   }
 
-  if (
-    isStorePaymentPage(page) &&
-    pendingSource === 'storefront' &&
-    pendingSlug
-  ) {
+  if (isStorePaymentPage(page) && pendingSource === 'storefront' && pendingSlug) {
     return pendingSlug;
   }
 
@@ -418,6 +416,7 @@ const getPublicPathFromPage = (page: string) => {
 
   if (page === 'auth' || page === 'auth-login') return '/auth/login';
   if (page === 'auth-signup') return '/auth/signup';
+  if (page === 'auth-forgot-password') return '/auth/forgot-password';
   if (page === 'auth-reset-password') return '/auth/reset-password';
 
   if (page === 'seller-dashboard') return '/seller-dashboard';
@@ -1080,6 +1079,15 @@ function AppContent() {
             storeSlug={storeSlug || undefined}
             onNavigate={navigateWithContext}
             initialMode="signup"
+          />
+        );
+
+      case 'auth-forgot-password':
+        return (
+          <AuthPage
+            storeMode={false}
+            onNavigate={navigateWithContext}
+            initialMode="forgot-password"
           />
         );
 
