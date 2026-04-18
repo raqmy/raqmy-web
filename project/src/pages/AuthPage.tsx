@@ -51,6 +51,21 @@ const getInitialAuthMode = (
   return 'login';
 };
 
+const goToLoginRoute = () => {
+  if (typeof window === 'undefined') return;
+
+  const nextUrl = '/auth/login';
+  const currentUrl = `${window.location.pathname}${window.location.search}`;
+
+  if (currentUrl !== nextUrl) {
+    window.history.replaceState({}, document.title, nextUrl);
+  } else {
+    window.history.replaceState({}, document.title, nextUrl);
+  }
+
+  window.dispatchEvent(new PopStateEvent('popstate'));
+};
+
 const ForgotPasswordForm: React.FC<{
   onBackToLogin: () => void;
 }> = ({ onBackToLogin }) => {
@@ -259,11 +274,15 @@ const ResetPasswordForm: React.FC<{
       await supabase.auth.signOut();
 
       setSuccessMessage(
-        'تم تحديث كلمة المرور بنجاح. يمكنك الآن تسجيل الدخول باستخدام كلمة المرور الجديدة.'
+        'تم تحديث كلمة المرور بنجاح. سيتم تحويلك الآن إلى صفحة تسجيل الدخول.'
       );
       setPassword('');
       setConfirmPassword('');
       setIsRecoveryReady(false);
+
+      setTimeout(() => {
+        onBackToLogin();
+      }, 1200);
     } catch (err: any) {
       setError(err?.message || 'فشل تحديث كلمة المرور');
     } finally {
@@ -443,10 +462,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   }) => {
     setSignupPrefill(prefill ?? null);
     setMode('signup');
+
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, document.title, '/auth/signup');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
   };
 
   const handleSwitchToLogin = () => {
     setMode('login');
+    goToLoginRoute();
   };
 
   const renderAuthBody = () => {
