@@ -17,21 +17,15 @@ interface LoginFormProps {
     password?: string;
     resumeReason?: 'account-not-found' | 'incomplete-account';
   }) => void;
+  onForgotPassword: () => void;
 }
 
 type LoginStep = 'credentials' | 'email-verification';
 
-type AccountStatusResponse =
-  | {
-      success: true;
-      status: 'not_found' | 'email_not_confirmed' | 'signup_incomplete' | 'ready_for_login';
-    }
-  | {
-      success: false;
-      error?: string;
-    };
-
-export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
+export const LoginForm: React.FC<LoginFormProps> = ({
+  onSwitchToSignup,
+  onForgotPassword,
+}) => {
   const { signIn } = useAuth();
 
   const [step, setStep] = useState<LoginStep>('credentials');
@@ -80,6 +74,21 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
     );
   };
 
+  const inspectAccountByEmail = async (normalizedEmail: string) => {
+    const { data, error } = await supabase
+      .from('users_profile')
+      .select('id, email, signup_completed, phone_verified, phone')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (error) {
+      console.error('inspectAccountByEmail error:', error);
+      return null;
+    }
+
+    return data;
+  };
+
   const resetMessages = () => {
     setError('');
     setInfoMessage('');
@@ -91,62 +100,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
       'هذا الحساب موجود لكنه لم يكمل إنشاء الحساب بعد. يجب الرجوع إلى إنشاء الحساب بنفس البريد الإلكتروني وكلمة المرور السابقة لإكمال الخطوات المتبقية.'
     );
     setShowCompleteSignupAction(true);
-  };
-
-  const checkAccountStatus = async (
-    normalizedEmail: string
-  ): Promise<AccountStatusResponse | null> => {
-    try {
-      const { data, error: invokeError } = await supabase.functions.invoke(
-        'check-account-status',
-        {
-          body: { email: normalizedEmail },
-        }
-      );
-
-      if (invokeError) {
-        console.error('check-account-status invoke error:', invokeError);
-        return null;
-      }
-
-      return (data as AccountStatusResponse) ?? null;
-    } catch (err) {
-      console.error('check-account-status unexpected error:', err);
-      return null;
-    }
-  };
-
-  const resolveInvalidCredentials = async (normalizedEmail: string) => {
-    const statusResult = await checkAccountStatus(normalizedEmail);
-
-    if (!statusResult || !statusResult.success) {
-      setError('تعذر التحقق من حالة الحساب الآن. حاول مرة أخرى بعد قليل.');
-      setShowCompleteSignupAction(false);
-      return;
-    }
-
-    if (statusResult.status === 'not_found') {
-      setError('هذا الحساب غير موجود. يجب إنشاء حساب جديد أولًا.');
-      setShowCompleteSignupAction(false);
-      return;
-    }
-
-    if (
-      statusResult.status === 'email_not_confirmed' ||
-      statusResult.status === 'signup_incomplete'
-    ) {
-      handleIncompleteAccount();
-      return;
-    }
-
-    if (statusResult.status === 'ready_for_login') {
-      setError('كلمة المرور غير صحيحة. تأكد منها ثم حاول مرة أخرى.');
-      setShowCompleteSignupAction(false);
-      return;
-    }
-
-    setError('فشل تسجيل الدخول. حاول مرة أخرى.');
-    setShowCompleteSignupAction(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -177,7 +130,21 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
 
       if (isInvalidCredentialsMessage(message)) {
         const normalizedEmail = normalizeEmail(email);
-        await resolveInvalidCredentials(normalizedEmail);
+        const account = await inspectAccountByEmail(normalizedEmail);
+
+        if (!account) {
+          setError('هذا الحساب غير موجود. يجب إنشاء حساب جديد أولًا.');
+          setShowCompleteSignupAction(false);
+          return;
+        }
+
+        if (!account.signup_completed || !account.phone_verified) {
+          handleIncompleteAccount();
+          return;
+        }
+
+        setError('كلمة المرور غير صحيحة. تأكد منها ثم حاول مرة أخرى.');
+        setShowCompleteSignupAction(false);
         return;
       }
 
@@ -232,8 +199,19 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
       }
 
       if (isInvalidCredentialsMessage(message)) {
-        const normalizedEmail = normalizeEmail(email);
-        await resolveInvalidCredentials(normalizedEmail);
+        const account = await inspectAccountByEmail(normalizedEmail);
+
+        if (!account) {
+          setError('هذا الحساب غير موجود. يجب إنشاء حساب جديد أولًا.');
+          return;
+        }
+
+        if (!account.signup_completed || !account.phone_verified) {
+          handleIncompleteAccount();
+          return;
+        }
+
+        setError('كلمة المرور غير صحيحة. تأكد منها ثم حاول مرة أخرى.');
         return;
       }
 
@@ -401,9 +379,20 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            كلمة المرور
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium text-gray-700">
+              كلمة المرور
+            </label>
+
+            <button
+              type="button"
+              onClick={onForgotPassword}
+              className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+            >
+              نسيت كلمة المرور؟
+            </button>
+          </div>
+
           <div className="relative">
             <Lock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
