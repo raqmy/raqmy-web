@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Store, ArrowRight, ShieldCheck, Mail, Phone } from 'lucide-react';
 import { LoginForm } from '../components/auth/LoginForm';
 import { SignupForm } from '../components/auth/SignupForm';
@@ -15,13 +15,42 @@ type SignupPrefillState = {
   resumeReason?: 'account-not-found' | 'incomplete-account';
 } | null;
 
+const getInitialAuthMode = (): 'login' | 'signup' => {
+  if (typeof window === 'undefined') return 'login';
+
+  const pathname = window.location.pathname.toLowerCase();
+
+  if (pathname.includes('/auth/signup')) {
+    return 'signup';
+  }
+
+  return 'login';
+};
+
 export const AuthPage: React.FC<AuthPageProps> = ({
   storeMode = false,
   storeSlug,
   onNavigate,
 }) => {
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<'login' | 'signup'>(getInitialAuthMode);
   const [signupPrefill, setSignupPrefill] = useState<SignupPrefillState>(null);
+
+  useEffect(() => {
+    const syncModeWithPath = () => {
+      const nextMode = getInitialAuthMode();
+      setMode(nextMode);
+    };
+
+    syncModeWithPath();
+
+    window.addEventListener('popstate', syncModeWithPath);
+    window.addEventListener('hashchange', syncModeWithPath);
+
+    return () => {
+      window.removeEventListener('popstate', syncModeWithPath);
+      window.removeEventListener('hashchange', syncModeWithPath);
+    };
+  }, []);
 
   const storeDisplayName = useMemo(() => {
     if (!storeSlug) return 'المتجر';
