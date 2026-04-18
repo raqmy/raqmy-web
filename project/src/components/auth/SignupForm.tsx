@@ -45,6 +45,39 @@ const PHONE_OTP_DEMO_ENABLED =
 
 const PHONE_OTP_DEMO_CODE = String(import.meta.env.VITE_PHONE_OTP_DEMO_CODE ?? '000000');
 
+const EMAIL_REGEX =
+  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+$/;
+
+const COMMON_EMAIL_DOMAIN_TYPOS: Record<string, string> = {
+  'gamil.com': 'gmail.com',
+  'gmial.com': 'gmail.com',
+  'gmai.com': 'gmail.com',
+  'gmail.co': 'gmail.com',
+  'gmail.con': 'gmail.com',
+  'hotnail.com': 'hotmail.com',
+  'hotmai.com': 'hotmail.com',
+  'hotmial.com': 'hotmail.com',
+  'outlok.com': 'outlook.com',
+  'outllok.com': 'outlook.com',
+  'outlook.co': 'outlook.com',
+  'yaho.com': 'yahoo.com',
+  'yahooo.com': 'yahoo.com',
+  'yahoo.co': 'yahoo.com',
+  'icloud.co': 'icloud.com',
+  'iclod.com': 'icloud.com',
+};
+
+type EmailValidationResult =
+  | {
+      valid: true;
+      normalizedEmail: string;
+    }
+  | {
+      valid: false;
+      message: string;
+      suggestedEmail?: string;
+    };
+
 export const SignupForm: React.FC<SignupFormProps> = ({
   onSwitchToLogin,
   initialData,
@@ -77,6 +110,86 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
   const normalizeEmail = (value: string): string => value.trim().toLowerCase();
 
+  const validateEmail = (value: string): EmailValidationResult => {
+    const normalizedEmail = normalizeEmail(value);
+
+    if (!normalizedEmail) {
+      return {
+        valid: false,
+        message: 'البريد الإلكتروني مطلوب',
+      };
+    }
+
+    if (normalizedEmail.includes(' ')) {
+      return {
+        valid: false,
+        message: 'البريد الإلكتروني غير صحيح. احذف المسافات وحاول مرة أخرى.',
+      };
+    }
+
+    const atCount = (normalizedEmail.match(/@/g) || []).length;
+    if (atCount !== 1) {
+      return {
+        valid: false,
+        message: 'البريد الإلكتروني غير صحيح. يجب أن يحتوي على علامة @ مرة واحدة فقط.',
+      };
+    }
+
+    const [localPart = '', domainPart = ''] = normalizedEmail.split('@');
+
+    if (!localPart || !domainPart) {
+      return {
+        valid: false,
+        message: 'البريد الإلكتروني غير صحيح. تأكد من كتابة البريد كاملًا.',
+      };
+    }
+
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      return {
+        valid: false,
+        message: 'يرجى إدخال بريد إلكتروني صحيح.',
+      };
+    }
+
+    if (domainPart.startsWith('.') || domainPart.endsWith('.')) {
+      return {
+        valid: false,
+        message: 'البريد الإلكتروني غير صحيح. اسم النطاق غير مكتمل.',
+      };
+    }
+
+    if (!domainPart.includes('.')) {
+      return {
+        valid: false,
+        message: 'البريد الإلكتروني غير صحيح. يجب أن يحتوي النطاق على نقطة مثل gmail.com',
+      };
+    }
+
+    const domainParts = domainPart.split('.');
+    const tld = domainParts[domainParts.length - 1] || '';
+
+    if (tld.length < 2) {
+      return {
+        valid: false,
+        message: 'البريد الإلكتروني غير صحيح. امتداد النطاق قصير جدًا.',
+      };
+    }
+
+    const suggestedDomain = COMMON_EMAIL_DOMAIN_TYPOS[domainPart];
+    if (suggestedDomain) {
+      return {
+        valid: false,
+        message: `يبدو أن البريد الإلكتروني يحتوي على خطأ. هل تقصد ${localPart}@${suggestedDomain} ؟`,
+        suggestedEmail: `${localPart}@${suggestedDomain}`,
+      };
+    }
+
+    return {
+      valid: true,
+      normalizedEmail,
+    };
+  };
+
   const validatePhone = (phoneNumber: string): boolean => {
     const cleanedPhone = phoneNumber.trim().replace(/\s+/g, '');
     return /^(\+9665\d{8}|05\d{8}|5\d{8})$/.test(cleanedPhone);
@@ -103,6 +216,29 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   const handlePhoneChange = (value: string) => {
     const cleaned = value.replace(/[^\d+]/g, '');
     setPhone(cleaned);
+  };
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+
+    if (error) {
+      setError('');
+    }
+  };
+
+  const handleEmailBlur = () => {
+    const validation = validateEmail(email);
+
+    if (!validation.valid) {
+      setError(validation.message);
+      return;
+    }
+
+    setEmail(validation.normalizedEmail);
+
+    if (error && error.includes('البريد')) {
+      setError('');
+    }
   };
 
   const isEmailNotConfirmedMessage = (message: string) => {
@@ -379,8 +515,13 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       return;
     }
 
-    if (!email.trim()) {
-      setError('البريد الإلكتروني مطلوب');
+    const emailValidation = validateEmail(email);
+
+    if (!emailValidation.valid) {
+      setError(emailValidation.message);
+      if (emailValidation.suggestedEmail) {
+        setEmail(emailValidation.suggestedEmail);
+      }
       return;
     }
 
@@ -397,7 +538,8 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     setLoading(true);
 
     try {
-      const normalizedEmail = normalizeEmail(email);
+      const normalizedEmail = emailValidation.normalizedEmail;
+      setEmail(normalizedEmail);
 
       const statusResult = await checkAccountStatus(normalizedEmail);
 
@@ -473,12 +615,17 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     setError('');
     setInfoMessage('');
 
-    const normalizedEmail = normalizeEmail(email);
+    const emailValidation = validateEmail(email);
 
-    if (!normalizedEmail) {
-      setError('لا يوجد بريد إلكتروني لإعادة إرسال رابط التحقق.');
+    if (!emailValidation.valid) {
+      setError(emailValidation.message);
+      if (emailValidation.suggestedEmail) {
+        setEmail(emailValidation.suggestedEmail);
+      }
       return;
     }
+
+    const normalizedEmail = emailValidation.normalizedEmail;
 
     if (emailResendCooldown > 0) {
       setError(`انتظر ${emailResendCooldown} ثانية ثم حاول مرة أخرى.`);
@@ -508,6 +655,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
         throw resendError;
       }
 
+      setEmail(normalizedEmail);
       setInfoMessage(`تم إرسال رابط تحقق جديد إلى: ${normalizedEmail}`);
       setEmailResendCooldown(60);
     } catch (err: any) {
@@ -528,7 +676,14 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     setEmailCheckLoading(true);
 
     try {
-      const normalizedEmail = normalizeEmail(email);
+      const emailValidation = validateEmail(email);
+
+      if (!emailValidation.valid) {
+        throw new Error(emailValidation.message);
+      }
+
+      const normalizedEmail = emailValidation.normalizedEmail;
+      setEmail(normalizedEmail);
 
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
@@ -993,11 +1148,15 @@ export const SignupForm: React.FC<SignupFormProps> = ({
               <input
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => handleEmailChange(e.target.value)}
+                onBlur={handleEmailBlur}
                 className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="example@email.com"
                 required
                 dir="ltr"
+                autoComplete="email"
+                spellCheck={false}
+                autoCapitalize="none"
               />
             </div>
           </div>
