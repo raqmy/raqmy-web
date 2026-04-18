@@ -373,6 +373,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     const profileData = await ensureUserProfileRecord(data.user);
 
     if (mountedRef.current) {
+      currentUserIdRef.current = data.user.id;
       setUser(data.user);
       setProfile(profileData);
       setLoading(false);
@@ -403,6 +404,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         'هذا الحساب لم يكمل خطوات التسجيل بعد. يجب إكمال التحقق من البريد ثم إضافة رقم الجوال وتأكيده قبل تسجيل الدخول.'
       );
     }
+
+    if (mountedRef.current) {
+      currentUserIdRef.current = data.user.id;
+      setUser(data.user);
+      setProfile(profileData);
+      setLoading(false);
+    }
   };
 
   const requestPasswordReset = async (email: string) => {
@@ -427,6 +435,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
 
+    currentUserIdRef.current = null;
     clearCachedAuthState();
     setUser(null);
     setProfile(null);
