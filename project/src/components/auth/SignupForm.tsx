@@ -84,6 +84,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 }) => {
   const { refreshProfile } = useAuth();
   const autoResumeAttemptedRef = useRef(false);
+  const sessionRecoveryAttemptedRef = useRef(false);
 
   const [step, setStep] = useState<SignupStep>('basic-info');
 
@@ -109,6 +110,14 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   const [emailResendCooldown, setEmailResendCooldown] = useState(0);
 
   const normalizeEmail = (value: string): string => value.trim().toLowerCase();
+
+  const clearAuthHashFromUrl = () => {
+    if (typeof window === 'undefined') return;
+    if (!window.location.hash) return;
+
+    const cleanUrl = `${window.location.pathname}${window.location.search}`;
+    window.history.replaceState({}, document.title, cleanUrl);
+  };
 
   const validateEmail = (value: string): EmailValidationResult => {
     const normalizedEmail = normalizeEmail(value);
@@ -351,6 +360,36 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     return createdProfile;
   };
 
+  const moveToStepAfterConfirmedEmail = async (authUser: any) => {
+    const profile = await ensureProfileForUser(authUser);
+    await refreshProfile();
+
+    const normalizedEmail = normalizeEmail(authUser.email || email);
+    const normalizedPhone = profile?.phone ? String(profile.phone) : '';
+
+    setEmail(normalizedEmail);
+    setName((prev) => prev || profile?.name || authUser.user_metadata?.name || '');
+    setRole((profile?.role === 'seller' ? 'seller' : 'customer') as 'customer' | 'seller');
+    setPhone(normalizedPhone);
+
+    clearAuthHashFromUrl();
+
+    if (profile?.signup_completed && profile?.phone_verified) {
+      setStep('completed');
+      setInfoMessage('هذا الحساب مكتمل بالفعل وتم التحقق من البريد والجوال.');
+      return;
+    }
+
+    if (normalizedPhone && !profile?.phone_verified) {
+      setStep('phone-verification');
+      setInfoMessage('تم تأكيد البريد الإلكتروني بنجاح. بقي فقط تأكيد رقم الجوال.');
+      return;
+    }
+
+    setStep('phone-entry');
+    setInfoMessage('تم تأكيد البريد الإلكتروني بنجاح. الآن أضف رقم الجوال.');
+  };
+
   const resumeExistingSignup = async (
     normalizedEmail: string,
     currentPassword: string,
@@ -402,31 +441,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       return;
     }
 
-    const profile = await ensureProfileForUser(data.user);
-    await refreshProfile();
-
-    const normalizedPhone = profile?.phone ? String(profile.phone) : '';
-
-    if (profile?.signup_completed && profile?.phone_verified) {
-      throw new Error(
-        'هذا الحساب مكتمل بالفعل. انتقل إلى تسجيل الدخول واستخدم نفس البريد الإلكتروني وكلمة المرور.'
-      );
-    }
-
-    setPhone(normalizedPhone);
-
-    if (normalizedPhone && !profile?.phone_verified) {
-      setStep('phone-verification');
-      setInfoMessage(
-        'هذا الحساب موجود مسبقًا وتم تأكيد البريد الإلكتروني، وبقي فقط تأكيد رقم الجوال.'
-      );
-      return;
-    }
-
-    setStep('phone-entry');
-    setInfoMessage(
-      'هذا الحساب موجود مسبقًا وتم تأكيد البريد الإلكتروني. أكمل الآن بإضافة رقم الجوال وتأكيده.'
-    );
+    await moveToStepAfterConfirmedEmail(data.user);
   };
 
   useEffect(() => {
@@ -504,6 +519,35 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
     void runAutoResume();
   }, [initialData]);
+
+  useEffect(() => {
+    const recoverFromConfirmedEmailSession = async () => {
+      if (sessionRecoveryAttemptedRef.current) return;
+      sessionRecoveryAttemptedRef.current = true;
+
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          console.error('recover session error:', sessionError);
+          return;
+        }
+
+        const sessionUser = session?.user;
+        if (!sessionUser) return;
+        if (!sessionUser.email_confirmed_at) return;
+
+        await moveToStepAfterConfirmedEmail(sessionUser);
+      } catch (err) {
+        console.error('recoverFromConfirmedEmailSession error:', err);
+      }
+    };
+
+    void recoverFromConfirmedEmailSession();
+  }, []);
 
   const handleBasicSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -721,26 +765,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
         return;
       }
 
-      const profile = await ensureProfileForUser(data.user);
-      await refreshProfile();
-
-      const normalizedPhone = profile?.phone ? String(profile.phone) : '';
-      setPhone(normalizedPhone);
-
-      if (normalizedPhone && !profile?.phone_verified) {
-        setStep('phone-verification');
-        setInfoMessage('تم تأكيد البريد الإلكتروني بنجاح. بقي فقط تأكيد رقم الجوال.');
-        return;
-      }
-
-      if (profile?.signup_completed && profile?.phone_verified) {
-        setStep('completed');
-        setInfoMessage('هذا الحساب مكتمل بالفعل وتم التحقق من البريد والجوال.');
-        return;
-      }
-
-      setStep('phone-entry');
-      setInfoMessage('تم تأكيد البريد الإلكتروني بنجاح. الآن أضف رقم الجوال.');
+      await moveToStepAfterConfirmedEmail(data.user);
     } catch (err: any) {
       setError(err?.message || 'فشل التحقق من البريد الإلكتروني');
     } finally {
