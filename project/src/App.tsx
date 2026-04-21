@@ -282,7 +282,11 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
     return slug;
   }
 
-  if (isStorePaymentPage(page) && pendingSource === 'storefront' && pendingSlug) {
+  if (
+    isStorePaymentPage(page) &&
+    pendingSource === 'storefront' &&
+    pendingSlug
+  ) {
     return pendingSlug;
   }
 
@@ -503,8 +507,6 @@ function AppContent() {
 
   const typedProfile = (profile as (typeof profile & { signup_completed?: boolean }) | null);
   const signupCompleted = !!typedProfile?.signup_completed;
-  const hasVerifiedPhone = !!typedProfile?.phone_verified;
-  const hasPhoneValue = !!String(typedProfile?.phone || '').trim();
 
   const storeSlug = getActiveStoreSlugFromContext(currentPage);
   const isStoreMode = isStoreContextPage(currentPage);
@@ -865,35 +867,13 @@ function AppContent() {
     if (!user || loading || !typedProfile) return;
 
     if (!signupCompleted) {
-      if (hasPhoneValue && !hasVerifiedPhone) {
-        if (currentPage !== 'verify-phone') {
-          setCurrentPage('verify-phone');
-        }
-        return;
-      }
-
       if (currentPage !== 'auth-signup') {
         setCurrentPage('auth-signup');
       }
       return;
     }
 
-    if (!hasVerifiedPhone) {
-      if (isAuthRoute(currentPage)) {
-        if (hasPhoneValue) {
-          setCurrentPage('verify-phone');
-        }
-        return;
-      }
-
-      if (currentPage !== 'verify-phone') {
-        setCurrentPage('verify-phone');
-        return;
-      }
-    }
-
     if (
-      hasVerifiedPhone &&
       typedProfile.role === 'seller' &&
       hasBankDetails === false &&
       currentPage !== 'merchant-bank-details'
@@ -917,8 +897,6 @@ function AppContent() {
     user,
     typedProfile,
     signupCompleted,
-    hasVerifiedPhone,
-    hasPhoneValue,
     loading,
     currentPage,
     hasBankDetails,
