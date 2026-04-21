@@ -23,6 +23,9 @@ import {
   Landmark,
   CreditCard,
   BadgeCheck,
+  Upload,
+  RefreshCw,
+  FileText,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -87,6 +90,9 @@ type IdentityVerificationRecord = {
   full_name?: string | null;
   identity_type?: string | null;
   identity_number?: string | null;
+  date_of_birth?: string | null;
+  document_front_url?: string | null;
+  document_back_url?: string | null;
   submitted_at?: string | null;
   reviewed_at?: string | null;
   rejection_reason?: string | null;
@@ -101,7 +107,9 @@ type SellerPlanRecord = {
 };
 
 const AVATAR_BUCKET = 'avatars';
+const IDENTITY_BUCKET = 'identity-verifications';
 const MAX_AVATAR_SIZE_MB = 5;
+const MAX_IDENTITY_FILE_SIZE_MB = 10;
 
 const getActiveStoreScopeSlug = () => {
   try {
@@ -209,6 +217,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const { user, profile, updateProfile, signOut } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
+  const identityFrontInputRef = useRef<HTMLInputElement | null>(null);
+  const identityBackInputRef = useRef<HTMLInputElement | null>(null);
 
   const [activeTab, setActiveTab] = useState<
     'overview' | 'orders' | 'favorites' | 'viewed' | 'settings'
@@ -239,6 +249,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
   const [identityVerification, setIdentityVerification] = useState<IdentityVerificationRecord | null>(null);
   const [identityLoading, setIdentityLoading] = useState(false);
+  const [editingIdentity, setEditingIdentity] = useState(false);
+  const [identitySubmitting, setIdentitySubmitting] = useState(false);
+  const [identityMessage, setIdentityMessage] = useState('');
+  const [identityFullName, setIdentityFullName] = useState('');
+  const [identityType, setIdentityType] = useState('national_id');
+  const [identityNumber, setIdentityNumber] = useState('');
+  const [identityDateOfBirth, setIdentityDateOfBirth] = useState('');
+  const [identityFrontFile, setIdentityFrontFile] = useState<File | null>(null);
+  const [identityBackFile, setIdentityBackFile] = useState<File | null>(null);
+  const [identityFrontFileName, setIdentityFrontFileName] = useState('');
+  const [identityBackFileName, setIdentityBackFileName] = useState('');
 
   const [sellerPlan, setSellerPlan] = useState<SellerPlanRecord | null>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
@@ -375,6 +396,30 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     return { productsMap, imageMap };
   };
 
+  const fillIdentityFormFromRecord = (record: IdentityVerificationRecord | null) => {
+    if (record) {
+      setIdentityFullName(record.full_name || profile?.name || '');
+      setIdentityType(record.identity_type || 'national_id');
+      setIdentityNumber(record.identity_number || '');
+      setIdentityDateOfBirth(
+        record.date_of_birth ? String(record.date_of_birth).slice(0, 10) : ''
+      );
+      setIdentityFrontFile(null);
+      setIdentityBackFile(null);
+      setIdentityFrontFileName(record.document_front_url ? 'مرفق موجود حالياً' : '');
+      setIdentityBackFileName(record.document_back_url ? 'مرفق موجود حالياً' : '');
+    } else {
+      setIdentityFullName(profile?.name || '');
+      setIdentityType('national_id');
+      setIdentityNumber('');
+      setIdentityDateOfBirth('');
+      setIdentityFrontFile(null);
+      setIdentityBackFile(null);
+      setIdentityFrontFileName('');
+      setIdentityBackFileName('');
+    }
+  };
+
   const fetchProfileStats = async () => {
     if (!user) return;
 
@@ -474,6 +519,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         setBankAccountHolderName(data.account_holder_name || '');
         setBankIban(data.iban || '');
         setBankName(data.bank_name || '');
+      } else {
+        setBankDetails(null);
+        setBankAccountHolderName('');
+        setBankIban('');
+        setBankName('');
       }
     } catch (err) {
       console.error('Error fetching bank details:', err);
@@ -488,7 +538,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       const { data, error } = await supabase
         .from('identity_verifications')
         .select(
-          'id, status, full_name, identity_type, identity_number, submitted_at, reviewed_at, rejection_reason'
+          'id, status, full_name, identity_type, identity_number, date_of_birth, document_front_url, document_back_url, submitted_at, reviewed_at, rejection_reason'
         )
         .eq('user_id', user.id)
         .maybeSingle();
@@ -498,7 +548,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         return;
       }
 
-      setIdentityVerification((data as IdentityVerificationRecord) || null);
+      const record = (data as IdentityVerificationRecord) || null;
+      setIdentityVerification(record);
+      fillIdentityFormFromRecord(record);
     } catch (error) {
       console.error('Error fetching identity verification:', error);
     } finally {
@@ -949,6 +1001,181 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
+  const validateIdentityFile = (file: File) => {
+    const validMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    const extension = (file.name.split('.').pop() || '').toLowerCase();
+    const validExtensions = ['jpg', 'jpeg', 'png', 'webp', 'pdf'];
+
+    if (!validMimeTypes.includes(file.type) && !validExtensions.includes(extension)) {
+      throw new Error('يجب أن يكون الملف صورة أو PDF فقط');
+    }
+
+    if (file.size > MAX_IDENTITY_FILE_SIZE_MB * 1024 * 1024) {
+      throw new Error(`حجم الملف يجب أن يكون أقل من ${MAX_IDENTITY_FILE_SIZE_MB}MB`);
+    }
+  };
+
+  const uploadIdentityDocument = async (
+    file: File,
+    side: 'front' | 'back'
+  ): Promise<string> => {
+    if (!user) throw new Error('لا يوجد مستخدم');
+
+    validateIdentityFile(file);
+
+    const extension = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const timestamp = Date.now();
+    const path = `${user.id}/${side}-${timestamp}.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(IDENTITY_BUCKET)
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: true,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from(IDENTITY_BUCKET).getPublicUrl(path);
+    return `${data.publicUrl}?t=${timestamp}`;
+  };
+
+  const handleIdentityFrontChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = '';
+
+    if (!file) return;
+
+    try {
+      validateIdentityFile(file);
+      setIdentityFrontFile(file);
+      setIdentityFrontFileName(file.name);
+      setIdentityMessage('');
+    } catch (error: any) {
+      setIdentityMessage(error?.message || 'ملف الواجهة الأمامية غير صالح');
+    }
+  };
+
+  const handleIdentityBackChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = '';
+
+    if (!file) return;
+
+    try {
+      validateIdentityFile(file);
+      setIdentityBackFile(file);
+      setIdentityBackFileName(file.name);
+      setIdentityMessage('');
+    } catch (error: any) {
+      setIdentityMessage(error?.message || 'ملف الواجهة الخلفية غير صالح');
+    }
+  };
+
+  const handleStartIdentityEdit = () => {
+    fillIdentityFormFromRecord(identityVerification);
+    setIdentityMessage('');
+    setEditingIdentity(true);
+  };
+
+  const handleCancelIdentityEdit = () => {
+    fillIdentityFormFromRecord(identityVerification);
+    setIdentityMessage('');
+    setEditingIdentity(false);
+  };
+
+  const handleSubmitIdentityVerification = async () => {
+    if (!user) return;
+
+    setIdentitySubmitting(true);
+    setIdentityMessage('');
+
+    try {
+      const normalizedFullName = identityFullName.trim();
+      const normalizedIdentityNumber = identityNumber.trim();
+
+      if (!normalizedFullName) {
+        throw new Error('أدخل الاسم الكامل');
+      }
+
+      if (!identityType) {
+        throw new Error('اختر نوع الهوية');
+      }
+
+      if (!identityDateOfBirth) {
+        throw new Error('أدخل تاريخ الميلاد');
+      }
+
+      if (!normalizedIdentityNumber) {
+        throw new Error('أدخل رقم الهوية');
+      }
+
+      const currentFrontUrl = identityVerification?.document_front_url || null;
+      const currentBackUrl = identityVerification?.document_back_url || null;
+
+      let nextFrontUrl = currentFrontUrl;
+      let nextBackUrl = currentBackUrl;
+
+      if (identityFrontFile) {
+        nextFrontUrl = await uploadIdentityDocument(identityFrontFile, 'front');
+      }
+
+      if (identityBackFile) {
+        nextBackUrl = await uploadIdentityDocument(identityBackFile, 'back');
+      }
+
+      if (!nextFrontUrl) {
+        throw new Error('يجب رفع صورة الهوية الأمامية');
+      }
+
+      if (!nextBackUrl) {
+        throw new Error('يجب رفع صورة الهوية الخلفية');
+      }
+
+      const payload: any = {
+        user_id: user.id,
+        full_name: normalizedFullName,
+        identity_type: identityType,
+        identity_number: normalizedIdentityNumber,
+        date_of_birth: identityDateOfBirth,
+        document_front_url: nextFrontUrl,
+        document_back_url: nextBackUrl,
+        status: 'pending',
+        rejection_reason: null,
+        reviewed_at: null,
+        submitted_at: new Date().toISOString(),
+      };
+
+      if (identityVerification?.id) {
+        payload.id = identityVerification.id;
+      }
+
+      const { error } = await supabase
+        .from('identity_verifications')
+        .upsert(payload, { onConflict: 'user_id' });
+
+      if (error) throw error;
+
+      setIdentityFrontFile(null);
+      setIdentityBackFile(null);
+      setIdentityFrontFileName('');
+      setIdentityBackFileName('');
+      setEditingIdentity(false);
+      setIdentityMessage('تم إرسال طلب توثيق الهوية بنجاح');
+      await fetchIdentityVerification();
+    } catch (error: any) {
+      console.error('Error submitting identity verification:', error);
+      const rawMessage = error?.message || '';
+      if (rawMessage.includes('Bucket not found')) {
+        setIdentityMessage('مجلد ملفات التحقق غير موجود في التخزين. أنشئ bucket باسم identity-verifications أولاً');
+      } else {
+        setIdentityMessage(rawMessage || 'حدث خطأ أثناء إرسال طلب التوثيق');
+      }
+    } finally {
+      setIdentitySubmitting(false);
+    }
+  };
+
   const handleUpdateBankDetails = async () => {
     if (!user) return;
 
@@ -957,6 +1184,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     try {
       const normalizedIBAN = bankIban.replace(/\s+/g, '').toUpperCase();
+      const normalizedHolderName = bankAccountHolderName.trim();
+      const normalizedBankName = bankName.trim();
+
+      if (!normalizedHolderName) {
+        setBankMessage('أدخل اسم صاحب الحساب');
+        setBankLoading(false);
+        return;
+      }
 
       if (!normalizedIBAN.startsWith('SA') || normalizedIBAN.length !== 24) {
         setBankMessage('رقم الآيبان غير صحيح. يجب أن يبدأ بـ SA ويتكون من 24 حرفاً');
@@ -964,12 +1199,26 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         return;
       }
 
-      const { error } = await supabase.from('bank_accounts').upsert({
+      if (!normalizedBankName) {
+        setBankMessage('أدخل اسم البنك');
+        setBankLoading(false);
+        return;
+      }
+
+      const payload: any = {
         user_id: user.id,
-        account_holder_name: bankAccountHolderName.trim(),
+        account_holder_name: normalizedHolderName,
         iban: normalizedIBAN,
-        bank_name: bankName || null,
-      });
+        bank_name: normalizedBankName,
+      };
+
+      if (bankDetails?.id) {
+        payload.id = bankDetails.id;
+      }
+
+      const { error } = await supabase
+        .from('bank_accounts')
+        .upsert(payload, { onConflict: 'user_id' });
 
       if (error) {
         console.error('Error updating bank details:', error);
@@ -1223,6 +1472,22 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
+  const getIdentityTypeText = (type?: string | null) => {
+    switch (type) {
+      case 'national_id':
+      case 'هوية وطنية':
+        return 'هوية وطنية';
+      case 'iqama':
+      case 'إقامة':
+        return 'إقامة';
+      case 'passport':
+      case 'جواز سفر':
+        return 'جواز سفر';
+      default:
+        return type || 'غير متوفر';
+    }
+  };
+
   const openScopedProduct = (item: { product_id: string; product_slug?: string | null }) => {
     if (item.product_slug) {
       onNavigate(`product-slug-${item.product_slug}`);
@@ -1388,6 +1653,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const isMerchant = profile.role === 'seller';
   const emailConfirmed = !!(user as any)?.email_confirmed_at;
   const sellerProfile = profile as any;
+  const bankStatus = bankDetails?.status || (bankDetails ? 'added' : 'not_added');
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -2028,28 +2294,58 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     {isMerchant && (
                       <>
                         <div className="border border-gray-200 rounded-2xl p-6">
-                          <div className="flex items-center gap-3 mb-5">
-                            <div className="w-11 h-11 rounded-xl bg-yellow-50 flex items-center justify-center">
-                              <BadgeCheck className="w-5 h-5 text-yellow-600" />
+                          <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
+                            <div className="flex items-center gap-3">
+                              <div className="w-11 h-11 rounded-xl bg-yellow-50 flex items-center justify-center">
+                                <BadgeCheck className="w-5 h-5 text-yellow-600" />
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-bold text-gray-900">التحقق من الهوية</h3>
+                                <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
+                              </div>
                             </div>
-                            <div>
-                              <h3 className="text-lg font-bold text-gray-900">التحقق من الهوية</h3>
-                              <p className="text-sm text-gray-500">يظهر هذا القسم للتاجر فقط</p>
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                onClick={fetchIdentityVerification}
+                                disabled={identityLoading || identitySubmitting}
+                                className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm inline-flex items-center gap-2 disabled:opacity-50"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                                <span>{identityLoading ? 'جاري التحديث...' : 'تحديث الحالة'}</span>
+                              </button>
+
+                              <button
+                                onClick={() => onNavigate('seller-dashboard-identity')}
+                                className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm"
+                              >
+                                فتح صفحة التحقق
+                              </button>
+
+                              {!editingIdentity && (
+                                <button
+                                  onClick={handleStartIdentityEdit}
+                                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                                >
+                                  {identityVerification ? 'تعديل الطلب' : 'بدء التوثيق'}
+                                </button>
+                              )}
                             </div>
                           </div>
 
-                          {identityLoading ? (
-                            <div className="text-sm text-gray-500">جاري تحميل حالة التحقق...</div>
-                          ) : (
-                            <div className="space-y-4">
-                              <div className="flex items-center justify-between gap-4 flex-wrap border border-gray-200 rounded-xl p-4">
-                                <div>
-                                  <div className="text-sm text-gray-500 mb-1">حالة التحقق</div>
-                                  <div className="font-semibold text-gray-900">
-                                    {getIdentityStatusText(identityVerification?.status)}
-                                  </div>
-                                </div>
+                          {identityMessage && (
+                            <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-sm">
+                              {identityMessage}
+                            </div>
+                          )}
 
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="text-sm text-gray-500 mb-1">حالة التحقق</div>
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="font-semibold text-gray-900">
+                                  {getIdentityStatusText(identityVerification?.status)}
+                                </div>
                                 <div
                                   className={`px-3 py-1 rounded-full text-sm font-semibold ${getIdentityStatusColor(
                                     identityVerification?.status
@@ -2058,72 +2354,244 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                   {getIdentityStatusText(identityVerification?.status)}
                                 </div>
                               </div>
+                            </div>
+
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="text-sm text-gray-500 mb-1">الاسم في التحقق</div>
+                              <div className="font-semibold text-gray-900">
+                                {identityVerification?.full_name || 'غير متوفر'}
+                              </div>
+                            </div>
+
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="text-sm text-gray-500 mb-1">نوع الهوية</div>
+                              <div className="font-semibold text-gray-900">
+                                {getIdentityTypeText(identityVerification?.identity_type)}
+                              </div>
+                            </div>
+
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="text-sm text-gray-500 mb-1">رقم الهوية</div>
+                              <div className="font-semibold text-gray-900">
+                                {identityVerification?.identity_number || 'غير متوفر'}
+                              </div>
+                            </div>
+
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="text-sm text-gray-500 mb-1">تاريخ التقديم</div>
+                              <div className="font-semibold text-gray-900">
+                                {identityVerification?.submitted_at
+                                  ? new Date(identityVerification.submitted_at).toLocaleDateString('ar-SA')
+                                  : 'لم يتم التقديم'}
+                              </div>
+                            </div>
+
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="text-sm text-gray-500 mb-1">تاريخ المراجعة</div>
+                              <div className="font-semibold text-gray-900">
+                                {identityVerification?.reviewed_at
+                                  ? new Date(identityVerification.reviewed_at).toLocaleDateString('ar-SA')
+                                  : 'لم تتم المراجعة'}
+                              </div>
+                            </div>
+                          </div>
+
+                          {identityVerification?.status === 'rejected' &&
+                            identityVerification?.rejection_reason && (
+                              <div className="mb-5 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
+                                <div className="font-semibold mb-1">سبب الرفض</div>
+                                <div>{identityVerification.rejection_reason}</div>
+                              </div>
+                            )}
+
+                          {(editingIdentity || !identityVerification) && (
+                            <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50">
+                              <div className="flex items-center gap-2 mb-4">
+                                <FileText className="w-5 h-5 text-blue-600" />
+                                <h4 className="font-bold text-gray-900">نموذج تقديم التوثيق</h4>
+                              </div>
 
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="border border-gray-200 rounded-xl p-4">
-                                  <div className="text-sm text-gray-500 mb-1">الاسم في التحقق</div>
-                                  <div className="font-semibold text-gray-900">
-                                    {identityVerification?.full_name || 'غير متوفر'}
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    الاسم الكامل
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={identityFullName}
+                                    onChange={(e) => setIdentityFullName(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="الاسم كما هو في الهوية"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    نوع الهوية
+                                  </label>
+                                  <select
+                                    value={identityType}
+                                    onChange={(e) => setIdentityType(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                                  >
+                                    <option value="national_id">هوية وطنية</option>
+                                    <option value="iqama">إقامة</option>
+                                    <option value="passport">جواز سفر</option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    رقم الهوية
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={identityNumber}
+                                    onChange={(e) => setIdentityNumber(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="أدخل رقم الهوية"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    تاريخ الميلاد
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={identityDateOfBirth}
+                                    onChange={(e) => setIdentityDateOfBirth(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                <div className="border border-dashed border-gray-300 rounded-xl p-4 bg-white">
+                                  <div className="flex items-center justify-between gap-3 mb-3">
+                                    <div>
+                                      <div className="font-semibold text-gray-900">صورة الهوية الأمامية</div>
+                                      <div className="text-sm text-gray-500">JPG / PNG / WEBP / PDF</div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => identityFrontInputRef.current?.click()}
+                                      className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-2"
+                                    >
+                                      <Upload className="w-4 h-4" />
+                                      <span>اختيار ملف</span>
+                                    </button>
+                                  </div>
+
+                                  <input
+                                    ref={identityFrontInputRef}
+                                    type="file"
+                                    accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf"
+                                    onChange={handleIdentityFrontChange}
+                                    className="hidden"
+                                  />
+
+                                  <div className="text-sm text-gray-600">
+                                    {identityFrontFileName || 'لم يتم اختيار ملف'}
                                   </div>
                                 </div>
 
-                                <div className="border border-gray-200 rounded-xl p-4">
-                                  <div className="text-sm text-gray-500 mb-1">نوع الهوية</div>
-                                  <div className="font-semibold text-gray-900">
-                                    {identityVerification?.identity_type || 'غير متوفر'}
+                                <div className="border border-dashed border-gray-300 rounded-xl p-4 bg-white">
+                                  <div className="flex items-center justify-between gap-3 mb-3">
+                                    <div>
+                                      <div className="font-semibold text-gray-900">صورة الهوية الخلفية</div>
+                                      <div className="text-sm text-gray-500">JPG / PNG / WEBP / PDF</div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => identityBackInputRef.current?.click()}
+                                      className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-2"
+                                    >
+                                      <Upload className="w-4 h-4" />
+                                      <span>اختيار ملف</span>
+                                    </button>
                                   </div>
-                                </div>
 
-                                <div className="border border-gray-200 rounded-xl p-4">
-                                  <div className="text-sm text-gray-500 mb-1">تاريخ التقديم</div>
-                                  <div className="font-semibold text-gray-900">
-                                    {identityVerification?.submitted_at
-                                      ? new Date(identityVerification.submitted_at).toLocaleDateString('ar-SA')
-                                      : 'لم يتم التقديم'}
-                                  </div>
-                                </div>
+                                  <input
+                                    ref={identityBackInputRef}
+                                    type="file"
+                                    accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf"
+                                    onChange={handleIdentityBackChange}
+                                    className="hidden"
+                                  />
 
-                                <div className="border border-gray-200 rounded-xl p-4">
-                                  <div className="text-sm text-gray-500 mb-1">تاريخ المراجعة</div>
-                                  <div className="font-semibold text-gray-900">
-                                    {identityVerification?.reviewed_at
-                                      ? new Date(identityVerification.reviewed_at).toLocaleDateString('ar-SA')
-                                      : 'لم تتم المراجعة'}
+                                  <div className="text-sm text-gray-600">
+                                    {identityBackFileName || 'لم يتم اختيار ملف'}
                                   </div>
                                 </div>
                               </div>
 
-                              {identityVerification?.status === 'rejected' &&
-                                identityVerification?.rejection_reason && (
-                                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
-                                    <div className="font-semibold mb-1">سبب الرفض</div>
-                                    <div>{identityVerification.rejection_reason}</div>
-                                  </div>
+                              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm leading-7">
+                                بعد الإرسال سيتم تحويل الطلب إلى حالة <span className="font-bold">قيد المراجعة</span>.
+                                ويمكنك تعديل الطلب وإعادة إرساله إذا تم رفضه لاحقاً.
+                              </div>
+
+                              <div className="flex flex-wrap gap-3 mt-5">
+                                <button
+                                  onClick={handleSubmitIdentityVerification}
+                                  disabled={identitySubmitting}
+                                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                  {identitySubmitting ? 'جاري إرسال الطلب...' : 'إرسال طلب التوثيق'}
+                                </button>
+
+                                {identityVerification && (
+                                  <button
+                                    onClick={handleCancelIdentityEdit}
+                                    disabled={identitySubmitting}
+                                    className="px-6 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50"
+                                  >
+                                    إلغاء
+                                  </button>
                                 )}
+                              </div>
                             </div>
                           )}
                         </div>
 
                         <div className="border border-gray-200 rounded-2xl p-6">
-                          <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+                          <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
                             <div className="flex items-center gap-3">
                               <div className="w-11 h-11 rounded-xl bg-green-50 flex items-center justify-center">
                                 <Landmark className="w-5 h-5 text-green-600" />
                               </div>
                               <div>
                                 <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
-                                <p className="text-sm text-gray-500">يظهر هذا القسم للتاجر فقط</p>
+                                <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
                               </div>
                             </div>
 
-                            {!editingBank && (
+                            <div className="flex flex-wrap gap-2">
                               <button
-                                onClick={() => setEditingBank(true)}
+                                onClick={fetchBankDetails}
+                                disabled={bankLoading}
+                                className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm inline-flex items-center gap-2 disabled:opacity-50"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                                <span>{bankLoading ? 'جاري التحديث...' : 'تحديث البيانات'}</span>
+                              </button>
+
+                              <button
+                                onClick={() => onNavigate('seller-dashboard-bank-account')}
                                 className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm"
                               >
-                                {bankDetails ? 'تعديل البيانات' : 'إضافة حساب بنكي'}
+                                فتح صفحة الحساب البنكي
                               </button>
-                            )}
+
+                              {!editingBank && (
+                                <button
+                                  onClick={() => setEditingBank(true)}
+                                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                                >
+                                  {bankDetails ? 'تعديل البيانات' : 'إضافة حساب بنكي'}
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           {bankMessage && (
@@ -2132,52 +2600,92 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                             </div>
                           )}
 
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="text-sm text-gray-500 mb-1">حالة الحساب البنكي</div>
+                              <div className="font-semibold text-gray-900">
+                                {bankStatus === 'approved'
+                                  ? 'معتمد'
+                                  : bankStatus === 'pending'
+                                  ? 'قيد المراجعة'
+                                  : bankDetails
+                                  ? 'مضاف'
+                                  : 'غير مضاف'}
+                              </div>
+                            </div>
+
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="text-sm text-gray-500 mb-1">صاحب الحساب</div>
+                              <div className="font-semibold text-gray-900">
+                                {bankDetails?.account_holder_name || 'غير متوفر'}
+                              </div>
+                            </div>
+
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="text-sm text-gray-500 mb-1">البنك</div>
+                              <div className="font-semibold text-gray-900">
+                                {bankDetails?.bank_name || 'غير متوفر'}
+                              </div>
+                            </div>
+                          </div>
+
                           {editingBank || !bankDetails ? (
-                            <div className="space-y-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  اسم صاحب الحساب
-                                </label>
-                                <input
-                                  type="text"
-                                  value={bankAccountHolderName}
-                                  onChange={(e) => setBankAccountHolderName(e.target.value)}
-                                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                />
+                            <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    اسم صاحب الحساب
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={bankAccountHolderName}
+                                    onChange={(e) => setBankAccountHolderName(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="اسم صاحب الحساب"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    اسم البنك
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={bankName}
+                                    onChange={(e) => setBankName(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="مثال: البنك الأهلي السعودي"
+                                  />
+                                </div>
+
+                                <div className="md:col-span-2">
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    رقم الآيبان
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={bankIban}
+                                    onChange={(e) => setBankIban(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="SA..."
+                                  />
+                                  <p className="text-xs text-gray-500 mt-2">
+                                    يجب أن يبدأ الآيبان بـ SA ويتكون من 24 خانة بعد إزالة المسافات
+                                  </p>
+                                </div>
                               </div>
 
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  رقم الآيبان
-                                </label>
-                                <input
-                                  type="text"
-                                  value={bankIban}
-                                  onChange={(e) => setBankIban(e.target.value)}
-                                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                  placeholder="SA..."
-                                />
+                              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm leading-7">
+                                احفظ بيانات الحساب البنكي لاستخدامها في طلبات السحب. ويمكنك تعديلها لاحقاً متى احتجت.
                               </div>
 
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  اسم البنك
-                                </label>
-                                <input
-                                  type="text"
-                                  value={bankName}
-                                  onChange={(e) => setBankName(e.target.value)}
-                                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                />
-                              </div>
-
-                              <div className="flex gap-3">
+                              <div className="flex gap-3 mt-5">
                                 <button
                                   onClick={handleUpdateBankDetails}
                                   disabled={bankLoading}
                                   className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
                                 >
-                                  {bankLoading ? 'جاري الحفظ...' : 'حفظ بيانات الحساب'}
+                                  {bankLoading ? 'جاري الحفظ...' : 'حفظ بيانات الحساب البنكي'}
                                 </button>
 
                                 {bankDetails && (
@@ -2185,8 +2693,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                     onClick={() => {
                                       setEditingBank(false);
                                       setBankMessage('');
+                                      setBankAccountHolderName(bankDetails.account_holder_name || '');
+                                      setBankIban(bankDetails.iban || '');
+                                      setBankName(bankDetails.bank_name || '');
                                     }}
-                                    className="px-6 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50"
+                                    disabled={bankLoading}
+                                    className="px-6 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50"
                                   >
                                     إلغاء
                                   </button>
@@ -2194,7 +2706,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                               </div>
                             </div>
                           ) : (
-                            <div className="space-y-3 text-sm">
+                            <div className="space-y-3 text-sm border border-gray-200 rounded-2xl p-5 bg-gray-50">
                               <div className="flex items-center justify-between">
                                 <span className="text-gray-500">صاحب الحساب</span>
                                 <span className="font-medium text-gray-900">
@@ -2220,7 +2732,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                             </div>
                             <div>
                               <h3 className="text-lg font-bold text-gray-900">الاشتراك والخطة</h3>
-                              <p className="text-sm text-gray-500">يظهر هذا القسم للتاجر فقط</p>
+                              <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
                             </div>
                           </div>
 
