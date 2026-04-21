@@ -16,6 +16,12 @@ import {
   XCircle,
   Clock,
   ArrowLeft,
+  Lock,
+  Mail,
+  CreditCard,
+  ShieldCheck,
+  Crown,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -72,6 +78,22 @@ type ProfileListedProduct = {
   user_id?: string | null;
   viewed_at?: string | null;
   created_at?: string | null;
+};
+
+type IdentityVerificationRecord = {
+  id?: string;
+  status?: string | null;
+  full_name?: string | null;
+  identity_type?: string | null;
+  submitted_at?: string | null;
+  reviewed_at?: string | null;
+  rejection_reason?: string | null;
+};
+
+type SellerPlanInfo = {
+  plan_name: string;
+  subscription_status: string | null;
+  subscription_expires_at: string | null;
 };
 
 const AVATAR_BUCKET = 'avatars';
@@ -179,6 +201,67 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
   );
 };
 
+const getIdentityStatusText = (status?: string | null) => {
+  switch (status) {
+    case 'approved':
+      return 'موثق';
+    case 'pending':
+      return 'قيد المراجعة';
+    case 'rejected':
+      return 'مرفوض';
+    case 'not_submitted':
+      return 'غير مرفوع';
+    default:
+      return 'غير مرفوع';
+  }
+};
+
+const getIdentityStatusClass = (status?: string | null) => {
+  switch (status) {
+    case 'approved':
+      return 'bg-green-100 text-green-700';
+    case 'pending':
+      return 'bg-yellow-100 text-yellow-700';
+    case 'rejected':
+      return 'bg-red-100 text-red-700';
+    default:
+      return 'bg-gray-100 text-gray-700';
+  }
+};
+
+const getSubscriptionStatusText = (status?: string | null) => {
+  switch (status) {
+    case 'active':
+      return 'نشط';
+    case 'expired':
+      return 'منتهي';
+    case 'cancelled':
+      return 'ملغي';
+    case 'trialing':
+      return 'تجريبي';
+    case 'past_due':
+      return 'متأخر';
+    default:
+      return 'غير محدد';
+  }
+};
+
+const getSubscriptionStatusClass = (status?: string | null) => {
+  switch (status) {
+    case 'active':
+      return 'bg-green-100 text-green-700';
+    case 'trialing':
+      return 'bg-blue-100 text-blue-700';
+    case 'past_due':
+      return 'bg-yellow-100 text-yellow-700';
+    case 'expired':
+    case 'cancelled':
+      return 'bg-red-100 text-red-700';
+    default:
+      return 'bg-gray-100 text-gray-700';
+  }
+};
+
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const { user, profile, updateProfile } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -222,6 +305,24 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [viewedProducts, setViewedProducts] = useState<ProfileListedProduct[]>([]);
   const [viewedProductsLoading, setViewedProductsLoading] = useState(false);
   const [viewedProductsError, setViewedProductsError] = useState('');
+
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState('');
+
+  const [emailResendLoading, setEmailResendLoading] = useState(false);
+  const [emailStatusMessage, setEmailStatusMessage] = useState('');
+
+  const [identityVerification, setIdentityVerification] = useState<IdentityVerificationRecord | null>(null);
+  const [identityLoading, setIdentityLoading] = useState(false);
+
+  const [sellerPlanInfo, setSellerPlanInfo] = useState<SellerPlanInfo>({
+    plan_name: 'غير محددة',
+    subscription_status: null,
+    subscription_expires_at: null,
+  });
+  const [planLoading, setPlanLoading] = useState(false);
 
   useEffect(() => {
     setName(profile?.name || '');
@@ -438,9 +539,88 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         setBankAccountHolderName(data.account_holder_name || '');
         setBankIban(data.iban || '');
         setBankName(data.bank_name || '');
+      } else {
+        setBankDetails(null);
+        setBankAccountHolderName('');
+        setBankIban('');
+        setBankName('');
       }
     } catch (err) {
       console.error('Error fetching bank details:', err);
+    }
+  };
+
+  const fetchIdentityVerification = async () => {
+    if (!user || profile?.role !== 'seller') return;
+
+    setIdentityLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('identity_verifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error fetching identity verification:', error);
+        setIdentityVerification(null);
+        return;
+      }
+
+      setIdentityVerification(data || null);
+    } catch (error) {
+      console.error('Error fetching identity verification:', error);
+      setIdentityVerification(null);
+    } finally {
+      setIdentityLoading(false);
+    }
+  };
+
+  const fetchSellerPlanInfo = async () => {
+    if (!user || profile?.role !== 'seller') return;
+
+    setPlanLoading(true);
+    try {
+      let resolvedPlanName = 'الخطة الأساسية';
+      const subscriptionStatus =
+        ((profile as any)?.subscription_status as string | null) || null;
+      const subscriptionExpiresAt =
+        ((profile as any)?.subscription_expires_at as string | null) || null;
+
+      const profilePlanId = (profile as any)?.plan_id;
+
+      if (profilePlanId) {
+        const { data: planData, error: planError } = await supabase
+          .from('plans')
+          .select('name, title, slug')
+          .eq('id', profilePlanId)
+          .maybeSingle();
+
+        if (!planError && planData) {
+          resolvedPlanName =
+            (planData as any).name ||
+            (planData as any).title ||
+            (planData as any).slug ||
+            resolvedPlanName;
+        }
+      }
+
+      setSellerPlanInfo({
+        plan_name: resolvedPlanName,
+        subscription_status: subscriptionStatus,
+        subscription_expires_at: subscriptionExpiresAt,
+      });
+    } catch (error) {
+      console.error('Error fetching seller plan info:', error);
+      setSellerPlanInfo({
+        plan_name: 'الخطة الأساسية',
+        subscription_status: null,
+        subscription_expires_at: null,
+      });
+    } finally {
+      setPlanLoading(false);
     }
   };
 
@@ -634,6 +814,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       fetchOrders();
       fetchFavorites();
       fetchViewedProducts();
+      if (profile?.role === 'seller') {
+        fetchIdentityVerification();
+        fetchSellerPlanInfo();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, profile?.role, scopeLoading, scopeInfo?.slug]);
@@ -650,11 +834,78 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     setMessage('');
     try {
       await updateProfile({ name });
-      setMessage('تم تحديث الملف الشخصي بنجاح');
+      setMessage('تم تحديث المعلومات الشخصية بنجاح');
     } catch {
-      setMessage('فشل تحديث الملف الشخصي');
+      setMessage('فشل تحديث المعلومات الشخصية');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    setPasswordMessage('');
+
+    if (!password.trim()) {
+      setPasswordMessage('كلمة المرور الجديدة مطلوبة');
+      return;
+    }
+
+    if (password.length < 6) {
+      setPasswordMessage('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setPasswordMessage('كلمتا المرور غير متطابقتين');
+      return;
+    }
+
+    setPasswordLoading(true);
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password,
+      });
+
+      if (error) throw error;
+
+      setPassword('');
+      setConfirmPassword('');
+      setPasswordMessage('تم تغيير كلمة المرور بنجاح');
+    } catch (error: any) {
+      console.error('Error updating password:', error);
+      setPasswordMessage(error?.message || 'فشل تغيير كلمة المرور');
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  const handleResendEmailVerification = async () => {
+    if (!user?.email) {
+      setEmailStatusMessage('تعذر العثور على البريد الإلكتروني الحالي');
+      return;
+    }
+
+    setEmailResendLoading(true);
+    setEmailStatusMessage('');
+
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: user.email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/signup`,
+        },
+      });
+
+      if (error) throw error;
+
+      setEmailStatusMessage('تم إرسال رابط تأكيد البريد الإلكتروني مرة أخرى');
+    } catch (error: any) {
+      console.error('Error resending email verification:', error);
+      setEmailStatusMessage(error?.message || 'فشل إعادة إرسال رابط التأكيد');
+    } finally {
+      setEmailResendLoading(false);
     }
   };
 
@@ -813,6 +1064,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     try {
       const normalizedIBAN = bankIban.replace(/\s+/g, '').toUpperCase();
+
+      if (!bankAccountHolderName.trim()) {
+        setBankMessage('اسم صاحب الحساب مطلوب');
+        setBankLoading(false);
+        return;
+      }
 
       if (!normalizedIBAN.startsWith('SA') || normalizedIBAN.length !== 24) {
         setBankMessage('رقم الآيبان غير صحيح. يجب أن يبدأ بـ SA ويتكون من 24 حرفاً');
@@ -1199,6 +1456,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   }
 
   const isMerchant = profile.role === 'seller';
+  const isEmailConfirmed = !!user.email_confirmed_at;
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -1429,413 +1687,4 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                         </div>
                       </div>
                       <div className="text-3xl font-bold text-gray-900 mb-1">
-                        {stats.favorites_count}
-                      </div>
-                      <p className="text-sm text-gray-600">المنتجات المفضلة</p>
-                    </div>
-
-                    <div className="bg-green-50 rounded-xl p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                          <Eye className="w-6 h-6 text-green-600" />
-                        </div>
-                      </div>
-                      <div className="text-3xl font-bold text-gray-900 mb-1">
-                        {stats.viewed_products_count}
-                      </div>
-                      <p className="text-sm text-gray-600">المنتجات المشاهدة</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'orders' && (
-                <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <h2 className="text-2xl font-bold text-gray-900">مشترياتي</h2>
-                      {scopeInfo && (
-                        <p className="text-sm text-gray-500 mt-1">
-                          عرض مشترياتك من متجر {scopeInfo.name}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      onClick={fetchOrders}
-                      disabled={ordersLoading}
-                      className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {ordersLoading ? 'جاري التحديث...' : 'تحديث المشتريات'}
-                    </button>
-                  </div>
-
-                  {ordersLoading ? (
-                    <div className="text-center py-12">
-                      <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                      <p className="text-gray-600">جاري تحميل المشتريات...</p>
-                    </div>
-                  ) : ordersError ? (
-                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-                      {ordersError}
-                    </div>
-                  ) : orders.length === 0 ? (
-                    <div className="text-center py-12">
-                      <ShoppingBag className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                      <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد مشتريات</h3>
-                      <p className="text-gray-600 mb-6">
-                        {scopeInfo
-                          ? `ابدأ بالشراء من متجر ${scopeInfo.name}`
-                          : 'ابدأ بتصفح المنتجات وشراء ما يعجبك'}
-                      </p>
-                      <button
-                        onClick={() => onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')}
-                        className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-                      >
-                        {scopeInfo ? 'العودة إلى المتجر' : 'تصفح المنتجات'}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {orders.map((order) => (
-                        <div key={order.id} className="border border-gray-200 rounded-2xl p-6">
-                          <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
-                            <div>
-                              <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                                الطلب #{order.order_number}
-                              </h3>
-                              <p className="text-sm text-gray-500">
-                                {new Date(order.created_at).toLocaleString('ar-SA')}
-                              </p>
-                            </div>
-
-                            <div className="text-left md:text-right">
-                              <div className="text-3xl font-bold text-blue-600 mb-2">
-                                {order.total_amount.toFixed(2)} ريال
-                              </div>
-                              <div
-                                className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(
-                                  order.status
-                                )}`}
-                              >
-                                {getStatusIcon(order.status)}
-                                <span>{getStatusText(order.status)}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="space-y-4">
-                            <h4 className="font-bold text-gray-900">عناصر الطلب</h4>
-
-                            {order.items.length > 0 ? (
-                              <div className="space-y-3">
-                                {order.items.map((item) => (
-                                  <div
-                                    key={item.id}
-                                    className="border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
-                                  >
-                                    <div className="flex items-center gap-4 min-w-0">
-                                      <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0">
-                                        {item.thumbnail_url ? (
-                                          <img
-                                            src={item.thumbnail_url}
-                                            alt={item.product_name}
-                                            className="w-full h-full object-cover"
-                                          />
-                                        ) : (
-                                          <Package className="w-8 h-8 text-blue-600" />
-                                        )}
-                                      </div>
-
-                                      <div className="min-w-0">
-                                        <p className="font-bold text-gray-900 truncate">{item.product_name}</p>
-                                        <p className="text-sm text-gray-500">الكمية: {item.quantity}</p>
-                                      </div>
-                                    </div>
-
-                                    <div className="flex flex-wrap items-center gap-3 justify-end">
-                                      <div className="text-lg font-bold text-blue-600">
-                                        {item.subtotal.toFixed(2)} ريال
-                                      </div>
-
-                                      <button
-                                        onClick={() => openScopedProduct(item)}
-                                        className="px-4 py-2 border border-gray-200 rounded-lg font-medium hover:bg-gray-50"
-                                      >
-                                        عرض المنتج
-                                      </button>
-
-                                      {canAccessFiles(order.status) && (
-                                        <button
-                                          onClick={() => openScopedProduct(item)}
-                                          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2"
-                                        >
-                                          <Download className="w-4 h-4" />
-                                          <span>الوصول للملفات</span>
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-sm text-gray-500">لا توجد عناصر لهذا الطلب</p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {activeTab === 'favorites' && (
-                <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <h2 className="text-2xl font-bold text-gray-900">المنتجات المفضلة</h2>
-                      {scopeInfo && (
-                        <p className="text-sm text-gray-500 mt-1">
-                          عرض المفضلة داخل متجر {scopeInfo.name}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      onClick={fetchFavorites}
-                      disabled={favoritesLoading}
-                      className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {favoritesLoading ? 'جاري التحديث...' : 'تحديث المفضلة'}
-                    </button>
-                  </div>
-
-                  {renderProductCardList(favorites, {
-                    emptyTitle: 'لا توجد منتجات في المفضلة',
-                    emptyDescription: scopeInfo
-                      ? `ابدأ بإضافة منتجات من متجر ${scopeInfo.name} إلى المفضلة`
-                      : 'ابدأ بإضافة المنتجات التي تعجبك إلى المفضلة',
-                    refreshLabel: 'تحديث المفضلة',
-                    loading: favoritesLoading,
-                    error: favoritesError,
-                    onRefresh: fetchFavorites,
-                    primaryButtonText: 'أضف إلى السلة',
-                    secondaryButtonText: 'إزالة من المفضلة',
-                    onPrimaryAction: (item) => handleAddProductToCart(item.product_id),
-                    onSecondaryAction: (item) => handleRemoveFavorite(item.product_id),
-                    secondaryButtonClassName:
-                      'px-5 py-3 border border-red-200 text-red-600 rounded-lg font-semibold hover:bg-red-50',
-                  })}
-                </div>
-              )}
-
-              {activeTab === 'viewed' && (
-                <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <h2 className="text-2xl font-bold text-gray-900">المنتجات التي شاهدتها</h2>
-                      {scopeInfo && (
-                        <p className="text-sm text-gray-500 mt-1">
-                          عرض المشاهدات داخل متجر {scopeInfo.name}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      onClick={fetchViewedProducts}
-                      disabled={viewedProductsLoading}
-                      className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {viewedProductsLoading ? 'جاري التحديث...' : 'تحديث المشاهدات'}
-                    </button>
-                  </div>
-
-                  {renderProductCardList(viewedProducts, {
-                    emptyTitle: 'لا توجد منتجات تمت مشاهدتها',
-                    emptyDescription: scopeInfo
-                      ? `ابدأ بتصفح منتجات متجر ${scopeInfo.name}`
-                      : 'ابدأ بتصفح المنتجات لتظهر هنا',
-                    refreshLabel: 'تحديث المشاهدات',
-                    loading: viewedProductsLoading,
-                    error: viewedProductsError,
-                    onRefresh: fetchViewedProducts,
-                    primaryButtonText: 'أضف إلى السلة',
-                    secondaryButtonText: 'إزالة من السجل',
-                    onPrimaryAction: (item) => handleAddProductToCart(item.product_id),
-                    onSecondaryAction: (item) => handleRemoveViewedProduct(item.product_id),
-                    secondaryButtonClassName:
-                      'px-5 py-3 border border-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-50',
-                    metaLabel: (item) =>
-                      item.viewed_at
-                        ? `آخر مشاهدة: ${new Date(item.viewed_at).toLocaleString('ar-SA')}`
-                        : null,
-                  })}
-                </div>
-              )}
-
-              {activeTab === 'settings' && (
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">الإعدادات</h2>
-
-                  <div className="space-y-8">
-                    <div className="border border-gray-200 rounded-2xl p-6">
-                      <h3 className="text-lg font-bold text-gray-900 mb-4">الملف الشخصي</h3>
-
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            الاسم
-                          </label>
-                          <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="اسمك"
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div className="text-sm text-gray-500">{user.email}</div>
-                          <button
-                            onClick={handleUpdateProfile}
-                            disabled={loading}
-                            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
-                          >
-                            <Save className="w-4 h-4" />
-                            <span>{loading ? 'جاري الحفظ...' : 'حفظ التغييرات'}</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {isMerchant && (
-                      <div className="border border-gray-200 rounded-2xl p-6">
-                        <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
-                          <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
-                          {!editingBank && (
-                            <button
-                              onClick={() => setEditingBank(true)}
-                              className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm"
-                            >
-                              {bankDetails ? 'تعديل البيانات' : 'إضافة حساب بنكي'}
-                            </button>
-                          )}
-                        </div>
-
-                        {bankMessage && (
-                          <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-sm">
-                            {bankMessage}
-                          </div>
-                        )}
-
-                        {editingBank || !bankDetails ? (
-                          <div className="space-y-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                اسم صاحب الحساب
-                              </label>
-                              <input
-                                type="text"
-                                value={bankAccountHolderName}
-                                onChange={(e) => setBankAccountHolderName(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                رقم الآيبان
-                              </label>
-                              <input
-                                type="text"
-                                value={bankIban}
-                                onChange={(e) => setBankIban(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="SA..."
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                اسم البنك
-                              </label>
-                              <input
-                                type="text"
-                                value={bankName}
-                                onChange={(e) => setBankName(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              />
-                            </div>
-
-                            <div className="flex gap-3">
-                              <button
-                                onClick={handleUpdateBankDetails}
-                                disabled={bankLoading}
-                                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
-                              >
-                                {bankLoading ? 'جاري الحفظ...' : 'حفظ بيانات الحساب'}
-                              </button>
-
-                              {bankDetails && (
-                                <button
-                                  onClick={() => {
-                                    setEditingBank(false);
-                                    setBankMessage('');
-                                  }}
-                                  className="px-6 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50"
-                                >
-                                  إلغاء
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="space-y-3 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500">صاحب الحساب</span>
-                              <span className="font-medium text-gray-900">
-                                {bankDetails.account_holder_name || '-'}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500">الآيبان</span>
-                              <span className="font-medium text-gray-900">{bankDetails.iban || '-'}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500">البنك</span>
-                              <span className="font-medium text-gray-900">{bankDetails.bank_name || '-'}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="border border-red-200 rounded-2xl p-6 bg-red-50">
-                      <h3 className="text-lg font-bold text-red-600 mb-4">منطقة خطرة</h3>
-                      <button
-                        onClick={handleDeleteAccount}
-                        disabled={loading}
-                        className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        <span>حذف الحساب</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeTab !== 'overview' &&
-                activeTab !== 'orders' &&
-                activeTab !== 'favorites' &&
-                activeTab !== 'viewed' &&
-                activeTab !== 'settings' && (
-                  <div className="text-center py-12 text-gray-500">
-                    هذا القسم غير مستخدم حالياً في هذه الصفحة.
-                  </div>
-                )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
+                        {stats
