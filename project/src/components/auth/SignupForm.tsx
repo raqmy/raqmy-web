@@ -7,7 +7,6 @@ import {
   Store,
   Eye,
   EyeOff,
-  Smartphone,
   CheckCircle,
   RefreshCw,
 } from 'lucide-react';
@@ -23,12 +22,7 @@ interface SignupFormProps {
   };
 }
 
-type SignupStep =
-  | 'basic-info'
-  | 'email-verification'
-  | 'phone-entry'
-  | 'phone-verification'
-  | 'completed';
+type SignupStep = 'basic-info' | 'email-verification' | 'completed';
 
 type AccountStatusResponse =
   | {
@@ -39,11 +33,6 @@ type AccountStatusResponse =
       success: false;
       error?: string;
     };
-
-const PHONE_OTP_DEMO_ENABLED =
-  String(import.meta.env.VITE_PHONE_OTP_DEMO_ENABLED ?? 'true').toLowerCase() !== 'false';
-
-const PHONE_OTP_DEMO_CODE = String(import.meta.env.VITE_PHONE_OTP_DEMO_CODE ?? '000000');
 
 const EMAIL_REGEX =
   /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+$/;
@@ -89,8 +78,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   const [step, setStep] = useState<SignupStep>('basic-info');
 
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [otpCode, setOtpCode] = useState('');
   const [email, setEmail] = useState(initialData?.email ?? '');
   const [password, setPassword] = useState(initialData?.password ?? '');
   const [confirmPassword, setConfirmPassword] = useState(initialData?.password ?? '');
@@ -105,8 +92,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
   const [emailCheckLoading, setEmailCheckLoading] = useState(false);
   const [emailResendLoading, setEmailResendLoading] = useState(false);
-  const [phoneResendLoading, setPhoneResendLoading] = useState(false);
-
   const [emailResendCooldown, setEmailResendCooldown] = useState(0);
 
   const normalizeEmail = (value: string): string => value.trim().toLowerCase();
@@ -197,34 +182,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       valid: true,
       normalizedEmail,
     };
-  };
-
-  const validatePhone = (phoneNumber: string): boolean => {
-    const cleanedPhone = phoneNumber.trim().replace(/\s+/g, '');
-    return /^(\+9665\d{8}|05\d{8}|5\d{8})$/.test(cleanedPhone);
-  };
-
-  const formatPhone = (value: string): string => {
-    const cleaned = value.replace(/\D/g, '');
-
-    if (cleaned.startsWith('9665') && cleaned.length === 12) {
-      return '+' + cleaned;
-    }
-
-    if (cleaned.startsWith('05') && cleaned.length === 10) {
-      return '+966' + cleaned.substring(1);
-    }
-
-    if (cleaned.startsWith('5') && cleaned.length === 9) {
-      return '+966' + cleaned;
-    }
-
-    return value.trim();
-  };
-
-  const handlePhoneChange = (value: string) => {
-    const cleaned = value.replace(/[^\d+]/g, '');
-    setPhone(cleaned);
   };
 
   const handleEmailChange = (value: string) => {
@@ -360,34 +317,33 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     return createdProfile;
   };
 
-  const moveToStepAfterConfirmedEmail = async (authUser: any) => {
+  const markSignupCompleted = async (authUser: any) => {
     const profile = await ensureProfileForUser(authUser);
+
+    if (!profile?.signup_completed) {
+      const { error: updateProfileError } = await supabase
+        .from('users_profile')
+        .update({
+          signup_completed: true,
+        })
+        .eq('id', authUser.id);
+
+      if (updateProfileError) {
+        throw new Error(`فشل إكمال بيانات الحساب: ${updateProfileError.message}`);
+      }
+    }
+
     await refreshProfile();
 
     const normalizedEmail = normalizeEmail(authUser.email || email);
-    const normalizedPhone = profile?.phone ? String(profile.phone) : '';
 
     setEmail(normalizedEmail);
     setName((prev) => prev || profile?.name || authUser.user_metadata?.name || '');
     setRole((profile?.role === 'seller' ? 'seller' : 'customer') as 'customer' | 'seller');
-    setPhone(normalizedPhone);
 
     clearAuthHashFromUrl();
-
-    if (profile?.signup_completed && profile?.phone_verified) {
-      setStep('completed');
-      setInfoMessage('هذا الحساب مكتمل بالفعل وتم التحقق من البريد والجوال.');
-      return;
-    }
-
-    if (normalizedPhone && !profile?.phone_verified) {
-      setStep('phone-verification');
-      setInfoMessage('تم تأكيد البريد الإلكتروني بنجاح. بقي فقط تأكيد رقم الجوال.');
-      return;
-    }
-
-    setStep('phone-entry');
-    setInfoMessage('تم تأكيد البريد الإلكتروني بنجاح. الآن أضف رقم الجوال.');
+    setStep('completed');
+    setInfoMessage('تم إنشاء الحساب والتحقق من البريد الإلكتروني بنجاح.');
   };
 
   const resumeExistingSignup = async (
@@ -441,7 +397,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       return;
     }
 
-    await moveToStepAfterConfirmedEmail(data.user);
+    await markSignupCompleted(data.user);
   };
 
   useEffect(() => {
@@ -540,7 +496,22 @@ export const SignupForm: React.FC<SignupFormProps> = ({
         if (!sessionUser) return;
         if (!sessionUser.email_confirmed_at) return;
 
-        await moveToStepAfterConfirmedEmail(sessionUser);
+        const { data: profileData, error: profileError } = await supabase
+          .from('users_profile')
+          .select('signup_completed')
+          .eq('id', sessionUser.id)
+          .maybeSingle();
+
+        if (profileError) {
+          console.error('recover profile error:', profileError);
+          return;
+        }
+
+        if (profileData?.signup_completed) {
+          return;
+        }
+
+        await markSignupCompleted(sessionUser);
       } catch (err) {
         console.error('recoverFromConfirmedEmailSession error:', err);
       }
@@ -765,7 +736,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
         return;
       }
 
-      await moveToStepAfterConfirmedEmail(data.user);
+      await markSignupCompleted(data.user);
     } catch (err: any) {
       setError(err?.message || 'فشل التحقق من البريد الإلكتروني');
     } finally {
@@ -773,224 +744,10 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     }
   };
 
-  const handleSendPhoneOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setInfoMessage('');
-
-    if (!phone.trim()) {
-      setError('رقم الجوال مطلوب');
-      return;
-    }
-
-    const formattedPhone = formatPhone(phone);
-
-    if (!validatePhone(formattedPhone)) {
-      setError('رقم الجوال غير صحيح. استخدم رقمًا سعوديًا مثل 0551234567');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError) throw sessionError;
-      if (!session) throw new Error('يجب أن تكون مسجل الدخول لإكمال تحقق الجوال');
-
-      const { error: profileUpdateError } = await supabase
-        .from('users_profile')
-        .update({
-          phone: formattedPhone,
-          phone_verified: false,
-          signup_completed: false,
-        })
-        .eq('id', session.user.id);
-
-      if (profileUpdateError) {
-        throw new Error(`فشل حفظ رقم الجوال: ${profileUpdateError.message}`);
-      }
-
-      if (PHONE_OTP_DEMO_ENABLED) {
-        setPhone(formattedPhone);
-        setStep('phone-verification');
-        setInfoMessage(
-          `تم الانتقال إلى تحقق الجوال في الوضع التجريبي. استخدم الرمز: ${PHONE_OTP_DEMO_CODE}`
-        );
-        return;
-      }
-
-      const otpResponse = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-phone-otp`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ phone: formattedPhone }),
-        }
-      );
-
-      const otpResult = await otpResponse.json();
-
-      if (!otpResponse.ok || !otpResult.success) {
-        throw new Error(otpResult.error || 'فشل إرسال رمز التحقق');
-      }
-
-      setPhone(formattedPhone);
-      setInfoMessage('تم إرسال رمز التحقق إلى رقم الجوال.');
-      setStep('phone-verification');
-    } catch (err: any) {
-      setError(err?.message || 'فشل إرسال رمز تحقق الجوال');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyPhoneOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setInfoMessage('');
-
-    if (!otpCode.trim()) {
-      setError('رمز التحقق مطلوب');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError) throw sessionError;
-      if (!session) throw new Error('الجلسة غير متوفرة. سجّل الدخول ثم حاول مرة أخرى.');
-
-      if (PHONE_OTP_DEMO_ENABLED) {
-        if (otpCode.trim() !== PHONE_OTP_DEMO_CODE) {
-          throw new Error('رمز التحقق التجريبي غير صحيح');
-        }
-
-        const { error: profileError } = await supabase
-          .from('users_profile')
-          .update({
-            phone,
-            phone_verified: true,
-            signup_completed: true,
-          })
-          .eq('id', session.user.id);
-
-        if (profileError) {
-          throw new Error(`تم التحقق لكن فشل تحديث الملف الشخصي: ${profileError.message}`);
-        }
-
-        await refreshProfile();
-        setStep('completed');
-        setInfoMessage('تم إنشاء الحساب والتحقق من البريد والجوال بنجاح.');
-        return;
-      }
-
-      const verifyResponse = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-phone-otp`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            phone,
-            code: otpCode.trim(),
-          }),
-        }
-      );
-
-      const verifyResult = await verifyResponse.json();
-
-      if (!verifyResponse.ok || !verifyResult.success) {
-        throw new Error(verifyResult.error || 'رمز التحقق غير صحيح');
-      }
-
-      const { error: profileError } = await supabase
-        .from('users_profile')
-        .update({
-          phone,
-          phone_verified: true,
-          signup_completed: true,
-        })
-        .eq('id', session.user.id);
-
-      if (profileError) {
-        throw new Error(`تم التحقق لكن فشل تحديث الملف الشخصي: ${profileError.message}`);
-      }
-
-      await refreshProfile();
-      setStep('completed');
-      setInfoMessage('تم إنشاء الحساب والتحقق من البريد والجوال بنجاح.');
-    } catch (err: any) {
-      setError(err?.message || 'فشل تحقق الجوال');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResendPhoneOtp = async () => {
-    setError('');
-    setInfoMessage('');
-    setPhoneResendLoading(true);
-
-    try {
-      if (PHONE_OTP_DEMO_ENABLED) {
-        setInfoMessage(`تمت إعادة إرسال الرمز التجريبي. استخدم: ${PHONE_OTP_DEMO_CODE}`);
-        return;
-      }
-
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError) throw sessionError;
-      if (!session) throw new Error('الجلسة غير متوفرة');
-
-      const otpResponse = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-phone-otp`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ phone }),
-        }
-      );
-
-      const otpResult = await otpResponse.json();
-
-      if (!otpResponse.ok || !otpResult.success) {
-        throw new Error(otpResult.error || 'فشل إعادة إرسال رمز التحقق');
-      }
-
-      setInfoMessage('تمت إعادة إرسال رمز التحقق إلى الجوال.');
-    } catch (err: any) {
-      setError(err?.message || 'فشل إعادة إرسال رمز التحقق');
-    } finally {
-      setPhoneResendLoading(false);
-    }
-  };
-
   const renderStepHeader = () => {
     const steps = [
       { key: 'basic-info', label: 'المعلومات الأساسية' },
       { key: 'email-verification', label: 'تحقق البريد' },
-      { key: 'phone-entry', label: 'إضافة الجوال' },
-      { key: 'phone-verification', label: 'تحقق الجوال' },
     ];
 
     return (
@@ -1000,8 +757,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({
             const order: SignupStep[] = [
               'basic-info',
               'email-verification',
-              'phone-entry',
-              'phone-verification',
               'completed',
             ];
             const currentIndex = order.indexOf(step);
@@ -1048,7 +803,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
           <h2 className="text-3xl font-bold text-gray-900 mb-2">تم بنجاح</h2>
           <p className="text-gray-600 leading-7 mb-6">
-            تم إنشاء الحساب والتحقق من البريد الإلكتروني ورقم الجوال.
+            تم إنشاء الحساب والتحقق من البريد الإلكتروني بنجاح.
           </p>
 
           {infoMessage && (
@@ -1141,7 +896,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
             {role === 'seller' && (
               <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-xs text-blue-800">
-                  بعد إنشاء الحساب ستكمل التحقق ثم تتابع تجهيز بقية بيانات التاجر.
+                  بعد إنشاء الحساب ستكمل التحقق من البريد ثم تتابع استخدام المنصة.
                 </p>
               </div>
             )}
@@ -1282,87 +1037,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({
               : 'إعادة إرسال رابط التحقق'}
           </button>
         </div>
-      )}
-
-      {step === 'phone-entry' && (
-        <form onSubmit={handleSendPhoneOtp} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              رقم الجوال <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <Smartphone className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => handlePhoneChange(e.target.value)}
-                className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="+966501234567 أو 0501234567"
-                required
-                dir="ltr"
-              />
-            </div>
-            <p className="mt-1 text-xs text-gray-500">
-              سيتم إرسال رمز تحقق إلى هذا الرقم
-            </p>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'جاري إرسال الرمز...' : 'إرسال رمز التحقق'}
-          </button>
-        </form>
-      )}
-
-      {step === 'phone-verification' && (
-        <form onSubmit={handleVerifyPhoneOtp} className="space-y-6">
-          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
-            <p className="text-sm text-gray-700 mb-2">رقم الجوال:</p>
-            <p className="font-semibold text-gray-900" dir="ltr">
-              {phone}
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              رمز التحقق
-            </label>
-            <div className="relative">
-              <Smartphone className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                value={otpCode}
-                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="123456"
-                required
-                dir="ltr"
-                maxLength={6}
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'جاري التحقق...' : 'تأكيد رمز الجوال'}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleResendPhoneOtp}
-            disabled={phoneResendLoading}
-            className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            <RefreshCw className={`w-4 h-4 ${phoneResendLoading ? 'animate-spin' : ''}`} />
-            {phoneResendLoading ? 'جاري إعادة الإرسال...' : 'إعادة إرسال الرمز'}
-          </button>
-        </form>
       )}
 
       <div className="mt-6 text-center">
