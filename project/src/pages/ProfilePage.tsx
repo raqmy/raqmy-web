@@ -16,6 +16,13 @@ import {
   XCircle,
   Clock,
   ArrowLeft,
+  ShieldCheck,
+  Mail,
+  KeyRound,
+  LogOut,
+  Landmark,
+  CreditCard,
+  BadgeCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -72,6 +79,25 @@ type ProfileListedProduct = {
   user_id?: string | null;
   viewed_at?: string | null;
   created_at?: string | null;
+};
+
+type IdentityVerificationRecord = {
+  id: string;
+  status: string;
+  full_name?: string | null;
+  identity_type?: string | null;
+  identity_number?: string | null;
+  submitted_at?: string | null;
+  reviewed_at?: string | null;
+  rejection_reason?: string | null;
+};
+
+type SellerPlanRecord = {
+  id: string;
+  name?: string | null;
+  title?: string | null;
+  slug?: string | null;
+  price?: number | null;
 };
 
 const AVATAR_BUCKET = 'avatars';
@@ -180,7 +206,7 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
 };
 
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
-  const { user, profile, updateProfile } = useAuth();
+  const { user, profile, updateProfile, signOut } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -210,6 +236,16 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [bankName, setBankName] = useState('');
   const [bankLoading, setBankLoading] = useState(false);
   const [bankMessage, setBankMessage] = useState('');
+
+  const [identityVerification, setIdentityVerification] = useState<IdentityVerificationRecord | null>(null);
+  const [identityLoading, setIdentityLoading] = useState(false);
+
+  const [sellerPlan, setSellerPlan] = useState<SellerPlanRecord | null>(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+
+  const [emailActionLoading, setEmailActionLoading] = useState(false);
+  const [passwordResetLoading, setPasswordResetLoading] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
 
   const [orders, setOrders] = useState<ProfileOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -444,6 +480,64 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
+  const fetchIdentityVerification = async () => {
+    if (!user || profile?.role !== 'seller') return;
+
+    setIdentityLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('identity_verifications')
+        .select(
+          'id, status, full_name, identity_type, identity_number, submitted_at, reviewed_at, rejection_reason'
+        )
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error fetching identity verification:', error);
+        return;
+      }
+
+      setIdentityVerification((data as IdentityVerificationRecord) || null);
+    } catch (error) {
+      console.error('Error fetching identity verification:', error);
+    } finally {
+      setIdentityLoading(false);
+    }
+  };
+
+  const fetchSellerPlan = async () => {
+    if (!user || profile?.role !== 'seller') return;
+
+    setSubscriptionLoading(true);
+    try {
+      const sellerProfile = profile as any;
+      const planId = sellerProfile?.plan_id;
+
+      if (!planId) {
+        setSellerPlan(null);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('plans')
+        .select('id, name, title, slug, price')
+        .eq('id', planId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error fetching seller plan:', error);
+        return;
+      }
+
+      setSellerPlan((data as SellerPlanRecord) || null);
+    } catch (error) {
+      console.error('Error fetching seller plan:', error);
+    } finally {
+      setSubscriptionLoading(false);
+    }
+  };
+
   const fetchOrders = async () => {
     if (!user) return;
 
@@ -631,6 +725,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     if (!scopeLoading && user?.id) {
       fetchProfileStats();
       fetchBankDetails();
+      fetchIdentityVerification();
+      fetchSellerPlan();
       fetchOrders();
       fetchFavorites();
       fetchViewedProducts();
@@ -655,6 +751,54 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       setMessage('فشل تحديث الملف الشخصي');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendEmailConfirmation = async () => {
+    if (!user?.email) return;
+
+    setEmailActionLoading(true);
+    setMessage('');
+
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: user.email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/signup`,
+        },
+      });
+
+      if (error) throw error;
+
+      setMessage('تم إرسال رابط جديد لتأكيد البريد الإلكتروني.');
+    } catch (error: any) {
+      console.error('Error resending confirmation email:', error);
+      setMessage(error?.message || 'فشل إعادة إرسال رابط تأكيد البريد.');
+    } finally {
+      setEmailActionLoading(false);
+    }
+  };
+
+  const handleSendPasswordResetEmail = async () => {
+    if (!user?.email) return;
+
+    setPasswordResetLoading(true);
+    setMessage('');
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      });
+
+      if (error) throw error;
+
+      setMessage('تم إرسال رابط تغيير كلمة المرور إلى بريدك الإلكتروني.');
+    } catch (error: any) {
+      console.error('Error sending password reset email:', error);
+      setMessage(error?.message || 'فشل إرسال رابط تغيير كلمة المرور.');
+    } finally {
+      setPasswordResetLoading(false);
     }
   };
 
@@ -897,6 +1041,21 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
+  const handleLogout = async () => {
+    setLogoutLoading(true);
+    setMessage('');
+
+    try {
+      await signOut();
+      onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'home');
+    } catch (error: any) {
+      console.error('Error signing out:', error);
+      setMessage(error?.message || 'حدث خطأ أثناء تسجيل الخروج.');
+    } finally {
+      setLogoutLoading(false);
+    }
+  };
+
   const handleAddProductToCart = async (productId: string) => {
     if (!user) {
       onNavigate('auth');
@@ -1031,6 +1190,34 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       case 'cancelled':
       case 'refunded':
         return 'bg-gray-100 text-gray-700';
+      default:
+        return 'bg-gray-100 text-gray-700';
+    }
+  };
+
+  const getIdentityStatusText = (status?: string | null) => {
+    switch (status) {
+      case 'approved':
+        return 'موثق';
+      case 'pending':
+        return 'قيد المراجعة';
+      case 'rejected':
+        return 'مرفوض';
+      case 'not_submitted':
+        return 'غير مرفوع';
+      default:
+        return 'غير مرفوع';
+    }
+  };
+
+  const getIdentityStatusColor = (status?: string | null) => {
+    switch (status) {
+      case 'approved':
+        return 'bg-green-100 text-green-700';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-700';
+      case 'rejected':
+        return 'bg-red-100 text-red-700';
       default:
         return 'bg-gray-100 text-gray-700';
     }
@@ -1199,6 +1386,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   }
 
   const isMerchant = profile.role === 'seller';
+  const emailConfirmed = !!(user as any)?.email_confirmed_at;
+  const sellerProfile = profile as any;
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -1676,24 +1865,52 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
                   <div className="space-y-8">
                     <div className="border border-gray-200 rounded-2xl p-6">
-                      <h3 className="text-lg font-bold text-gray-900 mb-4">الملف الشخصي</h3>
+                      <div className="flex items-center gap-3 mb-5">
+                        <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center">
+                          <User className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">المعلومات الشخصية</h3>
+                          <p className="text-sm text-gray-500">عدّل بياناتك الأساسية من هنا</p>
+                        </div>
+                      </div>
 
                       <div className="space-y-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            الاسم
+                            الاسم الكامل
                           </label>
                           <input
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                             className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="اسمك"
+                            placeholder="اسمك الكامل"
                           />
                         </div>
 
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="border border-gray-200 rounded-xl p-4">
+                            <div className="text-sm text-gray-500 mb-1">البريد الإلكتروني</div>
+                            <div className="font-semibold text-gray-900 break-all">{user.email}</div>
+                          </div>
+
+                          <div className="border border-gray-200 rounded-xl p-4">
+                            <div className="text-sm text-gray-500 mb-1">نوع الحساب</div>
+                            <div className="font-semibold text-gray-900">
+                              {profile.role === 'admin'
+                                ? 'مدير'
+                                : isMerchant
+                                ? 'تاجر'
+                                : 'عميل'}
+                            </div>
+                          </div>
+                        </div>
+
                         <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div className="text-sm text-gray-500">{user.email}</div>
+                          <div className="text-sm text-gray-500">
+                            يمكنك تعديل الاسم والصورة الشخصية من هذه الصفحة
+                          </div>
                           <button
                             onClick={handleUpdateProfile}
                             disabled={loading}
@@ -1706,106 +1923,348 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                       </div>
                     </div>
 
-                    {isMerchant && (
-                      <div className="border border-gray-200 rounded-2xl p-6">
-                        <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
-                          <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
-                          {!editingBank && (
+                    <div className="border border-gray-200 rounded-2xl p-6">
+                      <div className="flex items-center gap-3 mb-5">
+                        <div className="w-11 h-11 rounded-xl bg-purple-50 flex items-center justify-center">
+                          <ShieldCheck className="w-5 h-5 text-purple-600" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">الأمان</h3>
+                          <p className="text-sm text-gray-500">البريد الإلكتروني وكلمة المرور</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+                          <div className="flex items-center gap-3">
+                            <Mail className="w-5 h-5 text-gray-400" />
+                            <div>
+                              <div className="text-sm text-gray-500">حالة البريد الإلكتروني</div>
+                              <div className="font-semibold text-gray-900">
+                                {emailConfirmed ? 'تم تأكيد البريد الإلكتروني' : 'البريد غير مؤكد'}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div
+                            className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                              emailConfirmed
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-yellow-100 text-yellow-700'
+                            }`}
+                          >
+                            {emailConfirmed ? 'مؤكد' : 'غير مؤكد'}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-3">
+                          {!emailConfirmed && (
                             <button
-                              onClick={() => setEditingBank(true)}
-                              className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm"
+                              onClick={handleResendEmailConfirmation}
+                              disabled={emailActionLoading}
+                              className="px-5 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50"
                             >
-                              {bankDetails ? 'تعديل البيانات' : 'إضافة حساب بنكي'}
+                              {emailActionLoading ? 'جاري الإرسال...' : 'إعادة إرسال تأكيد البريد'}
                             </button>
+                          )}
+
+                          <button
+                            onClick={handleSendPasswordResetEmail}
+                            disabled={passwordResetLoading}
+                            className="px-5 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
+                          >
+                            <KeyRound className="w-4 h-4" />
+                            <span>
+                              {passwordResetLoading
+                                ? 'جاري الإرسال...'
+                                : 'إرسال رابط تغيير كلمة المرور'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-200 rounded-2xl p-6">
+                      <div className="flex items-center gap-3 mb-5">
+                        <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center">
+                          <SettingsIcon className="w-5 h-5 text-gray-700" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">الحساب</h3>
+                          <p className="text-sm text-gray-500">معلومات الحساب والإجراءات العامة</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div className="border border-gray-200 rounded-xl p-4">
+                          <div className="text-sm text-gray-500 mb-1">تاريخ إنشاء الحساب</div>
+                          <div className="font-semibold text-gray-900">
+                            {(user as any)?.created_at
+                              ? new Date((user as any).created_at).toLocaleDateString('ar-SA')
+                              : 'غير متوفر'}
+                          </div>
+                        </div>
+
+                        <div className="border border-gray-200 rounded-xl p-4">
+                          <div className="text-sm text-gray-500 mb-1">حالة الحساب</div>
+                          <div className="font-semibold text-gray-900">
+                            {sellerProfile?.signup_completed ? 'نشط ومكتمل' : 'غير مكتمل'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3">
+                        <button
+                          onClick={handleLogout}
+                          disabled={logoutLoading}
+                          className="px-5 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-2"
+                        >
+                          <LogOut className="w-4 h-4" />
+                          <span>{logoutLoading ? 'جاري تسجيل الخروج...' : 'تسجيل الخروج'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {isMerchant && (
+                      <>
+                        <div className="border border-gray-200 rounded-2xl p-6">
+                          <div className="flex items-center gap-3 mb-5">
+                            <div className="w-11 h-11 rounded-xl bg-yellow-50 flex items-center justify-center">
+                              <BadgeCheck className="w-5 h-5 text-yellow-600" />
+                            </div>
+                            <div>
+                              <h3 className="text-lg font-bold text-gray-900">التحقق من الهوية</h3>
+                              <p className="text-sm text-gray-500">يظهر هذا القسم للتاجر فقط</p>
+                            </div>
+                          </div>
+
+                          {identityLoading ? (
+                            <div className="text-sm text-gray-500">جاري تحميل حالة التحقق...</div>
+                          ) : (
+                            <div className="space-y-4">
+                              <div className="flex items-center justify-between gap-4 flex-wrap border border-gray-200 rounded-xl p-4">
+                                <div>
+                                  <div className="text-sm text-gray-500 mb-1">حالة التحقق</div>
+                                  <div className="font-semibold text-gray-900">
+                                    {getIdentityStatusText(identityVerification?.status)}
+                                  </div>
+                                </div>
+
+                                <div
+                                  className={`px-3 py-1 rounded-full text-sm font-semibold ${getIdentityStatusColor(
+                                    identityVerification?.status
+                                  )}`}
+                                >
+                                  {getIdentityStatusText(identityVerification?.status)}
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="border border-gray-200 rounded-xl p-4">
+                                  <div className="text-sm text-gray-500 mb-1">الاسم في التحقق</div>
+                                  <div className="font-semibold text-gray-900">
+                                    {identityVerification?.full_name || 'غير متوفر'}
+                                  </div>
+                                </div>
+
+                                <div className="border border-gray-200 rounded-xl p-4">
+                                  <div className="text-sm text-gray-500 mb-1">نوع الهوية</div>
+                                  <div className="font-semibold text-gray-900">
+                                    {identityVerification?.identity_type || 'غير متوفر'}
+                                  </div>
+                                </div>
+
+                                <div className="border border-gray-200 rounded-xl p-4">
+                                  <div className="text-sm text-gray-500 mb-1">تاريخ التقديم</div>
+                                  <div className="font-semibold text-gray-900">
+                                    {identityVerification?.submitted_at
+                                      ? new Date(identityVerification.submitted_at).toLocaleDateString('ar-SA')
+                                      : 'لم يتم التقديم'}
+                                  </div>
+                                </div>
+
+                                <div className="border border-gray-200 rounded-xl p-4">
+                                  <div className="text-sm text-gray-500 mb-1">تاريخ المراجعة</div>
+                                  <div className="font-semibold text-gray-900">
+                                    {identityVerification?.reviewed_at
+                                      ? new Date(identityVerification.reviewed_at).toLocaleDateString('ar-SA')
+                                      : 'لم تتم المراجعة'}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {identityVerification?.status === 'rejected' &&
+                                identityVerification?.rejection_reason && (
+                                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
+                                    <div className="font-semibold mb-1">سبب الرفض</div>
+                                    <div>{identityVerification.rejection_reason}</div>
+                                  </div>
+                                )}
+                            </div>
                           )}
                         </div>
 
-                        {bankMessage && (
-                          <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-sm">
-                            {bankMessage}
-                          </div>
-                        )}
-
-                        {editingBank || !bankDetails ? (
-                          <div className="space-y-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                اسم صاحب الحساب
-                              </label>
-                              <input
-                                type="text"
-                                value={bankAccountHolderName}
-                                onChange={(e) => setBankAccountHolderName(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              />
+                        <div className="border border-gray-200 rounded-2xl p-6">
+                          <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-11 h-11 rounded-xl bg-green-50 flex items-center justify-center">
+                                <Landmark className="w-5 h-5 text-green-600" />
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
+                                <p className="text-sm text-gray-500">يظهر هذا القسم للتاجر فقط</p>
+                              </div>
                             </div>
 
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                رقم الآيبان
-                              </label>
-                              <input
-                                type="text"
-                                value={bankIban}
-                                onChange={(e) => setBankIban(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="SA..."
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                اسم البنك
-                              </label>
-                              <input
-                                type="text"
-                                value={bankName}
-                                onChange={(e) => setBankName(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              />
-                            </div>
-
-                            <div className="flex gap-3">
+                            {!editingBank && (
                               <button
-                                onClick={handleUpdateBankDetails}
-                                disabled={bankLoading}
-                                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                                onClick={() => setEditingBank(true)}
+                                className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm"
                               >
-                                {bankLoading ? 'جاري الحفظ...' : 'حفظ بيانات الحساب'}
+                                {bankDetails ? 'تعديل البيانات' : 'إضافة حساب بنكي'}
                               </button>
+                            )}
+                          </div>
 
-                              {bankDetails && (
+                          {bankMessage && (
+                            <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-sm">
+                              {bankMessage}
+                            </div>
+                          )}
+
+                          {editingBank || !bankDetails ? (
+                            <div className="space-y-4">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  اسم صاحب الحساب
+                                </label>
+                                <input
+                                  type="text"
+                                  value={bankAccountHolderName}
+                                  onChange={(e) => setBankAccountHolderName(e.target.value)}
+                                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  رقم الآيبان
+                                </label>
+                                <input
+                                  type="text"
+                                  value={bankIban}
+                                  onChange={(e) => setBankIban(e.target.value)}
+                                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  placeholder="SA..."
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  اسم البنك
+                                </label>
+                                <input
+                                  type="text"
+                                  value={bankName}
+                                  onChange={(e) => setBankName(e.target.value)}
+                                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+
+                              <div className="flex gap-3">
                                 <button
-                                  onClick={() => {
-                                    setEditingBank(false);
-                                    setBankMessage('');
-                                  }}
-                                  className="px-6 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50"
+                                  onClick={handleUpdateBankDetails}
+                                  disabled={bankLoading}
+                                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
                                 >
-                                  إلغاء
+                                  {bankLoading ? 'جاري الحفظ...' : 'حفظ بيانات الحساب'}
                                 </button>
-                              )}
+
+                                {bankDetails && (
+                                  <button
+                                    onClick={() => {
+                                      setEditingBank(false);
+                                      setBankMessage('');
+                                    }}
+                                    className="px-6 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50"
+                                  >
+                                    إلغاء
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-3 text-sm">
+                              <div className="flex items-center justify-between">
+                                <span className="text-gray-500">صاحب الحساب</span>
+                                <span className="font-medium text-gray-900">
+                                  {bankDetails.account_holder_name || '-'}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-gray-500">الآيبان</span>
+                                <span className="font-medium text-gray-900">{bankDetails.iban || '-'}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-gray-500">البنك</span>
+                                <span className="font-medium text-gray-900">{bankDetails.bank_name || '-'}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="border border-gray-200 rounded-2xl p-6">
+                          <div className="flex items-center gap-3 mb-5">
+                            <div className="w-11 h-11 rounded-xl bg-indigo-50 flex items-center justify-center">
+                              <CreditCard className="w-5 h-5 text-indigo-600" />
+                            </div>
+                            <div>
+                              <h3 className="text-lg font-bold text-gray-900">الاشتراك والخطة</h3>
+                              <p className="text-sm text-gray-500">يظهر هذا القسم للتاجر فقط</p>
                             </div>
                           </div>
-                        ) : (
-                          <div className="space-y-3 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500">صاحب الحساب</span>
-                              <span className="font-medium text-gray-900">
-                                {bankDetails.account_holder_name || '-'}
-                              </span>
+
+                          {subscriptionLoading ? (
+                            <div className="text-sm text-gray-500">جاري تحميل بيانات الخطة...</div>
+                          ) : (
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="border border-gray-200 rounded-xl p-4">
+                                  <div className="text-sm text-gray-500 mb-1">الخطة الحالية</div>
+                                  <div className="font-semibold text-gray-900">
+                                    {sellerPlan?.name || sellerPlan?.title || sellerPlan?.slug || 'الخطة الأساسية'}
+                                  </div>
+                                </div>
+
+                                <div className="border border-gray-200 rounded-xl p-4">
+                                  <div className="text-sm text-gray-500 mb-1">حالة الاشتراك</div>
+                                  <div className="font-semibold text-gray-900">
+                                    {sellerProfile?.subscription_status || 'غير محدد'}
+                                  </div>
+                                </div>
+
+                                <div className="border border-gray-200 rounded-xl p-4">
+                                  <div className="text-sm text-gray-500 mb-1">تاريخ انتهاء الاشتراك</div>
+                                  <div className="font-semibold text-gray-900">
+                                    {sellerProfile?.subscription_expires_at
+                                      ? new Date(sellerProfile.subscription_expires_at).toLocaleDateString('ar-SA')
+                                      : 'غير متوفر'}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-3">
+                                <button
+                                  onClick={() => onNavigate('pricing')}
+                                  className="px-5 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                                >
+                                  عرض الخطط والترقية
+                                </button>
+                              </div>
                             </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500">الآيبان</span>
-                              <span className="font-medium text-gray-900">{bankDetails.iban || '-'}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500">البنك</span>
-                              <span className="font-medium text-gray-900">{bankDetails.bank_name || '-'}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                          )}
+                        </div>
+                      </>
                     )}
 
                     <div className="border border-red-200 rounded-2xl p-6 bg-red-50">
