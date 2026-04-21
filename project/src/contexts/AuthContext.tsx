@@ -398,10 +398,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       throw new Error('تعذر العثور على بيانات الحساب أو إنشاؤها.');
     }
 
-    if (!profileData.signup_completed || !profileData.phone_verified) {
+    if (!profileData.signup_completed) {
       await supabase.auth.signOut();
       throw new Error(
-        'هذا الحساب لم يكمل خطوات التسجيل بعد. يجب إكمال التحقق من البريد ثم إضافة رقم الجوال وتأكيده قبل تسجيل الدخول.'
+        'هذا الحساب لم يكمل خطوات التسجيل بعد. يجب إكمال التحقق من البريد الإلكتروني قبل تسجيل الدخول.'
       );
     }
 
