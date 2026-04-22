@@ -107,7 +107,7 @@ type SellerPlanRecord = {
 };
 
 const AVATAR_BUCKET = 'avatars';
-const IDENTITY_BUCKET = 'identity-verifications';
+const IDENTITY_BUCKET = 'identity-documents';
 const MAX_AVATAR_SIZE_MB = 5;
 const MAX_IDENTITY_FILE_SIZE_MB = 10;
 
@@ -1235,7 +1235,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       const rawMessage = error?.message || '';
       if (rawMessage.includes('Bucket not found')) {
         setIdentityMessage(
-          'مجلد ملفات التحقق غير موجود في التخزين. أنشئ bucket باسم identity-verifications أولاً'
+          'أنشئ bucket باسم identity-documents أولاً'
         );
       } else {
         setIdentityMessage(rawMessage || 'حدث خطأ أثناء إرسال طلب التوثيق');
