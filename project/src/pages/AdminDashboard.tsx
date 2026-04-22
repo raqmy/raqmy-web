@@ -207,6 +207,43 @@ const getAdminDashboardPath = (tab: AdminDashboardTab) => {
   return ADMIN_DASHBOARD_TAB_PATHS[tab] || ADMIN_DASHBOARD_BASE_PATH;
 };
 
+const extractIdentityStoragePath = (value: string | null | undefined) => {
+  if (!value) return '';
+
+  let normalized = String(value).trim();
+  if (!normalized) return '';
+
+  const signMarker = '/object/sign/identity-documents/';
+  const publicMarker = '/object/public/identity-documents/';
+
+  if (normalized.includes(signMarker)) {
+    normalized = normalized.split(signMarker)[1] || '';
+  } else if (normalized.includes(publicMarker)) {
+    normalized = normalized.split(publicMarker)[1] || '';
+  }
+
+  if (normalized.startsWith('identity-documents/')) {
+    normalized = normalized.slice('identity-documents/'.length);
+  }
+
+  if (normalized.startsWith('/')) {
+    normalized = normalized.slice(1);
+  }
+
+  const queryIndex = normalized.indexOf('?');
+  if (queryIndex !== -1) {
+    normalized = normalized.slice(0, queryIndex);
+  }
+
+  try {
+    normalized = decodeURIComponent(normalized);
+  } catch {
+    // ignore malformed encoding
+  }
+
+  return normalized;
+};
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
 
@@ -1599,14 +1636,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     }
   };
 
-  const openSignedDocument = async (path: string | null, side: 'front' | 'back') => {
-    if (!path) return;
+  const openSignedDocument = async (storedValue: string | null, side: 'front' | 'back') => {
+    if (!storedValue) return;
 
     try {
       setDocumentError('');
       setDocumentLoading(side);
 
-      const { data, error } = await supabase.storage.from('identity-documents').createSignedUrl(path, 60 * 10);
+      const path = extractIdentityStoragePath(storedValue);
+
+      if (!path) {
+        throw new Error('تعذر تحديد مسار الملف داخل التخزين');
+      }
+
+      const { data, error } = await supabase.storage
+        .from('identity-documents')
+        .createSignedUrl(path, 60 * 10);
 
       if (error) throw error;
 
@@ -3116,7 +3161,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                             </div>
 
                             <p className="text-xs text-gray-500 break-all">
-                              {selectedVerification.document_front_url || 'لا يوجد ملف'}
+                              {extractIdentityStoragePath(selectedVerification.document_front_url) || 'لا يوجد ملف'}
                             </p>
 
                             {frontSignedUrl && (
@@ -3147,7 +3192,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                             </div>
 
                             <p className="text-xs text-gray-500 break-all">
-                              {selectedVerification.document_back_url || 'لا يوجد ملف'}
+                              {extractIdentityStoragePath(selectedVerification.document_back_url) || 'لا يوجد ملف'}
                             </p>
 
                             {backSignedUrl && (
