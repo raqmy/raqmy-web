@@ -225,7 +225,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   >('overview');
 
   const [name, setName] = useState(profile?.name || '');
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(((profile as any)?.avatar_url as string) || null);
+  const [email, setEmail] = useState(user?.email || '');
+  const [pendingEmail, setPendingEmail] = useState<string | null>(
+    ((user as any)?.new_email as string) || ((user as any)?.email_change as string) || null
+  );
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(
+    ((profile as any)?.avatar_url as string) || null
+  );
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -247,7 +253,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [bankLoading, setBankLoading] = useState(false);
   const [bankMessage, setBankMessage] = useState('');
 
-  const [identityVerification, setIdentityVerification] = useState<IdentityVerificationRecord | null>(null);
+  const [identityVerification, setIdentityVerification] =
+    useState<IdentityVerificationRecord | null>(null);
   const [identityLoading, setIdentityLoading] = useState(false);
   const [editingIdentity, setEditingIdentity] = useState(false);
   const [identitySubmitting, setIdentitySubmitting] = useState(false);
@@ -265,6 +272,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
 
   const [emailActionLoading, setEmailActionLoading] = useState(false);
+  const [emailChangeLoading, setEmailChangeLoading] = useState(false);
   const [passwordResetLoading, setPasswordResetLoading] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
 
@@ -282,8 +290,18 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     setName(profile?.name || '');
+    setEmail(user?.email || '');
+    setPendingEmail(
+      ((user as any)?.new_email as string) || ((user as any)?.email_change as string) || null
+    );
     setAvatarUrl(((profile as any)?.avatar_url as string) || null);
-  }, [profile?.name, (profile as any)?.avatar_url]);
+  }, [
+    profile?.name,
+    (profile as any)?.avatar_url,
+    user?.email,
+    (user as any)?.new_email,
+    (user as any)?.email_change,
+  ]);
 
   useEffect(() => {
     const loadScope = async () => {
@@ -401,9 +419,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       setIdentityFullName(record.full_name || profile?.name || '');
       setIdentityType(record.identity_type || 'national_id');
       setIdentityNumber(record.identity_number || '');
-      setIdentityDateOfBirth(
-        record.date_of_birth ? String(record.date_of_birth).slice(0, 10) : ''
-      );
+      setIdentityDateOfBirth(record.date_of_birth ? String(record.date_of_birth).slice(0, 10) : '');
       setIdentityFrontFile(null);
       setIdentityBackFile(null);
       setIdentityFrontFileName(record.document_front_url ? 'مرفق موجود حالياً' : '');
@@ -428,10 +444,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       const [favoritesRes, viewedRes, ordersRes] = await Promise.all([
         supabase.from('favorites').select('id, product_id').eq('user_id', user.id),
         supabase.from('viewed_products').select('id, product_id').eq('user_id', user.id),
-        supabase
-          .from('orders')
-          .select('id')
-          .or(`user_id.eq.${user.id},customer_id.eq.${user.id}`),
+        supabase.from('orders').select('id').or(`user_id.eq.${user.id},customer_id.eq.${user.id}`),
       ]);
 
       const favoriteRows = favoritesRes.data || [];
@@ -467,7 +480,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
           .in('order_id', orderIds);
 
         const items = rawItems || [];
-        const orderItemProductIds = [...new Set(items.map((i: any) => i.product_id).filter(Boolean))];
+        const orderItemProductIds = [
+          ...new Set(items.map((i: any) => i.product_id).filter(Boolean)),
+        ];
         const { productsMap: orderProductsMap } = await fetchProductsMapByIds(orderItemProductIds);
 
         const validOrderIds = new Set<string>();
@@ -806,6 +821,57 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
+  const normalizeEmailInput = (value: string) => value.trim().toLowerCase();
+
+  const isValidEmail = (value: string) => {
+    const normalizedValue = normalizeEmailInput(value);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedValue);
+  };
+
+  const handleChangeEmail = async () => {
+    if (!user) return;
+
+    const normalizedEmail = normalizeEmailInput(email);
+    const currentEmail = normalizeEmailInput(user.email || '');
+
+    setEmailChangeLoading(true);
+    setMessage('');
+
+    try {
+      if (!normalizedEmail) {
+        throw new Error('البريد الإلكتروني مطلوب');
+      }
+
+      if (!isValidEmail(normalizedEmail)) {
+        throw new Error('صيغة البريد الإلكتروني غير صحيحة');
+      }
+
+      if (normalizedEmail === currentEmail) {
+        throw new Error('هذا هو نفس البريد الإلكتروني الحالي');
+      }
+
+      const { error } = await supabase.auth.updateUser(
+        { email: normalizedEmail },
+        {
+          emailRedirectTo: `${window.location.origin}/profile`,
+        }
+      );
+
+      if (error) throw error;
+
+      setPendingEmail(normalizedEmail);
+      setEmail(normalizedEmail);
+      setMessage(
+        'تم إرسال رابط تأكيد إلى البريد الإلكتروني الجديد. افتح الرسالة وأكّد البريد لإكمال التغيير.'
+      );
+    } catch (error: any) {
+      console.error('Error changing email:', error);
+      setMessage(error?.message || 'فشل طلب تغيير البريد الإلكتروني.');
+    } finally {
+      setEmailChangeLoading(false);
+    }
+  };
+
   const handleResendEmailConfirmation = async () => {
     if (!user?.email) return;
 
@@ -883,8 +949,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
 
     try {
-      window.dispatchEvent(new CustomEvent('profile-updated', { detail: { avatar_url: nextAvatarUrl } }));
-      window.dispatchEvent(new CustomEvent('profile-avatar-updated', { detail: { avatar_url: nextAvatarUrl } }));
+      window.dispatchEvent(
+        new CustomEvent('profile-updated', { detail: { avatar_url: nextAvatarUrl } })
+      );
+      window.dispatchEvent(
+        new CustomEvent('profile-avatar-updated', { detail: { avatar_url: nextAvatarUrl } })
+      );
     } catch (eventError) {
       console.error('Avatar sync event error:', eventError);
     }
@@ -969,12 +1039,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       const safeExtension = extension === 'jpeg' ? 'jpg' : extension;
       const filePath = `${user.id}/avatar.${safeExtension}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from(AVATAR_BUCKET)
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: true,
-        });
+      const { error: uploadError } = await supabase.storage.from(AVATAR_BUCKET).upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true,
+      });
 
       if (uploadError) throw uploadError;
 
@@ -992,7 +1060,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     } catch (error: any) {
       console.error('Error uploading avatar:', error);
       if ((error?.message || '').includes('Bucket not found')) {
-        setMessage('مجلد صور الملفات الشخصية غير موجود في التخزين. أنشئ bucket باسم avatars أولاً');
+        setMessage(
+          'مجلد صور الملفات الشخصية غير موجود في التخزين. أنشئ bucket باسم avatars أولاً'
+        );
       } else {
         setMessage(error?.message || 'حدث خطأ أثناء رفع صورة الملف الشخصي');
       }
@@ -1015,10 +1085,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
-  const uploadIdentityDocument = async (
-    file: File,
-    side: 'front' | 'back'
-  ): Promise<string> => {
+  const uploadIdentityDocument = async (file: File, side: 'front' | 'back'): Promise<string> => {
     if (!user) throw new Error('لا يوجد مستخدم');
 
     validateIdentityFile(file);
@@ -1167,7 +1234,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       console.error('Error submitting identity verification:', error);
       const rawMessage = error?.message || '';
       if (rawMessage.includes('Bucket not found')) {
-        setIdentityMessage('مجلد ملفات التحقق غير موجود في التخزين. أنشئ bucket باسم identity-verifications أولاً');
+        setIdentityMessage(
+          'مجلد ملفات التحقق غير موجود في التخزين. أنشئ bucket باسم identity-verifications أولاً'
+        );
       } else {
         setIdentityMessage(rawMessage || 'حدث خطأ أثناء إرسال طلب التوثيق');
       }
@@ -1241,7 +1310,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const handleUpgradeToSeller = async () => {
     if (profile?.role === 'seller') return;
 
-    const confirm = window.confirm('هل تريد ترقية حسابك إلى حساب تاجر؟ ستتمكن من إنشاء متاجر وبيع المنتجات.');
+    const confirm = window.confirm(
+      'هل تريد ترقية حسابك إلى حساب تاجر؟ ستتمكن من إنشاء متاجر وبيع المنتجات.'
+    );
     if (!confirm) return;
 
     setLoading(true);
@@ -1585,9 +1656,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     </div>
 
                     <div className="text-left md:text-right">
-                      <div className="text-3xl font-bold text-blue-600 mb-2">
-                        {item.price} ريال
-                      </div>
+                      <div className="text-3xl font-bold text-blue-600 mb-2">{item.price} ريال</div>
                     </div>
                   </div>
 
@@ -1943,7 +2012,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           : 'ابدأ بتصفح المنتجات وشراء ما يعجبك'}
                       </p>
                       <button
-                        onClick={() => onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')}
+                        onClick={() =>
+                          onNavigate(scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace')
+                        }
                         className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
                       >
                         {scopeInfo ? 'العودة إلى المتجر' : 'تصفح المنتجات'}
@@ -2002,7 +2073,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                       </div>
 
                                       <div className="min-w-0">
-                                        <p className="font-bold text-gray-900 truncate">{item.product_name}</p>
+                                        <p className="font-bold text-gray-900 truncate">
+                                          {item.product_name}
+                                        </p>
                                         <p className="text-sm text-gray-500">الكمية: {item.quantity}</p>
                                       </div>
                                     </div>
@@ -2156,12 +2229,25 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="border border-gray-200 rounded-xl p-4">
-                            <div className="text-sm text-gray-500 mb-1">البريد الإلكتروني</div>
-                            <div className="font-semibold text-gray-900 break-all">{user.email}</div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              البريد الإلكتروني
+                            </label>
+                            <input
+                              type="email"
+                              value={email}
+                              onChange={(e) => setEmail(e.target.value)}
+                              dir="ltr"
+                              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="example@email.com"
+                            />
+                            <p className="text-xs text-gray-500 mt-2 leading-6">
+                              عند تغيير البريد سيتم إرسال رابط تأكيد إلى البريد الجديد، ولن يكتمل
+                              التغيير إلا بعد التأكيد.
+                            </p>
                           </div>
 
-                          <div className="border border-gray-200 rounded-xl p-4">
+                          <div className="border border-gray-200 rounded-xl p-4 self-start">
                             <div className="text-sm text-gray-500 mb-1">نوع الحساب</div>
                             <div className="font-semibold text-gray-900">
                               {profile.role === 'admin'
@@ -2175,16 +2261,30 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
                         <div className="flex items-center justify-between gap-3 flex-wrap">
                           <div className="text-sm text-gray-500">
-                            يمكنك تعديل الاسم والصورة الشخصية من هذه الصفحة
+                            يمكنك تعديل الاسم والصورة الشخصية والبريد الإلكتروني من هذه الصفحة
                           </div>
-                          <button
-                            onClick={handleUpdateProfile}
-                            disabled={loading}
-                            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
-                          >
-                            <Save className="w-4 h-4" />
-                            <span>{loading ? 'جاري الحفظ...' : 'حفظ التغييرات'}</span>
-                          </button>
+
+                          <div className="flex flex-wrap gap-3">
+                            <button
+                              onClick={handleUpdateProfile}
+                              disabled={loading}
+                              className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
+                            >
+                              <Save className="w-4 h-4" />
+                              <span>{loading ? 'جاري الحفظ...' : 'حفظ الاسم'}</span>
+                            </button>
+
+                            <button
+                              onClick={handleChangeEmail}
+                              disabled={emailChangeLoading}
+                              className="px-6 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-2"
+                            >
+                              <Mail className="w-4 h-4" />
+                              <span>
+                                {emailChangeLoading ? 'جاري الإرسال...' : 'تحديث البريد الإلكتروني'}
+                              </span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2222,6 +2322,28 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                             {emailConfirmed ? 'مؤكد' : 'غير مؤكد'}
                           </div>
                         </div>
+
+                        {pendingEmail &&
+                          normalizeEmailInput(pendingEmail) !==
+                            normalizeEmailInput(user.email || '') && (
+                            <div className="border border-yellow-200 bg-yellow-50 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+                              <div className="flex items-center gap-3">
+                                <AlertCircle className="w-5 h-5 text-yellow-600" />
+                                <div>
+                                  <div className="text-sm text-yellow-700">
+                                    بريد جديد بانتظار التأكيد
+                                  </div>
+                                  <div className="font-semibold text-gray-900 break-all">
+                                    {pendingEmail}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="px-3 py-1 rounded-full text-sm font-semibold bg-yellow-100 text-yellow-700">
+                                بانتظار التأكيد
+                              </div>
+                            </div>
+                          )}
 
                         <div className="flex flex-wrap gap-3">
                           {!emailConfirmed && (
@@ -2286,7 +2408,16 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           className="px-5 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-2"
                         >
                           <LogOut className="w-4 h-4" />
-                          <span>{logoutLoading ? 'جاري تسجيل الخروج...' : 'تسجيل الخروج'}</span>
+                          <span>{logoutLoading ? 'جاري الخروج...' : 'تسجيل الخروج'}</span>
+                        </button>
+
+                        <button
+                          onClick={handleDeleteAccount}
+                          disabled={loading}
+                          className="px-5 py-3 border border-red-200 text-red-600 rounded-lg font-semibold hover:bg-red-50 disabled:opacity-50 inline-flex items-center gap-2"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>حذف الحساب</span>
                         </button>
                       </div>
                     </div>
@@ -2294,58 +2425,37 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     {isMerchant && (
                       <>
                         <div className="border border-gray-200 rounded-2xl p-6">
-                          <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
-                            <div className="flex items-center gap-3">
-                              <div className="w-11 h-11 rounded-xl bg-yellow-50 flex items-center justify-center">
-                                <BadgeCheck className="w-5 h-5 text-yellow-600" />
-                              </div>
-                              <div>
-                                <h3 className="text-lg font-bold text-gray-900">التحقق من الهوية</h3>
-                                <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
-                              </div>
+                          <div className="flex items-center gap-3 mb-5">
+                            <div className="w-11 h-11 rounded-xl bg-amber-50 flex items-center justify-center">
+                              <BadgeCheck className="w-5 h-5 text-amber-600" />
                             </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                onClick={fetchIdentityVerification}
-                                disabled={identityLoading || identitySubmitting}
-                                className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm inline-flex items-center gap-2 disabled:opacity-50"
-                              >
-                                <RefreshCw className="w-4 h-4" />
-                                <span>{identityLoading ? 'جاري التحديث...' : 'تحديث الحالة'}</span>
-                              </button>
-
-                              <button
-                                onClick={() => onNavigate('seller-dashboard-identity')}
-                                className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm"
-                              >
-                                فتح صفحة التحقق
-                              </button>
-
-                              {!editingIdentity && (
-                                <button
-                                  onClick={handleStartIdentityEdit}
-                                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-                                >
-                                  {identityVerification ? 'تعديل الطلب' : 'بدء التوثيق'}
-                                </button>
-                              )}
+                            <div>
+                              <h3 className="text-lg font-bold text-gray-900">التحقق من الهوية</h3>
+                              <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
                             </div>
                           </div>
 
                           {identityMessage && (
-                            <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-sm">
+                            <div className="mb-4 p-4 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-sm">
                               {identityMessage}
                             </div>
                           )}
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="text-sm text-gray-500 mb-1">حالة التحقق</div>
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="font-semibold text-gray-900">
-                                  {getIdentityStatusText(identityVerification?.status)}
+                          {identityLoading ? (
+                            <div className="text-center py-8">
+                              <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                              <p className="text-gray-600">جاري تحميل بيانات التوثيق...</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-5">
+                              <div className="flex flex-wrap items-center justify-between gap-4 border border-gray-200 rounded-xl p-4">
+                                <div>
+                                  <div className="text-sm text-gray-500 mb-1">حالة التوثيق</div>
+                                  <div className="font-bold text-gray-900">
+                                    {getIdentityStatusText(identityVerification?.status)}
+                                  </div>
                                 </div>
+
                                 <div
                                   className={`px-3 py-1 rounded-full text-sm font-semibold ${getIdentityStatusColor(
                                     identityVerification?.status
@@ -2354,375 +2464,399 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                   {getIdentityStatusText(identityVerification?.status)}
                                 </div>
                               </div>
-                            </div>
 
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="text-sm text-gray-500 mb-1">الاسم في التحقق</div>
-                              <div className="font-semibold text-gray-900">
-                                {identityVerification?.full_name || 'غير متوفر'}
-                              </div>
-                            </div>
-
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="text-sm text-gray-500 mb-1">نوع الهوية</div>
-                              <div className="font-semibold text-gray-900">
-                                {getIdentityTypeText(identityVerification?.identity_type)}
-                              </div>
-                            </div>
-
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="text-sm text-gray-500 mb-1">رقم الهوية</div>
-                              <div className="font-semibold text-gray-900">
-                                {identityVerification?.identity_number || 'غير متوفر'}
-                              </div>
-                            </div>
-
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="text-sm text-gray-500 mb-1">تاريخ التقديم</div>
-                              <div className="font-semibold text-gray-900">
-                                {identityVerification?.submitted_at
-                                  ? new Date(identityVerification.submitted_at).toLocaleDateString('ar-SA')
-                                  : 'لم يتم التقديم'}
-                              </div>
-                            </div>
-
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="text-sm text-gray-500 mb-1">تاريخ المراجعة</div>
-                              <div className="font-semibold text-gray-900">
-                                {identityVerification?.reviewed_at
-                                  ? new Date(identityVerification.reviewed_at).toLocaleDateString('ar-SA')
-                                  : 'لم تتم المراجعة'}
-                              </div>
-                            </div>
-                          </div>
-
-                          {identityVerification?.status === 'rejected' &&
-                            identityVerification?.rejection_reason && (
-                              <div className="mb-5 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
-                                <div className="font-semibold mb-1">سبب الرفض</div>
-                                <div>{identityVerification.rejection_reason}</div>
-                              </div>
-                            )}
-
-                          {(editingIdentity || !identityVerification) && (
-                            <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50">
-                              <div className="flex items-center gap-2 mb-4">
-                                <FileText className="w-5 h-5 text-blue-600" />
-                                <h4 className="font-bold text-gray-900">نموذج تقديم التوثيق</h4>
-                              </div>
-
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    الاسم الكامل
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={identityFullName}
-                                    onChange={(e) => setIdentityFullName(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="الاسم كما هو في الهوية"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    نوع الهوية
-                                  </label>
-                                  <select
-                                    value={identityType}
-                                    onChange={(e) => setIdentityType(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                                  >
-                                    <option value="national_id">هوية وطنية</option>
-                                    <option value="iqama">إقامة</option>
-                                    <option value="passport">جواز سفر</option>
-                                  </select>
-                                </div>
-
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    رقم الهوية
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={identityNumber}
-                                    onChange={(e) => setIdentityNumber(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="أدخل رقم الهوية"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    تاريخ الميلاد
-                                  </label>
-                                  <input
-                                    type="date"
-                                    value={identityDateOfBirth}
-                                    onChange={(e) => setIdentityDateOfBirth(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                  />
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                                <div className="border border-dashed border-gray-300 rounded-xl p-4 bg-white">
-                                  <div className="flex items-center justify-between gap-3 mb-3">
-                                    <div>
-                                      <div className="font-semibold text-gray-900">صورة الهوية الأمامية</div>
-                                      <div className="text-sm text-gray-500">JPG / PNG / WEBP / PDF</div>
+                              {!editingIdentity ? (
+                                <>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="border border-gray-200 rounded-xl p-4">
+                                      <div className="text-sm text-gray-500 mb-1">الاسم في التحقق</div>
+                                      <div className="font-semibold text-gray-900">
+                                        {identityVerification?.full_name || 'غير متوفر'}
+                                      </div>
                                     </div>
+
+                                    <div className="border border-gray-200 rounded-xl p-4">
+                                      <div className="text-sm text-gray-500 mb-1">نوع الهوية</div>
+                                      <div className="font-semibold text-gray-900">
+                                        {getIdentityTypeText(identityVerification?.identity_type)}
+                                      </div>
+                                    </div>
+
+                                    <div className="border border-gray-200 rounded-xl p-4">
+                                      <div className="text-sm text-gray-500 mb-1">تاريخ التقديم</div>
+                                      <div className="font-semibold text-gray-900">
+                                        {identityVerification?.submitted_at
+                                          ? new Date(
+                                              identityVerification.submitted_at
+                                            ).toLocaleDateString('ar-SA')
+                                          : 'لم يتم التقديم'}
+                                      </div>
+                                    </div>
+
+                                    <div className="border border-gray-200 rounded-xl p-4">
+                                      <div className="text-sm text-gray-500 mb-1">تاريخ المراجعة</div>
+                                      <div className="font-semibold text-gray-900">
+                                        {identityVerification?.reviewed_at
+                                          ? new Date(
+                                              identityVerification.reviewed_at
+                                            ).toLocaleDateString('ar-SA')
+                                          : 'لم تتم المراجعة'}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {identityVerification?.rejection_reason && (
+                                    <div className="p-4 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm">
+                                      سبب الرفض: {identityVerification.rejection_reason}
+                                    </div>
+                                  )}
+
+                                  <div className="flex flex-wrap gap-3">
                                     <button
                                       type="button"
-                                      onClick={() => identityFrontInputRef.current?.click()}
-                                      className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-2"
+                                      onClick={handleStartIdentityEdit}
+                                      className="px-5 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
                                     >
-                                      <Upload className="w-4 h-4" />
-                                      <span>اختيار ملف</span>
+                                      {identityVerification ? 'تعديل / إعادة إرسال الطلب' : 'تقديم طلب التوثيق'}
                                     </button>
                                   </div>
-
-                                  <input
-                                    ref={identityFrontInputRef}
-                                    type="file"
-                                    accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf"
-                                    onChange={handleIdentityFrontChange}
-                                    className="hidden"
-                                  />
-
-                                  <div className="text-sm text-gray-600">
-                                    {identityFrontFileName || 'لم يتم اختيار ملف'}
-                                  </div>
-                                </div>
-
-                                <div className="border border-dashed border-gray-300 rounded-xl p-4 bg-white">
-                                  <div className="flex items-center justify-between gap-3 mb-3">
+                                </>
+                              ) : (
+                                <>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
-                                      <div className="font-semibold text-gray-900">صورة الهوية الخلفية</div>
-                                      <div className="text-sm text-gray-500">JPG / PNG / WEBP / PDF</div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        الاسم الكامل
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={identityFullName}
+                                        onChange={(e) => setIdentityFullName(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="الاسم كما يظهر في الهوية"
+                                      />
                                     </div>
+
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        نوع الهوية
+                                      </label>
+                                      <select
+                                        value={identityType}
+                                        onChange={(e) => setIdentityType(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                                      >
+                                        <option value="national_id">هوية وطنية</option>
+                                        <option value="iqama">إقامة</option>
+                                        <option value="passport">جواز سفر</option>
+                                      </select>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        رقم الهوية
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={identityNumber}
+                                        onChange={(e) => setIdentityNumber(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="رقم الهوية"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        تاريخ الميلاد
+                                      </label>
+                                      <input
+                                        type="date"
+                                        value={identityDateOfBirth}
+                                        onChange={(e) => setIdentityDateOfBirth(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="border border-dashed border-gray-300 rounded-xl p-4 bg-white">
+                                      <div className="flex items-center justify-between gap-3 mb-3">
+                                        <div>
+                                          <div className="font-semibold text-gray-900">
+                                            صورة الهوية الأمامية
+                                          </div>
+                                          <div className="text-sm text-gray-500">
+                                            JPG / PNG / WEBP / PDF
+                                          </div>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => identityFrontInputRef.current?.click()}
+                                          className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-2"
+                                        >
+                                          <Upload className="w-4 h-4" />
+                                          <span>اختيار ملف</span>
+                                        </button>
+                                      </div>
+
+                                      <input
+                                        ref={identityFrontInputRef}
+                                        type="file"
+                                        accept=".jpg,jpeg,png,webp,pdf,image/*,application/pdf"
+                                        onChange={handleIdentityFrontChange}
+                                        className="hidden"
+                                      />
+
+                                      <div className="text-sm text-gray-600">
+                                        {identityFrontFileName || 'لم يتم اختيار ملف'}
+                                      </div>
+                                    </div>
+
+                                    <div className="border border-dashed border-gray-300 rounded-xl p-4 bg-white">
+                                      <div className="flex items-center justify-between gap-3 mb-3">
+                                        <div>
+                                          <div className="font-semibold text-gray-900">
+                                            صورة الهوية الخلفية
+                                          </div>
+                                          <div className="text-sm text-gray-500">
+                                            JPG / PNG / WEBP / PDF
+                                          </div>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => identityBackInputRef.current?.click()}
+                                          className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-2"
+                                        >
+                                          <Upload className="w-4 h-4" />
+                                          <span>اختيار ملف</span>
+                                        </button>
+                                      </div>
+
+                                      <input
+                                        ref={identityBackInputRef}
+                                        type="file"
+                                        accept=".jpg,jpeg,png,webp,pdf,image/*,application/pdf"
+                                        onChange={handleIdentityBackChange}
+                                        className="hidden"
+                                      />
+
+                                      <div className="text-sm text-gray-600">
+                                        {identityBackFileName || 'لم يتم اختيار ملف'}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm leading-7">
+                                    بعد الإرسال سيتم تحويل الطلب إلى حالة{' '}
+                                    <span className="font-bold">قيد المراجعة</span>.
+                                    ويمكنك تعديل الطلب وإعادة إرساله إذا تم رفضه لاحقاً.
+                                  </div>
+
+                                  <div className="flex flex-wrap gap-3">
                                     <button
                                       type="button"
-                                      onClick={() => identityBackInputRef.current?.click()}
-                                      className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-2"
+                                      onClick={handleSubmitIdentityVerification}
+                                      disabled={identitySubmitting}
+                                      className="px-5 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
                                     >
-                                      <Upload className="w-4 h-4" />
-                                      <span>اختيار ملف</span>
+                                      {identitySubmitting ? 'جاري الإرسال...' : 'إرسال طلب التوثيق'}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={handleCancelIdentityEdit}
+                                      disabled={identitySubmitting}
+                                      className="px-5 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50"
+                                    >
+                                      إلغاء
                                     </button>
                                   </div>
-
-                                  <input
-                                    ref={identityBackInputRef}
-                                    type="file"
-                                    accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf"
-                                    onChange={handleIdentityBackChange}
-                                    className="hidden"
-                                  />
-
-                                  <div className="text-sm text-gray-600">
-                                    {identityBackFileName || 'لم يتم اختيار ملف'}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm leading-7">
-                                بعد الإرسال سيتم تحويل الطلب إلى حالة <span className="font-bold">قيد المراجعة</span>.
-                                ويمكنك تعديل الطلب وإعادة إرساله إذا تم رفضه لاحقاً.
-                              </div>
-
-                              <div className="flex flex-wrap gap-3 mt-5">
-                                <button
-                                  onClick={handleSubmitIdentityVerification}
-                                  disabled={identitySubmitting}
-                                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
-                                >
-                                  {identitySubmitting ? 'جاري إرسال الطلب...' : 'إرسال طلب التوثيق'}
-                                </button>
-
-                                {identityVerification && (
-                                  <button
-                                    onClick={handleCancelIdentityEdit}
-                                    disabled={identitySubmitting}
-                                    className="px-6 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50"
-                                  >
-                                    إلغاء
-                                  </button>
-                                )}
-                              </div>
+                                </>
+                              )}
                             </div>
                           )}
                         </div>
 
                         <div className="border border-gray-200 rounded-2xl p-6">
-                          <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
-                            <div className="flex items-center gap-3">
-                              <div className="w-11 h-11 rounded-xl bg-green-50 flex items-center justify-center">
-                                <Landmark className="w-5 h-5 text-green-600" />
-                              </div>
-                              <div>
-                                <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
-                                <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
-                              </div>
+                          <div className="flex items-center gap-3 mb-5">
+                            <div className="w-11 h-11 rounded-xl bg-green-50 flex items-center justify-center">
+                              <Landmark className="w-5 h-5 text-green-600" />
                             </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                onClick={fetchBankDetails}
-                                disabled={bankLoading}
-                                className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm inline-flex items-center gap-2 disabled:opacity-50"
-                              >
-                                <RefreshCw className="w-4 h-4" />
-                                <span>{bankLoading ? 'جاري التحديث...' : 'تحديث البيانات'}</span>
-                              </button>
-
-                              <button
-                                onClick={() => onNavigate('seller-dashboard-bank-account')}
-                                className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm"
-                              >
-                                فتح صفحة الحساب البنكي
-                              </button>
-
-                              {!editingBank && (
-                                <button
-                                  onClick={() => setEditingBank(true)}
-                                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-                                >
-                                  {bankDetails ? 'تعديل البيانات' : 'إضافة حساب بنكي'}
-                                </button>
-                              )}
+                            <div>
+                              <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
+                              <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
                             </div>
                           </div>
 
                           {bankMessage && (
-                            <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-sm">
+                            <div className="mb-4 p-4 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-sm">
                               {bankMessage}
                             </div>
                           )}
 
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="text-sm text-gray-500 mb-1">حالة الحساب البنكي</div>
-                              <div className="font-semibold text-gray-900">
+                          <div className="space-y-5">
+                            <div className="flex flex-wrap items-center justify-between gap-4 border border-gray-200 rounded-xl p-4">
+                              <div>
+                                <div className="text-sm text-gray-500 mb-1">حالة الحساب البنكي</div>
+                                <div className="font-bold text-gray-900">
+                                  {bankStatus === 'approved'
+                                    ? 'معتمد'
+                                    : bankStatus === 'pending'
+                                    ? 'قيد المراجعة'
+                                    : bankStatus === 'rejected'
+                                    ? 'مرفوض'
+                                    : bankDetails
+                                    ? 'مضاف'
+                                    : 'غير مضاف'}
+                                </div>
+                              </div>
+
+                              <div
+                                className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                                  bankStatus === 'approved'
+                                    ? 'bg-green-100 text-green-700'
+                                    : bankStatus === 'pending'
+                                    ? 'bg-yellow-100 text-yellow-700'
+                                    : bankStatus === 'rejected'
+                                    ? 'bg-red-100 text-red-700'
+                                    : bankDetails
+                                    ? 'bg-blue-100 text-blue-700'
+                                    : 'bg-gray-100 text-gray-700'
+                                }`}
+                              >
                                 {bankStatus === 'approved'
                                   ? 'معتمد'
                                   : bankStatus === 'pending'
                                   ? 'قيد المراجعة'
+                                  : bankStatus === 'rejected'
+                                  ? 'مرفوض'
                                   : bankDetails
                                   ? 'مضاف'
                                   : 'غير مضاف'}
                               </div>
                             </div>
 
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="text-sm text-gray-500 mb-1">صاحب الحساب</div>
-                              <div className="font-semibold text-gray-900">
-                                {bankDetails?.account_holder_name || 'غير متوفر'}
-                              </div>
-                            </div>
+                            {!editingBank ? (
+                              <>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  <div className="border border-gray-200 rounded-xl p-4">
+                                    <div className="text-sm text-gray-500 mb-1">اسم صاحب الحساب</div>
+                                    <div className="font-semibold text-gray-900">
+                                      {bankDetails?.account_holder_name || 'غير متوفر'}
+                                    </div>
+                                  </div>
 
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="text-sm text-gray-500 mb-1">البنك</div>
-                              <div className="font-semibold text-gray-900">
-                                {bankDetails?.bank_name || 'غير متوفر'}
-                              </div>
-                            </div>
-                          </div>
+                                  <div className="border border-gray-200 rounded-xl p-4">
+                                    <div className="text-sm text-gray-500 mb-1">اسم البنك</div>
+                                    <div className="font-semibold text-gray-900">
+                                      {bankDetails?.bank_name || 'غير متوفر'}
+                                    </div>
+                                  </div>
 
-                          {editingBank || !bankDetails ? (
-                            <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50">
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    اسم صاحب الحساب
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={bankAccountHolderName}
-                                    onChange={(e) => setBankAccountHolderName(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="اسم صاحب الحساب"
-                                  />
+                                  <div className="border border-gray-200 rounded-xl p-4 md:col-span-2">
+                                    <div className="text-sm text-gray-500 mb-1">الآيبان</div>
+                                    <div className="font-semibold text-gray-900 break-all">
+                                      {bankDetails?.iban || 'غير متوفر'}
+                                    </div>
+                                  </div>
                                 </div>
 
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    اسم البنك
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={bankName}
-                                    onChange={(e) => setBankName(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="مثال: البنك الأهلي السعودي"
-                                  />
-                                </div>
-
-                                <div className="md:col-span-2">
-                                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    رقم الآيبان
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={bankIban}
-                                    onChange={(e) => setBankIban(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="SA..."
-                                  />
-                                  <p className="text-xs text-gray-500 mt-2">
-                                    يجب أن يبدأ الآيبان بـ SA ويتكون من 24 خانة بعد إزالة المسافات
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm leading-7">
-                                احفظ بيانات الحساب البنكي لاستخدامها في طلبات السحب. ويمكنك تعديلها لاحقاً متى احتجت.
-                              </div>
-
-                              <div className="flex gap-3 mt-5">
-                                <button
-                                  onClick={handleUpdateBankDetails}
-                                  disabled={bankLoading}
-                                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
-                                >
-                                  {bankLoading ? 'جاري الحفظ...' : 'حفظ بيانات الحساب البنكي'}
-                                </button>
-
-                                {bankDetails && (
+                                <div className="flex flex-wrap gap-3">
                                   <button
+                                    type="button"
+                                    onClick={() => setEditingBank(true)}
+                                    className="px-5 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                                  >
+                                    {bankDetails ? 'تعديل بيانات الحساب البنكي' : 'إضافة حساب بنكي'}
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                      اسم صاحب الحساب
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={bankAccountHolderName}
+                                      onChange={(e) => setBankAccountHolderName(e.target.value)}
+                                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      placeholder="اسم صاحب الحساب"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                      اسم البنك
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={bankName}
+                                      onChange={(e) => setBankName(e.target.value)}
+                                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      placeholder="اسم البنك"
+                                    />
+                                  </div>
+
+                                  <div className="md:col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                      الآيبان
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={bankIban}
+                                      onChange={(e) => setBankIban(e.target.value)}
+                                      dir="ltr"
+                                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      placeholder="SAxxxxxxxxxxxxxxxxxxxxxx"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-2">
+                                      يجب أن يبدأ الآيبان بـ SA ويتكون من 24 حرفاً
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm leading-7">
+                                  بعد الحفظ سيتم إرسال بيانات الحساب البنكي للمراجعة من الإدارة إذا
+                                  كان ذلك مطلوباً في نظامك.
+                                </div>
+
+                                <div className="flex flex-wrap gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={handleUpdateBankDetails}
+                                    disabled={bankLoading}
+                                    className="px-5 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                                  >
+                                    {bankLoading ? 'جاري الحفظ...' : 'حفظ بيانات الحساب البنكي'}
+                                  </button>
+
+                                  <button
+                                    type="button"
                                     onClick={() => {
                                       setEditingBank(false);
+                                      if (bankDetails) {
+                                        setBankAccountHolderName(bankDetails.account_holder_name || '');
+                                        setBankIban(bankDetails.iban || '');
+                                        setBankName(bankDetails.bank_name || '');
+                                      } else {
+                                        setBankAccountHolderName('');
+                                        setBankIban('');
+                                        setBankName('');
+                                      }
                                       setBankMessage('');
-                                      setBankAccountHolderName(bankDetails.account_holder_name || '');
-                                      setBankIban(bankDetails.iban || '');
-                                      setBankName(bankDetails.bank_name || '');
                                     }}
                                     disabled={bankLoading}
-                                    className="px-6 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50"
+                                    className="px-5 py-3 border border-gray-200 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50"
                                   >
                                     إلغاء
                                   </button>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-3 text-sm border border-gray-200 rounded-2xl p-5 bg-gray-50">
-                              <div className="flex items-center justify-between">
-                                <span className="text-gray-500">صاحب الحساب</span>
-                                <span className="font-medium text-gray-900">
-                                  {bankDetails.account_holder_name || '-'}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-gray-500">الآيبان</span>
-                                <span className="font-medium text-gray-900">{bankDetails.iban || '-'}</span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-gray-500">البنك</span>
-                                <span className="font-medium text-gray-900">{bankDetails.bank_name || '-'}</span>
-                              </div>
-                            </div>
-                          )}
+                                </div>
+                              </>
+                            )}
+                          </div>
                         </div>
 
                         <div className="border border-gray-200 rounded-2xl p-6">
@@ -2737,72 +2871,33 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                           </div>
 
                           {subscriptionLoading ? (
-                            <div className="text-sm text-gray-500">جاري تحميل بيانات الخطة...</div>
+                            <div className="text-center py-8">
+                              <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                              <p className="text-gray-600">جاري تحميل الخطة الحالية...</p>
+                            </div>
                           ) : (
-                            <div className="space-y-4">
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="border border-gray-200 rounded-xl p-4">
-                                  <div className="text-sm text-gray-500 mb-1">الخطة الحالية</div>
-                                  <div className="font-semibold text-gray-900">
-                                    {sellerPlan?.name || sellerPlan?.title || sellerPlan?.slug || 'الخطة الأساسية'}
-                                  </div>
-                                </div>
-
-                                <div className="border border-gray-200 rounded-xl p-4">
-                                  <div className="text-sm text-gray-500 mb-1">حالة الاشتراك</div>
-                                  <div className="font-semibold text-gray-900">
-                                    {sellerProfile?.subscription_status || 'غير محدد'}
-                                  </div>
-                                </div>
-
-                                <div className="border border-gray-200 rounded-xl p-4">
-                                  <div className="text-sm text-gray-500 mb-1">تاريخ انتهاء الاشتراك</div>
-                                  <div className="font-semibold text-gray-900">
-                                    {sellerProfile?.subscription_expires_at
-                                      ? new Date(sellerProfile.subscription_expires_at).toLocaleDateString('ar-SA')
-                                      : 'غير متوفر'}
-                                  </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="border border-gray-200 rounded-xl p-4">
+                                <div className="text-sm text-gray-500 mb-1">الخطة الحالية</div>
+                                <div className="font-semibold text-gray-900">
+                                  {sellerPlan?.title || sellerPlan?.name || sellerPlan?.slug || 'الخطة الأساسية'}
                                 </div>
                               </div>
 
-                              <div className="flex flex-wrap gap-3">
-                                <button
-                                  onClick={() => onNavigate('pricing')}
-                                  className="px-5 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-                                >
-                                  عرض الخطط والترقية
-                                </button>
+                              <div className="border border-gray-200 rounded-xl p-4">
+                                <div className="text-sm text-gray-500 mb-1">السعر</div>
+                                <div className="font-semibold text-gray-900">
+                                  {sellerPlan?.price != null ? `${sellerPlan.price} ريال` : 'مجاناً'}
+                                </div>
                               </div>
                             </div>
                           )}
                         </div>
                       </>
                     )}
-
-                    <div className="border border-red-200 rounded-2xl p-6 bg-red-50">
-                      <h3 className="text-lg font-bold text-red-600 mb-4">منطقة خطرة</h3>
-                      <button
-                        onClick={handleDeleteAccount}
-                        disabled={loading}
-                        className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        <span>حذف الحساب</span>
-                      </button>
-                    </div>
                   </div>
                 </div>
               )}
-
-              {activeTab !== 'overview' &&
-                activeTab !== 'orders' &&
-                activeTab !== 'favorites' &&
-                activeTab !== 'viewed' &&
-                activeTab !== 'settings' && (
-                  <div className="text-center py-12 text-gray-500">
-                    هذا القسم غير مستخدم حالياً في هذه الصفحة.
-                  </div>
-                )}
             </div>
           </div>
         </div>
