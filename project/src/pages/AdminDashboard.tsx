@@ -868,7 +868,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       const userIds = Array.from(
         new Set(
           rows
-            .map((row) => merchantMap[row.merchant_id]?.user_id)
+            .flatMap((row) => [merchantMap[row.merchant_id]?.user_id, row.merchant_id])
             .filter(Boolean)
         )
       ) as string[];
@@ -891,16 +891,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             };
           }
         }
+
+        const missingUserIds = userIds.filter((id) => !userMap[id]);
+
+        if (missingUserIds.length > 0) {
+          const { data: fallbackProfiles, error: fallbackProfilesError } = await supabase
+            .from('profiles')
+            .select('id, name, email, full_name, username')
+            .in('id', missingUserIds);
+
+          if (fallbackProfilesError) {
+            console.error('profiles fetch for bank accounts fallback error:', fallbackProfilesError);
+          } else {
+            for (const profileRow of fallbackProfiles || []) {
+              userMap[(profileRow as any).id] = {
+                name:
+                  (profileRow as any).name ||
+                  (profileRow as any).full_name ||
+                  (profileRow as any).username ||
+                  '—',
+                email: (profileRow as any).email || '—',
+              };
+            }
+          }
+        }
       }
 
       const uiRows: BankAccountUI[] = rows.map((row) => {
         const merchant = merchantMap[row.merchant_id];
-        const merchantUserId = merchant?.user_id;
+        const merchantUserId = merchant?.user_id || row.merchant_id;
+        const merchantUser = merchantUserId ? userMap[merchantUserId] : null;
+
         return {
           ...row,
           merchant_user_id: merchantUserId,
-          merchant_name: merchantUserId ? userMap[merchantUserId]?.name || '—' : '—',
-          merchant_email: merchantUserId ? userMap[merchantUserId]?.email || '—' : '—',
+          merchant_name: merchantUser?.name || row.account_holder_name || '—',
+          merchant_email: merchantUser?.email || '—',
           store_name: merchant?.store_name || '—',
           store_slug: merchant?.store_slug || '',
         };
@@ -2048,7 +2074,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const filteredBankAccounts = bankAccounts.filter((item) => {
     const merchantName = (item.merchant_name ?? '').toLowerCase();
     const merchantEmail = (item.merchant_email ?? '').toLowerCase();
-    const storeName = (item.store_name ?? '').toLowerCase();
     const iban = (item.iban ?? '').toLowerCase();
     const bankName = (item.bank_name ?? '').toLowerCase();
     const holderName = (item.account_holder_name ?? '').toLowerCase();
@@ -2056,7 +2081,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     return (
       merchantName.includes(q) ||
       merchantEmail.includes(q) ||
-      storeName.includes(q) ||
       iban.includes(q) ||
       bankName.includes(q) ||
       holderName.includes(q)
@@ -3359,7 +3383,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="ابحث باسم التاجر أو البريد أو المتجر أو الآيبان أو البنك..."
+                  placeholder="ابحث باسم التاجر أو البريد أو الآيبان أو البنك..."
                   className="w-full pr-10 pl-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
@@ -3409,7 +3433,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                           </div>
 
                           <div className="space-y-1 text-sm text-gray-600">
-                            <p>المتجر: {item.store_name || '—'}</p>
                             <p>البنك: {item.bank_name || '—'}</p>
                             <p dir="ltr">الآيبان: {formatIban(item.iban)}</p>
                           </div>
@@ -3444,13 +3467,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                             >
                               {getBankAccountStatusMeta(selectedBankAccount.status).label}
                             </span>
-
-                            {selectedBankAccount.store_name && selectedBankAccount.store_name !== '—' && (
-                              <span className="inline-flex items-center gap-2 text-sm text-gray-600">
-                                <StoreIcon className="w-4 h-4" />
-                                {selectedBankAccount.store_name}
-                              </span>
-                            )}
                           </div>
                         </div>
 
@@ -3470,11 +3486,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                         <div className="bg-gray-50 rounded-xl p-4">
                           <p className="text-sm text-gray-500 mb-1">البريد الإلكتروني</p>
                           <p className="font-semibold text-gray-900">{selectedBankAccount.merchant_email || '—'}</p>
-                        </div>
-
-                        <div className="bg-gray-50 rounded-xl p-4">
-                          <p className="text-sm text-gray-500 mb-1">المتجر</p>
-                          <p className="font-semibold text-gray-900">{selectedBankAccount.store_name || '—'}</p>
                         </div>
 
                         <div className="bg-gray-50 rounded-xl p-4">
