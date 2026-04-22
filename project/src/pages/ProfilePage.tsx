@@ -1103,8 +1103,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     if (uploadError) throw uploadError;
 
-    const { data } = supabase.storage.from(IDENTITY_BUCKET).getPublicUrl(path);
-    return `${data.publicUrl}?t=${timestamp}`;
+    return path;
   };
 
   const handleIdentityFrontChange = (event: React.ChangeEvent<HTMLInputElement>) => {
