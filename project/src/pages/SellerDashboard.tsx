@@ -4,7 +4,6 @@ import {
   Package,
   Store as StoreIcon,
   DollarSign,
-  Settings,
   Plus,
   TrendingUp,
   ShoppingBag,
@@ -13,7 +12,6 @@ import {
   Users,
   Link as LinkIcon,
   Check,
-  ShieldCheck,
   Wallet,
   ArrowUpLeft,
   ArrowDownLeft,
@@ -208,11 +206,8 @@ type SellerDashboardTab =
   | 'products'
   | 'stores'
   | 'marketing'
-  | 'settings'
   | 'orders'
-  | 'earnings'
-  | 'verification'
-  | 'bankAccount';
+  | 'earnings';
 
 const FALLBACK_MIN_WITHDRAWAL_AMOUNT = 10;
 const WITHDRAWAL_PROOFS_BUCKET = 'withdrawal-proofs';
@@ -225,9 +220,10 @@ const SELLER_DASHBOARD_TAB_PATHS: Record<SellerDashboardTab, string> = {
   marketing: `${SELLER_DASHBOARD_BASE_PATH}/marketing`,
   orders: `${SELLER_DASHBOARD_BASE_PATH}/orders`,
   earnings: `${SELLER_DASHBOARD_BASE_PATH}/earnings`,
-  bankAccount: `${SELLER_DASHBOARD_BASE_PATH}/bank-account`,
-  verification: `${SELLER_DASHBOARD_BASE_PATH}/verification`,
-  settings: `${SELLER_DASHBOARD_BASE_PATH}/settings`,
+};
+
+const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
+  return ['overview', 'products', 'stores', 'marketing', 'orders', 'earnings'].includes(String(value));
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
@@ -416,8 +412,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         return;
       }
 
-      if (parsedCache.activeTab) {
-        setActiveTab(parsedCache.activeTab as SellerDashboardTab);
+      if (isSellerDashboardTab(parsedCache.activeTab)) {
+        setActiveTab(parsedCache.activeTab);
+      } else {
+        setActiveTab('overview');
       }
 
       setStores(Array.isArray(parsedCache.stores) ? parsedCache.stores : []);
@@ -2490,35 +2488,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               <span>الأرباح</span>
             </button>
 
-            <button
-              onClick={() => handleTabChange('bankAccount')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'bankAccount' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <Landmark className="w-5 h-5" />
-              <span>الحساب البنكي</span>
-            </button>
-
-            <button
-              onClick={() => handleTabChange('verification')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'verification' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <ShieldCheck className="w-5 h-5" />
-              <span>توثيق الهوية</span>
-            </button>
-
-            <button
-              onClick={() => handleTabChange('settings')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                activeTab === 'settings' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <Settings className="w-5 h-5" />
-              <span>الإعدادات</span>
-            </button>
           </div>
         </div>
 
@@ -3907,418 +3876,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           </div>
         )}
 
-        {activeTab === 'bankAccount' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl p-8 shadow-sm">
-              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-                <div className="flex items-start gap-4">
-                  <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <Landmark className="w-7 h-7 text-purple-600" />
-                  </div>
-
-                  <div className="flex-1">
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">الحساب البنكي</h2>
-                    <p className="text-gray-600 mb-4">
-                      أضف بيانات حسابك البنكي لربطه بطلبات السحب. أي تعديل على البيانات سيعيد الحالة إلى قيد المراجعة.
-                    </p>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${bankAccountStatusMeta.className}`}>
-                        {bankAccountStatusMeta.label}
-                      </span>
-                      <span className="text-sm text-gray-500">{bankAccountStatusMeta.description}</span>
-                    </div>
-
-                    {bankAccountData?.rejection_reason && bankAccountData.status === 'rejected' && (
-                      <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                        سبب الرفض: {bankAccountData.rejection_reason}
-                      </div>
-                    )}
-
-                    {bankAccountData?.reviewed_at && (
-                      <div className="mt-4 text-sm text-gray-500">
-                        تاريخ آخر مراجعة: {formatDate(bankAccountData.reviewed_at)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <button
-                  onClick={fetchBankAccountData}
-                  disabled={bankAccountLoading}
-                  className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-5 h-5 ${bankAccountLoading ? 'animate-spin' : ''}`} />
-                  <span>تحديث البيانات</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-gray-900 mb-6">
-                {bankAccountData ? 'تعديل الحساب البنكي' : 'إضافة حساب بنكي'}
-              </h3>
-
-              {bankAccountLoading ? (
-                <div className="text-center py-8">
-                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                  <p className="text-gray-600">جاري تحميل بيانات الحساب البنكي...</p>
-                </div>
-              ) : (
-                <form onSubmit={handleBankAccountSubmit} className="space-y-6">
-                  {bankAccountError && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                      {bankAccountError}
-                    </div>
-                  )}
-
-                  {bankAccountSuccess && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-700">
-                      {bankAccountSuccess}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">اسم البنك</label>
-                      <input
-                        type="text"
-                        value={bankAccountForm.bank_name}
-                        onChange={(e) => setBankAccountForm((prev) => ({ ...prev, bank_name: e.target.value }))}
-                        disabled={bankAccountSubmitting}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
-                        placeholder="مثال: البنك الأهلي السعودي"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">اسم صاحب الحساب</label>
-                      <input
-                        type="text"
-                        value={bankAccountForm.account_holder_name}
-                        onChange={(e) =>
-                          setBankAccountForm((prev) => ({ ...prev, account_holder_name: e.target.value }))
-                        }
-                        disabled={bankAccountSubmitting}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
-                        placeholder="الاسم كما يظهر في البنك"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">الآيبان</label>
-                      <input
-                        type="text"
-                        value={bankAccountForm.iban}
-                        onChange={(e) => setBankAccountForm((prev) => ({ ...prev, iban: e.target.value.toUpperCase() }))}
-                        disabled={bankAccountSubmitting}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
-                        placeholder="SAxxxxxxxxxxxxxxxxxxxxxx"
-                        dir="ltr"
-                      />
-                      <p className="text-xs text-gray-500 mt-2">
-                        يجب أن يبدأ الآيبان بـ SA وأن يتكون من 24 خانة بعد إزالة المسافات.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800 space-y-2">
-                    <p>بعد الحفظ سيتم إرسال الحساب البنكي للمراجعة من الإدارة.</p>
-                    <p>إذا قمت بتعديل البيانات لاحقاً فسيعود الطلب تلقائياً إلى حالة "قيد المراجعة".</p>
-                    <p>لن تتمكن من السحب حتى تصبح حالة الحساب البنكي "معتمد".</p>
-                  </div>
-
-                  {bankAccountData?.status === 'approved' && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
-                      الحساب البنكي الحالي معتمد. أي تعديل جديد سيعيده إلى حالة المراجعة.
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={bankAccountSubmitting}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {bankAccountSubmitting
-                      ? 'جاري الحفظ...'
-                      : bankAccountData
-                      ? 'حفظ تحديثات الحساب البنكي'
-                      : 'حفظ الحساب البنكي'}
-                  </button>
-                </form>
-              )}
-            </div>
-
-            <div className="bg-white rounded-xl p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">الحالة الحالية</h3>
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className={`px-3 py-1 rounded-full text-sm font-semibold ${bankAccountStatusMeta.className}`}>
-                    {bankAccountStatusMeta.label}
-                  </span>
-                  <span className="text-sm text-gray-500">{bankAccountStatusMeta.description}</span>
-                </div>
-
-                {bankAccountData?.bank_name && (
-                  <p className="text-sm text-gray-600">
-                    اسم البنك: <span className="font-semibold text-gray-900">{bankAccountData.bank_name}</span>
-                  </p>
-                )}
-
-                {bankAccountData?.account_holder_name && (
-                  <p className="text-sm text-gray-600">
-                    صاحب الحساب: <span className="font-semibold text-gray-900">{bankAccountData.account_holder_name}</span>
-                  </p>
-                )}
-
-                {bankAccountData?.iban && (
-                  <p className="text-sm text-gray-600">
-                    الآيبان:{' '}
-                    <span className="font-semibold text-gray-900" dir="ltr">
-                      {formatIbanForInput(bankAccountData.iban)}
-                    </span>
-                  </p>
-                )}
-
-                {bankAccountData?.created_at && (
-                  <p className="text-sm text-gray-500">تاريخ الإضافة: {formatDate(bankAccountData.created_at)}</p>
-                )}
-
-                {bankAccountData?.updated_at && (
-                  <p className="text-sm text-gray-500">آخر تحديث: {formatDate(bankAccountData.updated_at)}</p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'verification' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl p-8 shadow-sm">
-              <div className="flex items-start gap-4">
-                <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <ShieldCheck className="w-7 h-7 text-blue-600" />
-                </div>
-
-                <div className="flex-1">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-2">توثيق الهوية</h2>
-                  <p className="text-gray-600 mb-4">
-                    ارفع بيانات الهوية والمستندات المطلوبة لإرسال طلب التوثيق ومراجعته من الإدارة.
-                  </p>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className={`px-3 py-1 rounded-full text-sm font-semibold ${verificationStatusMeta.className}`}>
-                      {verificationStatusMeta.label}
-                    </span>
-                    <span className="text-sm text-gray-500">{verificationStatusMeta.description}</span>
-                  </div>
-
-                  {identityVerification?.rejection_reason && identityVerification.status === 'rejected' && (
-                    <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                      سبب الرفض: {identityVerification.rejection_reason}
-                    </div>
-                  )}
-
-                  {isVerificationPending && (
-                    <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-yellow-800">
-                      لا يمكنك تعديل الطلب حالياً لأن الطلب قيد المراجعة.
-                    </div>
-                  )}
-
-                  {isVerificationApproved && (
-                    <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
-                      تم اعتماد هويتك بنجاح، لذلك تم قفل نموذج التعديل.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-gray-900 mb-6">نموذج التوثيق</h3>
-
-              {verificationLoading ? (
-                <div className="text-center py-8">
-                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                  <p className="text-gray-600">جاري تحميل بيانات التوثيق...</p>
-                </div>
-              ) : (
-                <form onSubmit={handleVerificationSubmit} className="space-y-6">
-                  {verificationError && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                      {verificationError}
-                    </div>
-                  )}
-
-                  {verificationSuccess && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-700">
-                      {verificationSuccess}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">الاسم الكامل</label>
-                      <input
-                        type="text"
-                        value={verificationForm.full_name}
-                        onChange={(e) => setVerificationForm((prev) => ({ ...prev, full_name: e.target.value }))}
-                        disabled={!canEditVerification || verificationSubmitting}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
-                        placeholder="اكتب الاسم الكامل كما هو في الهوية"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">نوع الهوية</label>
-                      <select
-                        value={verificationForm.identity_type}
-                        onChange={(e) => setVerificationForm((prev) => ({ ...prev, identity_type: e.target.value }))}
-                        disabled={!canEditVerification || verificationSubmitting}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
-                      >
-                        <option value="national_id">هوية وطنية</option>
-                        <option value="iqama">إقامة</option>
-                        <option value="passport">جواز سفر</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">رقم الهوية</label>
-                      <input
-                        type="text"
-                        value={verificationForm.identity_number}
-                        onChange={(e) => setVerificationForm((prev) => ({ ...prev, identity_number: e.target.value }))}
-                        disabled={!canEditVerification || verificationSubmitting}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
-                        placeholder="أدخل رقم الهوية"
-                        dir="ltr"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">تاريخ الميلاد</label>
-                      <input
-                        type="date"
-                        value={verificationForm.date_of_birth}
-                        onChange={(e) => setVerificationForm((prev) => ({ ...prev, date_of_birth: e.target.value }))}
-                        disabled={!canEditVerification || verificationSubmitting}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">صورة الهوية الأمامية</label>
-                      <input
-                        type="file"
-                        accept="image/*,.pdf"
-                        onChange={(e) => setFrontFile(e.target.files?.[0] || null)}
-                        disabled={!canEditVerification || verificationSubmitting}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-500"
-                      />
-                      <p className="text-xs text-gray-500 mt-2">
-                        {frontFile
-                          ? `الملف الجديد المختار: ${frontFile.name}`
-                          : identityVerification?.document_front_url
-                          ? `الملف الحالي: ${getFileNameFromPath(identityVerification.document_front_url)}`
-                          : 'ارفع صورة أو ملف PDF للواجهة الأمامية.'}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">صورة الهوية الخلفية</label>
-                      <input
-                        type="file"
-                        accept="image/*,.pdf"
-                        onChange={(e) => setBackFile(e.target.files?.[0] || null)}
-                        disabled={!canEditVerification || verificationSubmitting}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white disabled:bg-gray-100 disabled:text-gray-500"
-                      />
-                      <p className="text-xs text-gray-500 mt-2">
-                        {backFile
-                          ? `الملف الجديد المختار: ${backFile.name}`
-                          : identityVerification?.document_back_url
-                          ? `الملف الحالي: ${getFileNameFromPath(identityVerification.document_back_url)}`
-                          : 'ارفع صورة أو ملف PDF للواجهة الخلفية.'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-                    بعد الإرسال سيتم تحويل الحالة إلى "قيد المراجعة"، ويمكن للإدارة لاحقاً الموافقة أو الرفض مع سبب الرفض.
-                  </div>
-
-                  {canEditVerification ? (
-                    <button
-                      type="submit"
-                      disabled={verificationSubmitting}
-                      className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {verificationSubmitting
-                        ? 'جاري إرسال الطلب...'
-                        : identityVerification?.status === 'rejected'
-                        ? 'إعادة إرسال طلب التوثيق'
-                        : 'إرسال طلب التوثيق'}
-                    </button>
-                  ) : (
-                    <div className="text-sm text-gray-500">تم إيقاف تعديل النموذج حسب حالة طلب التوثيق الحالية.</div>
-                  )}
-                </form>
-              )}
-            </div>
-
-            <div className="bg-white rounded-xl p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">الحالة الحالية</h3>
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className={`px-3 py-1 rounded-full text-sm font-semibold ${verificationStatusMeta.className}`}>
-                    {verificationStatusMeta.label}
-                  </span>
-                  <span className="text-sm text-gray-500">{verificationStatusMeta.description}</span>
-                </div>
-
-                {identityVerification?.submitted_at && (
-                  <p className="text-sm text-gray-500">تاريخ التقديم: {new Date(identityVerification.submitted_at).toLocaleString('ar-SA')}</p>
-                )}
-
-                {identityVerification?.reviewed_at && (
-                  <p className="text-sm text-gray-500">تاريخ المراجعة: {new Date(identityVerification.reviewed_at).toLocaleString('ar-SA')}</p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'settings' && (
-          <div className="bg-white rounded-xl p-8">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">الإعدادات</h2>
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
-                <input
-                  type="text"
-                  defaultValue={profile?.name}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">رقم الجوال</label>
-                <input
-                  type="tel"
-                  defaultValue={profile?.phone}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  dir="ltr"
-                />
-              </div>
-
-              <button className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors">
-                حفظ التغييرات
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
 
       {showWithdrawalDetails && selectedWithdrawal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
