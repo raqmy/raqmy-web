@@ -18,6 +18,7 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
   updatePassword: (newPassword: string) => Promise<void>;
+  changeEmail: (newEmail: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -431,6 +432,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     if (error) throw error;
   };
 
+  const changeEmail = async (newEmail: string) => {
+    if (!user) throw new Error('لا يوجد مستخدم مسجل دخول');
+
+    const normalizedEmail = newEmail.trim().toLowerCase();
+    const currentEmail = (user.email || '').trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      throw new Error('البريد الإلكتروني الجديد مطلوب');
+    }
+
+    if (normalizedEmail === currentEmail) {
+      throw new Error('البريد الإلكتروني الجديد مطابق للبريد الحالي');
+    }
+
+    const { data, error } = await supabase.auth.updateUser(
+      {
+        email: normalizedEmail,
+      },
+      {
+        emailRedirectTo: `${window.location.origin}/profile`,
+      }
+    );
+
+    if (error) throw error;
+
+    if (mountedRef.current && data.user) {
+      setUser(data.user);
+    }
+  };
+
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
@@ -498,6 +529,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     refreshProfile,
     requestPasswordReset,
     updatePassword,
+    changeEmail,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
