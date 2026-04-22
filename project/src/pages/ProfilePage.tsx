@@ -514,14 +514,56 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
+  const resolveCurrentMerchantId = async () => {
+    if (!user) return null;
+
+    try {
+      const { data: merchantByUser, error: merchantByUserError } = await supabase
+        .from('merchants')
+        .select('id, user_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (!merchantByUserError && merchantByUser?.id) {
+        return merchantByUser.id as string;
+      }
+
+      const fallbackId = profile?.id || user.id;
+
+      const { data: merchantById, error: merchantByIdError } = await supabase
+        .from('merchants')
+        .select('id')
+        .eq('id', fallbackId)
+        .maybeSingle();
+
+      if (!merchantByIdError && merchantById?.id) {
+        return merchantById.id as string;
+      }
+    } catch (error) {
+      console.error('Error resolving current merchant id:', error);
+    }
+
+    return null;
+  };
+
   const fetchBankDetails = async () => {
     if (!user || profile?.role !== 'seller') return;
 
     try {
+      const merchantId = await resolveCurrentMerchantId();
+
+      if (!merchantId) {
+        setBankDetails(null);
+        setBankAccountHolderName(profile?.name || '');
+        setBankIban('');
+        setBankName('');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('bank_accounts')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('merchant_id', merchantId)
         .maybeSingle();
 
       if (error) {
@@ -531,12 +573,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       if (data) {
         setBankDetails(data);
-        setBankAccountHolderName(data.account_holder_name || '');
+        setBankAccountHolderName(data.account_holder_name || profile?.name || '');
         setBankIban(data.iban || '');
         setBankName(data.bank_name || '');
       } else {
         setBankDetails(null);
-        setBankAccountHolderName('');
+        setBankAccountHolderName(profile?.name || '');
         setBankIban('');
         setBankName('');
       }
@@ -1251,6 +1293,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     setBankMessage('');
 
     try {
+      const merchantId = await resolveCurrentMerchantId();
+
+      if (!merchantId) {
+        setBankMessage('تعذر العثور على سجل التاجر المرتبط بهذا الحساب');
+        setBankLoading(false);
+        return;
+      }
+
       const normalizedIBAN = bankIban.replace(/\s+/g, '').toUpperCase();
       const normalizedHolderName = bankAccountHolderName.trim();
       const normalizedBankName = bankName.trim();
@@ -1274,10 +1324,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       }
 
       const payload: any = {
-        user_id: user.id,
+        merchant_id: merchantId,
         account_holder_name: normalizedHolderName,
         iban: normalizedIBAN,
         bank_name: normalizedBankName,
+        status: 'pending',
+        rejection_reason: null,
+        reviewed_at: null,
+        reviewed_by: null,
       };
 
       if (bankDetails?.id) {
@@ -1286,21 +1340,25 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const { error } = await supabase
         .from('bank_accounts')
-        .upsert(payload, { onConflict: 'user_id' });
+        .upsert(payload, { onConflict: 'merchant_id' });
 
       if (error) {
         console.error('Error updating bank details:', error);
-        setBankMessage('فشل تحديث بيانات الحساب البنكي');
+        setBankMessage(error.message || 'فشل تحديث بيانات الحساب البنكي');
         setBankLoading(false);
         return;
       }
 
-      setBankMessage('تم تحديث بيانات الحساب البنكي بنجاح');
+      setBankMessage(
+        bankDetails?.id
+          ? 'تم تحديث بيانات الحساب البنكي وإعادة إرسالها للمراجعة'
+          : 'تم حفظ بيانات الحساب البنكي وإرسالها للمراجعة'
+      );
       setEditingBank(false);
       await fetchBankDetails();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating bank details:', err);
-      setBankMessage('حدث خطأ أثناء تحديث البيانات');
+      setBankMessage(err?.message || 'حدث خطأ أثناء تحديث البيانات');
     } finally {
       setBankLoading(false);
     }
