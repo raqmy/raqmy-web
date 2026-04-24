@@ -105,6 +105,17 @@ type AffiliateTierRow = {
   is_active?: boolean | null;
 };
 
+type OrderRowForStats = {
+  id: string;
+  status?: string | null;
+};
+
+type AffiliateCommissionRowForStats = {
+  id: string;
+  commission_amount?: number | string | null;
+  status?: string | null;
+};
+
 const getApplyToLabel = (value?: string | null) => {
   switch (value) {
     case 'product':
@@ -263,10 +274,7 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
     const existingRule = normalizeRule(baseData.rule);
     const existingTiers = sortTiers((baseData.tiers || []).map(normalizeTier));
 
-    if (
-      existingRule &&
-      existingTiers.length > 0
-    ) {
+    if (existingRule && existingTiers.length > 0) {
       return {
         ...baseData,
         rule: existingRule,
@@ -396,6 +404,65 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
     };
   };
 
+  const hydratePerformanceFromDatabase = async (
+    baseData: PublicStatsData
+  ): Promise<PublicStatsData> => {
+    const linkId = baseData.link?.id ? String(baseData.link.id) : '';
+    const marketerId = baseData.link?.marketer_id
+      ? String(baseData.link.marketer_id)
+      : baseData.marketer?.id
+      ? String(baseData.marketer.id)
+      : '';
+
+    if (!linkId || !marketerId) {
+      return baseData;
+    }
+
+    const [{ data: paidOrders, error: ordersError }, { data: commissionRows, error: commissionsError }] =
+      await Promise.all([
+        supabase
+          .from('orders')
+          .select('id, status')
+          .eq('status', 'paid')
+          .eq('affiliate_link_id', linkId)
+          .eq('affiliate_marketer_id', marketerId),
+        supabase
+          .from('affiliate_commissions')
+          .select('id, commission_amount, status')
+          .eq('link_id', linkId)
+          .eq('marketer_id', marketerId),
+      ]);
+
+    if (ordersError) {
+      console.error('Error fetching paid affiliate orders for public stats:', ordersError);
+    }
+
+    if (commissionsError) {
+      console.error('Error fetching affiliate commissions for public stats:', commissionsError);
+    }
+
+    const paidSalesCount = new Set(
+      ((paidOrders || []) as OrderRowForStats[])
+        .map((row) => row.id)
+        .filter(Boolean)
+    ).size;
+
+    const earningsStatuses = new Set(['approved', 'paid']);
+    const totalCommissionEarnings = ((commissionRows || []) as AffiliateCommissionRowForStats[])
+      .filter((row) => earningsStatuses.has(String(row.status || '').toLowerCase()))
+      .reduce((sum, row) => sum + Number(row.commission_amount || 0), 0);
+
+    return {
+      ...baseData,
+      link: {
+        ...baseData.link,
+        clicks: Number(baseData.link?.clicks || 0),
+        sales: paidSalesCount,
+        earnings: totalCommissionEarnings,
+      },
+    };
+  };
+
   const fetchStats = async () => {
     setLoading(true);
     setError('');
@@ -462,8 +529,9 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
         tiers: sortTiers((rawData.tiers || []).map(normalizeTier)),
       };
 
-      const hydratedData = await hydrateRuleAndTiersFallback(normalizedData);
-      setData(hydratedData);
+      const hydratedRuleData = await hydrateRuleAndTiersFallback(normalizedData);
+      const hydratedPerformanceData = await hydratePerformanceFromDatabase(hydratedRuleData);
+      setData(hydratedPerformanceData);
     } catch (err: any) {
       console.error('Error fetching marketer affiliate stats:', err);
       setError(err.message || 'حدث خطأ أثناء جلب الإحصائيات');
