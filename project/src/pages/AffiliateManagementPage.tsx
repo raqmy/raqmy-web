@@ -122,12 +122,19 @@ type TierDraft = {
   is_active: boolean;
 };
 
+type UnifiedCampaignMetrics = {
+  clicks: number;
+  sales: number;
+  earnings: number;
+};
+
 type UnifiedCampaignRow = {
   id: string;
   marketer: AffiliateMarketerRow | null;
   link: AffiliateLinkRow | null;
   rule: AffiliateRuleRow | null;
   title: string;
+  metrics: UnifiedCampaignMetrics;
 };
 
 type UnifiedAffiliateForm = {
@@ -155,6 +162,30 @@ type UnifiedAffiliateForm = {
 };
 
 type ScopeFilter = 'all' | 'product' | 'store' | 'catalog';
+
+type OrderAffiliateRow = {
+  id: string;
+  affiliate_link_id?: string | null;
+  affiliate_marketer_id?: string | null;
+  status?: string | null;
+};
+
+type AffiliateCommissionRow = {
+  id: string;
+  order_id?: string | null;
+  order_item_id?: string | null;
+  seller_id?: string | null;
+  marketer_id?: string | null;
+  link_id?: string | null;
+  rule_id?: string | null;
+  commission_type?: string | null;
+  commission_value?: number | string | null;
+  commission_amount?: number | string | null;
+  status?: string | null;
+  approved_at?: string | null;
+  paid_at?: string | null;
+  created_at?: string | null;
+};
 
 const getDisplayName = (item?: { name?: string | null; title?: string | null } | null) =>
   item?.title || item?.name || 'بدون اسم';
@@ -229,7 +260,6 @@ const buildGeneratedAffiliateCode = (
 
   return `${getScopeCodePrefix(scope)}-${namePart}-${suffix}`;
 };
-
 
 const uniqueIds = (values: Array<string | null | undefined>) =>
   [...new Set(values.filter((value): value is string => Boolean(value)))];
@@ -429,6 +459,8 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
   const [marketers, setMarketers] = useState<AffiliateMarketerRow[]>([]);
   const [links, setLinks] = useState<AffiliateLinkRow[]>([]);
   const [rules, setRules] = useState<AffiliateRuleRow[]>([]);
+  const [ordersWithAffiliate, setOrdersWithAffiliate] = useState<OrderAffiliateRow[]>([]);
+  const [affiliateCommissions, setAffiliateCommissions] = useState<AffiliateCommissionRow[]>([]);
 
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<UnifiedCampaignRow | null>(null);
@@ -450,7 +482,13 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     setLoading(true);
 
     try {
-      await Promise.all([fetchMarketers(), fetchLinks(), fetchRules()]);
+      await Promise.all([
+        fetchMarketers(),
+        fetchLinks(),
+        fetchRules(),
+        fetchOrdersWithAffiliate(),
+        fetchAffiliateCommissions(),
+      ]);
     } finally {
       setLoading(false);
     }
@@ -655,6 +693,45 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     setRules(normalizedRules);
   };
 
+  const fetchOrdersWithAffiliate = async () => {
+    if (!user?.id) return;
+
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, affiliate_link_id, affiliate_marketer_id, status')
+      .eq('status', 'paid')
+      .eq('merchant_id', user.id)
+      .not('affiliate_link_id', 'is', null)
+      .not('affiliate_marketer_id', 'is', null)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching affiliate orders:', error);
+      return;
+    }
+
+    setOrdersWithAffiliate((data || []) as OrderAffiliateRow[]);
+  };
+
+  const fetchAffiliateCommissions = async () => {
+    if (!user?.id) return;
+
+    const { data, error } = await supabase
+      .from('affiliate_commissions')
+      .select(
+        'id, order_id, order_item_id, seller_id, marketer_id, link_id, rule_id, commission_type, commission_value, commission_amount, status, approved_at, paid_at, created_at'
+      )
+      .eq('seller_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching affiliate commissions:', error);
+      return;
+    }
+
+    setAffiliateCommissions((data || []) as AffiliateCommissionRow[]);
+  };
+
   const handleDeleteCampaign = async (campaign: UnifiedCampaignRow) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا العرض؟ سيتم حذف الرابط والقاعدة المرتبطين به.')) {
       return;
@@ -695,6 +772,90 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     }
   };
 
+  const campaignMetricsMap = useMemo(() => {
+    const map = new Map<string, UnifiedCampaignMetrics>();
+
+    const commissionApprovedStatuses = new Set(['approved', 'paid']);
+
+    links.forEach((link) => {
+      const paidOrdersForLink = ordersWithAffiliate.filter(
+        (order) =>
+          String(order.affiliate_link_id || '') === String(link.id) &&
+          String(order.affiliate_marketer_id || '') === String(link.marketer_id || '')
+      );
+
+      const uniquePaidOrderIds = new Set(
+        paidOrdersForLink.map((order) => order.id).filter(Boolean)
+      );
+
+      const commissionsForLink = affiliateCommissions.filter(
+        (commission) =>
+          String(commission.link_id || '') === String(link.id) &&
+          String(commission.marketer_id || '') === String(link.marketer_id || '') &&
+          commissionApprovedStatuses.has(String(commission.status || '').toLowerCase())
+      );
+
+      const earnings = commissionsForLink.reduce(
+        (sum, row) => sum + Number(row.commission_amount || 0),
+        0
+      );
+
+      map.set(link.id, {
+        clicks: Number(link.clicks || 0),
+        sales: uniquePaidOrderIds.size,
+        earnings,
+      });
+    });
+
+    return map;
+  }, [links, ordersWithAffiliate, affiliateCommissions]);
+
+  const marketerMetricsMap = useMemo(() => {
+    const map = new Map<string, UnifiedCampaignMetrics>();
+
+    const commissionApprovedStatuses = new Set(['approved', 'paid']);
+
+    marketers.forEach((marketer) => {
+      const marketerLinks = links.filter((link) => String(link.marketer_id || '') === String(marketer.id));
+      const marketerLinkIds = new Set(marketerLinks.map((link) => link.id));
+
+      const clicks = marketerLinks.reduce((sum, link) => sum + Number(link.clicks || 0), 0);
+
+      const paidOrdersForMarketer = ordersWithAffiliate.filter(
+        (order) => String(order.affiliate_marketer_id || '') === String(marketer.id)
+      );
+
+      const uniquePaidOrderIds = new Set(
+        paidOrdersForMarketer
+          .filter((order) => {
+            if (!order.affiliate_link_id) return false;
+            return marketerLinkIds.has(String(order.affiliate_link_id));
+          })
+          .map((order) => order.id)
+          .filter(Boolean)
+      );
+
+      const commissionsForMarketer = affiliateCommissions.filter(
+        (commission) =>
+          String(commission.marketer_id || '') === String(marketer.id) &&
+          commissionApprovedStatuses.has(String(commission.status || '').toLowerCase())
+      );
+
+      const earnings = commissionsForMarketer.reduce(
+        (sum, row) => sum + Number(row.commission_amount || 0),
+        0
+      );
+
+      map.set(marketer.id, {
+        clicks,
+        sales: uniquePaidOrderIds.size,
+        earnings,
+      });
+    });
+
+    return map;
+  }, [marketers, links, ordersWithAffiliate, affiliateCommissions]);
+
   const unifiedCampaigns = useMemo(() => {
     const fromLinks: UnifiedCampaignRow[] = links.map((link) => {
       const marketer =
@@ -702,6 +863,11 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       const rule = matchRuleForLink(link, rules);
       const marketerName = marketer?.name || link.marketer?.name || 'بدون مسوق';
       const scopeLabel = getApplyToLabel(link.apply_to);
+      const metrics = campaignMetricsMap.get(link.id) || {
+        clicks: Number(link.clicks || 0),
+        sales: 0,
+        earnings: 0,
+      };
 
       return {
         id: `campaign-link-${link.id}`,
@@ -709,6 +875,7 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
         link,
         rule,
         title: `${marketerName} • ${scopeLabel}`,
+        metrics,
       };
     });
 
@@ -721,17 +888,25 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
         const marketer =
           marketers.find((marketer) => marketer.id === rule.marketer_id) || null;
 
+        const metrics =
+          (marketer?.id && marketerMetricsMap.get(marketer.id)) || {
+            clicks: 0,
+            sales: 0,
+            earnings: 0,
+          };
+
         return {
           id: `campaign-rule-${rule.id}`,
           marketer,
           link: null,
           rule,
           title: `${marketer?.name || rule.marketer?.name || 'مسوق'} • قاعدة فقط`,
+          metrics,
         } as UnifiedCampaignRow;
       });
 
     return [...fromLinks, ...ruleOnly];
-  }, [links, rules, marketers]);
+  }, [links, rules, marketers, campaignMetricsMap, marketerMetricsMap]);
 
   const filteredCampaigns = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -786,15 +961,15 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
 
   const overviewStats = useMemo(() => {
     const totalClicks = unifiedCampaigns.reduce(
-      (sum, item) => sum + Number(item.link?.clicks || item.marketer?.total_clicks || 0),
+      (sum, item) => sum + Number(item.metrics.clicks || 0),
       0
     );
     const totalSales = unifiedCampaigns.reduce(
-      (sum, item) => sum + Number(item.link?.sales || item.marketer?.total_sales || 0),
+      (sum, item) => sum + Number(item.metrics.sales || 0),
       0
     );
     const totalEarnings = unifiedCampaigns.reduce(
-      (sum, item) => sum + Number(item.link?.earnings || item.marketer?.total_earnings || 0),
+      (sum, item) => sum + Number(item.metrics.earnings || 0),
       0
     );
     const activeCampaigns = unifiedCampaigns.filter((item) => isCampaignActive(item)).length;
@@ -1148,27 +1323,22 @@ const UnifiedCampaignsList: React.FC<{
                         <MetricCard
                           icon={<MousePointerClick className="w-4 h-4" />}
                           label="النقرات"
-                          value={campaign.link?.clicks || campaign.marketer?.total_clicks || 0}
+                          value={campaign.metrics.clicks}
                         />
                         <MetricCard
                           icon={<TrendingUp className="w-4 h-4" />}
                           label="المبيعات"
-                          value={campaign.link?.sales || campaign.marketer?.total_sales || 0}
+                          value={campaign.metrics.sales}
                         />
                         <MetricCard
                           icon={<DollarSign className="w-4 h-4" />}
                           label="الأرباح"
-                          value={formatMoney(
-                            campaign.link?.earnings || campaign.marketer?.total_earnings || 0
-                          )}
+                          value={formatMoney(campaign.metrics.earnings)}
                         />
                         <MetricCard
                           icon={<Target className="w-4 h-4" />}
                           label="التحويل"
-                          value={conversionRate(
-                            campaign.link?.clicks || 0,
-                            campaign.link?.sales || 0
-                          )}
+                          value={conversionRate(campaign.metrics.clicks, campaign.metrics.sales)}
                         />
                       </div>
                     </div>
