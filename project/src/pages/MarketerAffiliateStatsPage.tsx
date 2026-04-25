@@ -613,7 +613,8 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
                     الكود: <span className="font-mono font-bold">{data.link?.code || '—'}</span>
                   </div>
                   <div>
-                    نوع العرض: <span className="font-semibold">{getApplyToLabel(data.link?.apply_to)}</span>
+                    نوع العرض:{' '}
+                    <span className="font-semibold">{getApplyToLabel(data.link?.apply_to)}</span>
                   </div>
                   <div>
                     المستهدف: <span className="font-semibold">{targetName}</span>
