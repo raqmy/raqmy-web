@@ -253,6 +253,20 @@ const buildRuleName = (marketerName: string, scopeType: string) => {
   return `قاعدة ${marketerName || 'أفلييت'} - ${scopeLabel}`;
 };
 
+const getStoredLinkMetrics = (link?: AffiliateLinkRow | null): UnifiedCampaignMetrics => ({
+  clicks: Number(link?.clicks || 0),
+  sales: Number(link?.sales || 0),
+  earnings: Number(link?.earnings || 0),
+});
+
+const getStoredMarketerMetrics = (
+  marketer?: AffiliateMarketerRow | null
+): UnifiedCampaignMetrics => ({
+  clicks: Number(marketer?.total_clicks || 0),
+  sales: Number(marketer?.total_sales || 0),
+  earnings: Number(marketer?.total_earnings || 0),
+});
+
 const matchRuleForLink = (
   link: AffiliateLinkRow,
   rules: AffiliateRuleRow[],
@@ -368,8 +382,11 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
         fetchMarketers(),
         fetchLinks(),
         fetchRules(),
-      ]).then(async ([marketersData, linksData]) => {
-        return [marketersData || [], linksData || []] as [AffiliateMarketerRow[], AffiliateLinkRow[]];
+      ]).then(([marketersData, linksData]) => {
+        return [marketersData || [], linksData || []] as [
+          AffiliateMarketerRow[],
+          AffiliateLinkRow[]
+        ];
       });
 
       await fetchAffiliatePerformance(linksRows, marketersRows);
@@ -431,7 +448,9 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     if (marketerIds.length > 0) {
       const { data: marketersData, error: marketersError } = await supabase
         .from('affiliate_marketers')
-        .select('id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings')
+        .select(
+          'id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings'
+        )
         .in('id', marketerIds);
 
       if (marketersError) {
@@ -532,7 +551,9 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     if (marketerIds.length > 0) {
       const { data: marketersData, error: marketersError } = await supabase
         .from('affiliate_marketers')
-        .select('id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings')
+        .select(
+          'id, name, email, phone, status, is_active, seller_id, user_id, notes, total_clicks, total_sales, total_earnings'
+        )
         .in('id', marketerIds);
 
       if (marketersError) {
@@ -711,15 +732,15 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     const approvedStatuses = new Set(['approved', 'paid']);
 
     links.forEach((link) => {
+      const storedMetrics = getStoredLinkMetrics(link);
+
       const relatedOrders = ordersWithAffiliate.filter(
         (order) =>
           String(order.affiliate_link_id || '') === String(link.id) &&
           String(order.affiliate_marketer_id || '') === String(link.marketer_id || '')
       );
 
-      const uniqueOrderIds = new Set(
-        relatedOrders.map((order) => order.id).filter(Boolean)
-      );
+      const uniqueOrderIds = new Set(relatedOrders.map((order) => order.id).filter(Boolean));
 
       const relatedCommissions = affiliateCommissions.filter(
         (commission) =>
@@ -728,15 +749,15 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
           approvedStatuses.has(String(commission.status || '').toLowerCase())
       );
 
-      const earnings = relatedCommissions.reduce(
+      const commissionsEarnings = relatedCommissions.reduce(
         (sum, item) => sum + Number(item.commission_amount || 0),
         0
       );
 
       map.set(link.id, {
-        clicks: Number(link.clicks || 0),
-        sales: uniqueOrderIds.size,
-        earnings,
+        clicks: Math.max(Number(storedMetrics.clicks || 0), Number(link.clicks || 0)),
+        sales: Math.max(uniqueOrderIds.size, Number(storedMetrics.sales || 0)),
+        earnings: commissionsEarnings > 0 ? commissionsEarnings : Number(storedMetrics.earnings || 0),
       });
     });
 
@@ -748,10 +769,16 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
     const approvedStatuses = new Set(['approved', 'paid']);
 
     marketers.forEach((marketer) => {
-      const marketerLinks = links.filter((link) => String(link.marketer_id || '') === String(marketer.id));
+      const storedMetrics = getStoredMarketerMetrics(marketer);
+      const marketerLinks = links.filter(
+        (link) => String(link.marketer_id || '') === String(marketer.id)
+      );
       const marketerLinkIds = new Set(marketerLinks.map((link) => link.id));
 
-      const clicks = marketerLinks.reduce((sum, link) => sum + Number(link.clicks || 0), 0);
+      const clicksFromLinks = marketerLinks.reduce(
+        (sum, link) => sum + Number(link.clicks || 0),
+        0
+      );
 
       const relatedOrders = ordersWithAffiliate.filter(
         (order) =>
@@ -759,9 +786,7 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
           (!order.affiliate_link_id || marketerLinkIds.has(String(order.affiliate_link_id)))
       );
 
-      const uniqueOrderIds = new Set(
-        relatedOrders.map((order) => order.id).filter(Boolean)
-      );
+      const uniqueOrderIds = new Set(relatedOrders.map((order) => order.id).filter(Boolean));
 
       const relatedCommissions = affiliateCommissions.filter(
         (commission) =>
@@ -769,15 +794,15 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
           approvedStatuses.has(String(commission.status || '').toLowerCase())
       );
 
-      const earnings = relatedCommissions.reduce(
+      const commissionsEarnings = relatedCommissions.reduce(
         (sum, item) => sum + Number(item.commission_amount || 0),
         0
       );
 
       map.set(marketer.id, {
-        clicks,
-        sales: uniqueOrderIds.size,
-        earnings,
+        clicks: Math.max(clicksFromLinks, Number(storedMetrics.clicks || 0)),
+        sales: Math.max(uniqueOrderIds.size, Number(storedMetrics.sales || 0)),
+        earnings: commissionsEarnings > 0 ? commissionsEarnings : Number(storedMetrics.earnings || 0),
       });
     });
 
@@ -786,16 +811,11 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
 
   const unifiedCampaigns = useMemo(() => {
     const fromLinks: UnifiedCampaignRow[] = links.map((link) => {
-      const marketer =
-        marketers.find((marketer) => marketer.id === link.marketer_id) || null;
+      const marketer = marketers.find((marketer) => marketer.id === link.marketer_id) || null;
       const rule = matchRuleForLink(link, rules, marketerNameMap);
       const scopeLabel = getApplyToLabel(link.apply_to);
       const marketerName = marketer?.name || link.marketer?.name || 'بدون مسوق';
-      const metrics = campaignMetricsMap.get(link.id) || {
-        clicks: Number(link.clicks || 0),
-        sales: 0,
-        earnings: 0,
-      };
+      const metrics = campaignMetricsMap.get(link.id) || getStoredLinkMetrics(link);
 
       return {
         id: `campaign-link-${link.id}`,
@@ -813,15 +833,11 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
           !links.some((link) => matchRuleForLink(link, [rule], marketerNameMap)?.id === rule.id)
       )
       .map((rule) => {
-        const marketer =
-          marketers.find((marketer) => marketer.id === rule.marketer_id) || null;
+        const marketer = marketers.find((marketer) => marketer.id === rule.marketer_id) || null;
 
         const metrics =
-          (marketer?.id && marketerMetricsMap.get(marketer.id)) || {
-            clicks: 0,
-            sales: 0,
-            earnings: 0,
-          };
+          (marketer?.id && marketerMetricsMap.get(marketer.id)) ||
+          getStoredMarketerMetrics(marketer);
 
         return {
           id: `campaign-rule-${rule.id}`,
@@ -848,12 +864,8 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
 
       const code = (campaign.link?.code || '').toLowerCase();
       const title = (campaign.title || '').toLowerCase();
-      const productName = getDisplayName(
-        campaign.link?.product || campaign.rule?.product
-      ).toLowerCase();
-      const storeName = getDisplayName(
-        campaign.link?.store || campaign.rule?.store
-      ).toLowerCase();
+      const productName = getDisplayName(campaign.link?.product || campaign.rule?.product).toLowerCase();
+      const storeName = getDisplayName(campaign.link?.store || campaign.rule?.store).toLowerCase();
       const objectName = getCampaignObjectName(campaign).toLowerCase();
       const isActive = isCampaignActive(campaign);
       const campaignScope = getCampaignScopeValue(campaign);
@@ -1369,10 +1381,7 @@ const UnifiedCampaignsList: React.FC<{
             {isExpanded && (
               <div className="border-t border-gray-100 bg-gray-50/60 px-5 lg:px-6 py-5">
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-                  <DetailsCard
-                    title="بيانات المسوق"
-                    icon={<Users className="w-5 h-5" />}
-                  >
+                  <DetailsCard title="بيانات المسوق" icon={<Users className="w-5 h-5" />}>
                     <InfoRow label="الاسم" value={marketerName} />
                     <InfoRow label="البريد" value={campaign.marketer?.email || '—'} />
                     <InfoRow label="الهاتف" value={campaign.marketer?.phone || '—'} />
@@ -1387,10 +1396,7 @@ const UnifiedCampaignsList: React.FC<{
                     )}
                   </DetailsCard>
 
-                  <DetailsCard
-                    title="بيانات الرابط"
-                    icon={<LinkIcon className="w-5 h-5" />}
-                  >
+                  <DetailsCard title="بيانات الرابط" icon={<LinkIcon className="w-5 h-5" />}>
                     <InfoRow label="الكود" value={campaign.link?.code || '—'} />
                     <InfoRow
                       label="النطاق"
@@ -1401,16 +1407,10 @@ const UnifiedCampaignsList: React.FC<{
                       label="الحالة"
                       value={(campaign.link?.is_active ?? true) ? 'نشط' : 'غير نشط'}
                     />
-                    <InfoRow
-                      label="الوصف"
-                      value={campaign.link?.description || 'بدون وصف'}
-                    />
+                    <InfoRow label="الوصف" value={campaign.link?.description || 'بدون وصف'} />
                   </DetailsCard>
 
-                  <DetailsCard
-                    title="قاعدة العمولة"
-                    icon={<Settings2 className="w-5 h-5" />}
-                  >
+                  <DetailsCard title="قاعدة العمولة" icon={<Settings2 className="w-5 h-5" />}>
                     <InfoRow
                       label="نوع القاعدة"
                       value={campaign.rule ? getScopeTypeLabel(campaign.rule.scope_type) : '—'}
@@ -1426,18 +1426,12 @@ const UnifiedCampaignsList: React.FC<{
                           : '—'
                       }
                     />
-                    <InfoRow
-                      label="الأولوية"
-                      value={String(campaign.rule?.priority || 100)}
-                    />
+                    <InfoRow label="الأولوية" value={String(campaign.rule?.priority || 100)} />
                     <InfoRow
                       label="الحالة"
                       value={(campaign.rule?.is_active ?? true) ? 'نشطة' : 'غير نشطة'}
                     />
-                    <InfoRow
-                      label="عدد الشرائح"
-                      value={String(campaign.rule?.tiers?.length || 0)}
-                    />
+                    <InfoRow label="عدد الشرائح" value={String(campaign.rule?.tiers?.length || 0)} />
                   </DetailsCard>
                 </div>
 
@@ -1461,7 +1455,11 @@ const UnifiedCampaignsList: React.FC<{
                           <MiniInfo label="من اليوم" value={String(tier.day_from ?? 0)} />
                           <MiniInfo
                             label="إلى اليوم"
-                            value={tier.day_to !== null && tier.day_to !== undefined ? String(tier.day_to) : 'مفتوح'}
+                            value={
+                              tier.day_to !== null && tier.day_to !== undefined
+                                ? String(tier.day_to)
+                                : 'مفتوح'
+                            }
                           />
                           <MiniInfo
                             label="العمولة"
