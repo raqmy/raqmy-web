@@ -106,6 +106,30 @@ type SellerPlanRecord = {
   price?: number | null;
 };
 
+const normalizeSubscriptionStatusLabel = (status?: string | null) => {
+  switch ((status || '').toLowerCase()) {
+    case 'active':
+      return 'نشط';
+    case 'paid':
+      return 'مدفوع';
+    case 'pending':
+      return 'قيد الانتظار';
+    case 'cancelled':
+      return 'ملغي';
+    case 'expired':
+      return 'منتهي';
+    case 'failed':
+      return 'فشل';
+    default:
+      return status || 'غير محدد';
+  }
+};
+
+const getPlanDisplayName = (plan?: SellerPlanRecord | null) => {
+  if (!plan) return 'الخطة الأساسية';
+  return plan.title || plan.name || plan.slug || 'الخطة الأساسية';
+};
+
 const AVATAR_BUCKET = 'avatars';
 const IDENTITY_BUCKET = 'identity-documents';
 const MAX_AVATAR_SIZE_MB = 5;
@@ -214,7 +238,7 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
 };
 
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
-  const { user, profile, updateProfile, signOut } = useAuth();
+  const { user, profile, updateProfile, signOut, refreshProfile } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
   const identityFrontInputRef = useRef<HTMLInputElement | null>(null);
@@ -621,25 +645,52 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     setSubscriptionLoading(true);
     try {
       const sellerProfile = profile as any;
+      let resolvedPlan: SellerPlanRecord | null = null;
       const planId = sellerProfile?.plan_id;
 
-      if (!planId) {
-        setSellerPlan(null);
-        return;
+      if (planId) {
+        const { data, error } = await supabase
+          .from('plans')
+          .select('id, name, title, slug, price')
+          .eq('id', planId)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error fetching seller plan by profile plan_id:', error);
+        } else if (data) {
+          resolvedPlan = data as SellerPlanRecord;
+        }
       }
 
-      const { data, error } = await supabase
-        .from('plans')
-        .select('id, name, title, slug, price')
-        .eq('id', planId)
-        .maybeSingle();
+      if (!resolvedPlan) {
+        const { data: subscriptionPayment, error: subscriptionPaymentError } = await supabase
+          .from('subscription_payments')
+          .select('plan_id, status, paid_at, created_at')
+          .eq('user_id', user.id)
+          .in('status', ['paid', 'success', 'completed', 'active'])
+          .order('paid_at', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (error) {
-        console.error('Error fetching seller plan:', error);
-        return;
+        if (subscriptionPaymentError) {
+          console.error('Error fetching latest paid subscription payment:', subscriptionPaymentError);
+        } else if (subscriptionPayment?.plan_id) {
+          const { data: fallbackPlan, error: fallbackPlanError } = await supabase
+            .from('plans')
+            .select('id, name, title, slug, price')
+            .eq('id', subscriptionPayment.plan_id)
+            .maybeSingle();
+
+          if (fallbackPlanError) {
+            console.error('Error fetching fallback seller plan:', fallbackPlanError);
+          } else if (fallbackPlan) {
+            resolvedPlan = fallbackPlan as SellerPlanRecord;
+          }
+        }
       }
 
-      setSellerPlan((data as SellerPlanRecord) || null);
+      setSellerPlan(resolvedPlan);
     } catch (error) {
       console.error('Error fetching seller plan:', error);
     } finally {
@@ -831,6 +882,15 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   };
 
   useEffect(() => {
+    if (!user?.id || profile?.role !== 'seller') return;
+
+    refreshProfile().catch((error) => {
+      console.error('Error refreshing seller profile in ProfilePage:', error);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, profile?.role]);
+
+  useEffect(() => {
     if (!scopeLoading && user?.id) {
       fetchProfileStats();
       fetchBankDetails();
@@ -841,7 +901,15 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       fetchViewedProducts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, profile?.role, scopeLoading, scopeInfo?.slug]);
+  }, [
+    user?.id,
+    profile?.role,
+    (profile as any)?.plan_id,
+    (profile as any)?.subscription_status,
+    (profile as any)?.subscription_expires_at,
+    scopeLoading,
+    scopeInfo?.slug,
+  ]);
 
   useEffect(() => {
     if (activeTab === 'orders') fetchOrders();
@@ -2937,7 +3005,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                               <div className="border border-gray-200 rounded-xl p-4">
                                 <div className="text-sm text-gray-500 mb-1">الخطة الحالية</div>
                                 <div className="font-semibold text-gray-900">
-                                  {sellerPlan?.title || sellerPlan?.name || sellerPlan?.slug || 'الخطة الأساسية'}
+                                  {getPlanDisplayName(sellerPlan)}
                                 </div>
                               </div>
 
