@@ -320,6 +320,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, []);
 
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const syncLatestProfile = async () => {
+      try {
+        const updatedProfile = await ensureUserProfileRecord(user);
+        if (mountedRef.current) {
+          setProfile(updatedProfile);
+        }
+      } catch (error) {
+        console.error('Error syncing latest profile on focus:', error);
+      }
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState && document.visibilityState !== 'visible') return;
+      void syncLatestProfile();
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [user?.id]);
+
   const signUp = async (
     email: string,
     password: string,
