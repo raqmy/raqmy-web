@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { CheckCircle2, XCircle } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
@@ -88,6 +89,14 @@ const parsePathToPage = (pathname: string) => {
 
   if (segments[0] === 'affiliate-report' && segments[1]) {
     return 'affiliate-report';
+  }
+
+  if (segments[0] === 'subscription-success' && segments[1]) {
+    return `subscription-success-${decodeURIComponent(segments[1])}`;
+  }
+
+  if (segments[0] === 'subscription-failed' && segments[1]) {
+    return `subscription-failed-${decodeURIComponent(segments[1])}`;
   }
 
   if (segments[0] === 's' && segments[1]) {
@@ -282,11 +291,7 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
     return slug;
   }
 
-  if (
-    isStorePaymentPage(page) &&
-    pendingSource === 'storefront' &&
-    pendingSlug
-  ) {
+  if (isStorePaymentPage(page) && pendingSource === 'storefront' && pendingSlug) {
     return pendingSlug;
   }
 
@@ -345,6 +350,16 @@ const getPublicPathFromPage = (page: string) => {
 
   if (page === 'affiliate-report') {
     return null;
+  }
+
+  if (page.startsWith('subscription-success-')) {
+    const paymentId = encodeURIComponent(page.replace('subscription-success-', ''));
+    return `/subscription-success/${paymentId}`;
+  }
+
+  if (page.startsWith('subscription-failed-')) {
+    const paymentId = encodeURIComponent(page.replace('subscription-failed-', ''));
+    return `/subscription-failed/${paymentId}`;
   }
 
   if (page.startsWith('storefront-')) {
@@ -430,11 +445,7 @@ const getPublicPathFromPage = (page: string) => {
     return tab === 'overview' ? '/seller-dashboard' : `/seller-dashboard/${encodeURIComponent(tab)}`;
   }
 
-  if (
-    page === 'admin' ||
-    page === 'admin-dashboard' ||
-    page === 'admin-dashboard-overview'
-  ) {
+  if (page === 'admin' || page === 'admin-dashboard' || page === 'admin-dashboard-overview') {
     return '/admin-dashboard';
   }
 
@@ -496,16 +507,80 @@ const hasPotentialPaymobParams = () => {
   );
 };
 
+type SubscriptionPaymentStatusRow = {
+  id: string;
+  status?: string | null;
+  plan_id?: string | null;
+  amount?: number | null;
+  currency?: string | null;
+};
+
+const SubscriptionStatusPage: React.FC<{
+  status: 'success' | 'failed';
+  paymentId?: string;
+  onNavigate: (page: string) => void;
+}> = ({ status, paymentId, onNavigate }) => {
+  const isSuccess = status === 'success';
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <div className="max-w-xl w-full bg-white rounded-3xl shadow-sm border border-gray-100 p-8 text-center">
+        <div
+          className={`w-20 h-20 rounded-3xl mx-auto mb-5 flex items-center justify-center ${
+            isSuccess ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
+          }`}
+        >
+          {isSuccess ? (
+            <CheckCircle2 className="w-10 h-10" />
+          ) : (
+            <XCircle className="w-10 h-10" />
+          )}
+        </div>
+
+        <h1 className="text-3xl font-bold text-gray-900 mb-3">
+          {isSuccess ? 'تم دفع الاشتراك بنجاح' : 'تعذر إتمام دفع الاشتراك'}
+        </h1>
+
+        <p className="text-gray-600 leading-7 mb-3">
+          {isSuccess
+            ? 'تم تأكيد عملية الاشتراك بنجاح. يمكنك الآن متابعة استخدام المنصة والرجوع إلى صفحة الباقات أو لوحة التحكم.'
+            : 'لم تكتمل عملية دفع الاشتراك. يمكنك المحاولة مرة أخرى أو العودة إلى صفحة الباقات.'}
+        </p>
+
+        {paymentId && (
+          <p className="text-sm text-gray-400 mb-8">
+            رقم عملية الاشتراك: <span className="font-mono">{paymentId}</span>
+          </p>
+        )}
+
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={() => onNavigate('pricing')}
+            className="flex-1 px-6 py-3.5 rounded-2xl bg-blue-600 text-white font-semibold hover:bg-blue-700"
+          >
+            العودة إلى الباقات
+          </button>
+
+          <button
+            onClick={() => onNavigate('seller-dashboard')}
+            className="flex-1 px-6 py-3.5 rounded-2xl border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50"
+          >
+            الذهاب إلى لوحة التحكم
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function AppContent() {
   const { user, profile, loading } = useAuth();
-  const [currentPage, setCurrentPage] = useState(() =>
-    parsePathToPage(window.location.pathname)
-  );
+  const [currentPage, setCurrentPage] = useState(() => parsePathToPage(window.location.pathname));
   const [hasBankDetails, setHasBankDetails] = useState<boolean | null>(null);
   const [isHandlingPaymentReturn, setIsHandlingPaymentReturn] = useState(false);
   const hasInitializedRouteSync = useRef(false);
 
-  const typedProfile = (profile as (typeof profile & { signup_completed?: boolean }) | null);
+  const typedProfile = profile as (typeof profile & { signup_completed?: boolean }) | null;
   const signupCompleted = !!typedProfile?.signup_completed;
 
   const storeSlug = getActiveStoreSlugFromContext(currentPage);
@@ -595,9 +670,14 @@ function AppContent() {
       if (loading) return;
 
       const pendingOrderId = localStorage.getItem('pending_payment_order_id');
-      const expectedReturn = localStorage.getItem('pending_payment_return_expected');
-      const searchParams = new URLSearchParams(window.location.search);
+      const expectedOrderReturn = localStorage.getItem('pending_payment_return_expected');
 
+      const pendingSubscriptionPaymentId = localStorage.getItem('pending_subscription_payment_id');
+      const expectedSubscriptionReturn = localStorage.getItem(
+        'pending_subscription_return_expected'
+      );
+
+      const searchParams = new URLSearchParams(window.location.search);
       const paymobTransactionId = searchParams.get('id');
       const paymobOrderId =
         searchParams.get('order') ||
@@ -606,14 +686,31 @@ function AppContent() {
       const paymobSuccess = String(searchParams.get('success') || '').toLowerCase() === 'true';
       const hasPaymobParams = hasPotentialPaymobParams();
 
-      if (expectedReturn !== 'true' || !pendingOrderId) {
+      const hasPendingOrderFlow = expectedOrderReturn === 'true' && !!pendingOrderId;
+      const hasPendingSubscriptionFlow =
+        expectedSubscriptionReturn === 'true' && !!pendingSubscriptionPaymentId;
+
+      if (!hasPendingOrderFlow && !hasPendingSubscriptionFlow) {
         return;
       }
 
-      const cleanupPaymentReturn = () => {
+      const cleanupOrderPaymentReturn = () => {
         localStorage.removeItem('pending_payment_order_id');
         localStorage.removeItem('pending_payment_started_at');
         localStorage.removeItem('pending_payment_return_expected');
+
+        if (window.location.search) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        setIsHandlingPaymentReturn(false);
+      };
+
+      const cleanupSubscriptionPaymentReturn = () => {
+        localStorage.removeItem('pending_subscription_payment_id');
+        localStorage.removeItem('pending_subscription_plan_id');
+        localStorage.removeItem('pending_subscription_started_at');
+        localStorage.removeItem('pending_subscription_return_expected');
 
         if (window.location.search) {
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -637,6 +734,24 @@ function AppContent() {
           setCurrentPage(`payment-failed-${finalOrderId}`);
         } else {
           setCurrentPage('payment-failed');
+        }
+      };
+
+      const goToSubscriptionSuccess = (resolvedPaymentId?: string | null) => {
+        const finalPaymentId = resolvedPaymentId || pendingSubscriptionPaymentId;
+        if (finalPaymentId) {
+          setCurrentPage(`subscription-success-${finalPaymentId}`);
+        } else {
+          setCurrentPage('pricing');
+        }
+      };
+
+      const goToSubscriptionFailed = (resolvedPaymentId?: string | null) => {
+        const finalPaymentId = resolvedPaymentId || pendingSubscriptionPaymentId;
+        if (finalPaymentId) {
+          setCurrentPage(`subscription-failed-${finalPaymentId}`);
+        } else {
+          setCurrentPage('pricing');
         }
       };
 
@@ -695,126 +810,243 @@ function AppContent() {
         return await findOrderDirectly();
       };
 
-      setIsHandlingPaymentReturn(true);
+      const findSubscriptionPaymentDirectly = async (): Promise<SubscriptionPaymentStatusRow | null> => {
+        if (!pendingSubscriptionPaymentId) return null;
 
-      try {
-        if (hasPaymobParams) {
-          const paymobReturnParams = Object.fromEntries(searchParams.entries());
+        const { data, error } = await supabase
+          .from('subscription_payments')
+          .select('id, status, plan_id, amount, currency')
+          .eq('id', String(pendingSubscriptionPaymentId))
+          .maybeSingle();
 
-          const verifyOnce = async () => {
-            const { data, error } = await supabase.functions.invoke('verify-paymob-transaction', {
-              body: {
-                order_id: pendingOrderId,
-                transaction_id: paymobTransactionId,
-                paymob_order_id: paymobOrderId,
-                paymob_return_params: paymobReturnParams,
-              },
-            });
+        if (error) {
+          console.error('Error fetching subscription payment directly:', error);
+          return null;
+        }
 
-            return { data, error };
-          };
+        return (data as SubscriptionPaymentStatusRow | null) || null;
+      };
 
-          const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      const pollSubscriptionPaymentStatus = async () => {
+        for (let attempt = 1; attempt <= 8; attempt++) {
+          const payment = await findSubscriptionPaymentDirectly();
 
-          let finalData: any = null;
-          let finalError: any = null;
-
-          for (let attempt = 1; attempt <= 8; attempt++) {
-            const { data, error } = await verifyOnce();
-
-            finalData = data;
-            finalError = error;
-
-            console.log('verify-paymob-transaction attempt:', attempt, {
-              paymobTransactionId,
-              paymobOrderId,
-              pendingOrderId,
-              data,
-              error,
-            });
-
-            if (!error && data?.success) {
-              const resolvedOrderId = data?.order?.id || pendingOrderId;
-              const resolvedStatus = data?.status || data?.order?.status;
-
-              if (data?.verified === true || data?.paid === true || resolvedStatus === 'paid') {
-                goToSuccess(resolvedOrderId);
-                cleanupPaymentReturn();
-                return;
-              }
-
-              if (
-                data?.failed === true ||
-                resolvedStatus === 'failed' ||
-                resolvedStatus === 'cancelled'
-              ) {
-                goToFailed(resolvedOrderId);
-                cleanupPaymentReturn();
-                return;
-              }
-            }
-
-            if (attempt < 8) {
-              await sleep(paymobSuccess ? 2000 : 1200);
-            }
+          if (
+            payment?.status === 'paid' ||
+            payment?.status === 'completed' ||
+            payment?.status === 'active' ||
+            payment?.status === 'failed' ||
+            payment?.status === 'cancelled'
+          ) {
+            return payment;
           }
 
-          console.error('Payment verification final result:', { finalData, finalError });
+          if (attempt < 8) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
         }
 
-        const directOrder = await pollDirectOrderStatus();
+        return await findSubscriptionPaymentDirectly();
+      };
 
-        if (directOrder?.status === 'paid' || directOrder?.status === 'completed') {
-          goToSuccess(directOrder.id);
-          cleanupPaymentReturn();
-          return;
-        }
-
-        if (directOrder?.status === 'failed' || directOrder?.status === 'cancelled') {
-          goToFailed(directOrder.id);
-          cleanupPaymentReturn();
-          return;
-        }
-
-        if (paymobSuccess) {
-          goToSuccess(directOrder?.id || pendingOrderId);
-          cleanupPaymentReturn();
-          return;
-        }
-
-        if (hasPaymobParams) {
-          goToFailed(directOrder?.id || pendingOrderId);
-          cleanupPaymentReturn();
-          return;
-        }
-
-        setCurrentPage(`payment-${pendingOrderId}`);
-      } catch (err) {
-        console.error('Error handling Paymob return:', err);
+      if (hasPendingOrderFlow) {
+        setIsHandlingPaymentReturn(true);
 
         try {
+          if (hasPaymobParams) {
+            const paymobReturnParams = Object.fromEntries(searchParams.entries());
+
+            const verifyOnce = async () => {
+              const { data, error } = await supabase.functions.invoke('verify-paymob-transaction', {
+                body: {
+                  order_id: pendingOrderId,
+                  transaction_id: paymobTransactionId,
+                  paymob_order_id: paymobOrderId,
+                  paymob_return_params: paymobReturnParams,
+                },
+              });
+
+              return { data, error };
+            };
+
+            const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            let finalData: any = null;
+            let finalError: any = null;
+
+            for (let attempt = 1; attempt <= 8; attempt++) {
+              const { data, error } = await verifyOnce();
+
+              finalData = data;
+              finalError = error;
+
+              console.log('verify-paymob-transaction attempt:', attempt, {
+                paymobTransactionId,
+                paymobOrderId,
+                pendingOrderId,
+                data,
+                error,
+              });
+
+              if (!error && data?.success) {
+                const resolvedOrderId = data?.order?.id || pendingOrderId;
+                const resolvedStatus = data?.status || data?.order?.status;
+
+                if (data?.verified === true || data?.paid === true || resolvedStatus === 'paid') {
+                  goToSuccess(resolvedOrderId);
+                  cleanupOrderPaymentReturn();
+                  return;
+                }
+
+                if (
+                  data?.failed === true ||
+                  resolvedStatus === 'failed' ||
+                  resolvedStatus === 'cancelled'
+                ) {
+                  goToFailed(resolvedOrderId);
+                  cleanupOrderPaymentReturn();
+                  return;
+                }
+              }
+
+              if (attempt < 8) {
+                await sleep(paymobSuccess ? 2000 : 1200);
+              }
+            }
+
+            console.error('Payment verification final result:', { finalData, finalError });
+          }
+
           const directOrder = await pollDirectOrderStatus();
 
           if (directOrder?.status === 'paid' || directOrder?.status === 'completed') {
             goToSuccess(directOrder.id);
-          } else if (directOrder?.status === 'failed' || directOrder?.status === 'cancelled') {
-            goToFailed(directOrder.id);
-          } else if (paymobSuccess) {
-            goToSuccess(directOrder?.id || pendingOrderId);
-          } else {
-            goToFailed(directOrder?.id || pendingOrderId);
+            cleanupOrderPaymentReturn();
+            return;
           }
-        } catch (fallbackErr) {
-          console.error('Fallback DB check after catch failed:', fallbackErr);
+
+          if (directOrder?.status === 'failed' || directOrder?.status === 'cancelled') {
+            goToFailed(directOrder.id);
+            cleanupOrderPaymentReturn();
+            return;
+          }
 
           if (paymobSuccess) {
-            goToSuccess(pendingOrderId);
-          } else {
-            goToFailed(pendingOrderId);
+            goToSuccess(directOrder?.id || pendingOrderId);
+            cleanupOrderPaymentReturn();
+            return;
           }
+
+          if (hasPaymobParams) {
+            goToFailed(directOrder?.id || pendingOrderId);
+            cleanupOrderPaymentReturn();
+            return;
+          }
+
+          setCurrentPage(`payment-${pendingOrderId}`);
+        } catch (err) {
+          console.error('Error handling order Paymob return:', err);
+
+          try {
+            const directOrder = await pollDirectOrderStatus();
+
+            if (directOrder?.status === 'paid' || directOrder?.status === 'completed') {
+              goToSuccess(directOrder.id);
+            } else if (directOrder?.status === 'failed' || directOrder?.status === 'cancelled') {
+              goToFailed(directOrder.id);
+            } else if (paymobSuccess) {
+              goToSuccess(directOrder?.id || pendingOrderId);
+            } else {
+              goToFailed(directOrder?.id || pendingOrderId);
+            }
+          } catch (fallbackErr) {
+            console.error('Fallback DB check after catch failed:', fallbackErr);
+
+            if (paymobSuccess) {
+              goToSuccess(pendingOrderId);
+            } else {
+              goToFailed(pendingOrderId);
+            }
+          }
+        } finally {
+          cleanupOrderPaymentReturn();
         }
-      } finally {
-        cleanupPaymentReturn();
+
+        return;
+      }
+
+      if (hasPendingSubscriptionFlow) {
+        setIsHandlingPaymentReturn(true);
+
+        try {
+          const subscriptionPayment = await pollSubscriptionPaymentStatus();
+
+          if (
+            subscriptionPayment?.status === 'paid' ||
+            subscriptionPayment?.status === 'completed' ||
+            subscriptionPayment?.status === 'active'
+          ) {
+            goToSubscriptionSuccess(subscriptionPayment.id);
+            cleanupSubscriptionPaymentReturn();
+            return;
+          }
+
+          if (
+            subscriptionPayment?.status === 'failed' ||
+            subscriptionPayment?.status === 'cancelled'
+          ) {
+            goToSubscriptionFailed(subscriptionPayment.id);
+            cleanupSubscriptionPaymentReturn();
+            return;
+          }
+
+          if (paymobSuccess) {
+            goToSubscriptionSuccess(subscriptionPayment?.id || pendingSubscriptionPaymentId);
+            cleanupSubscriptionPaymentReturn();
+            return;
+          }
+
+          if (hasPaymobParams) {
+            goToSubscriptionFailed(subscriptionPayment?.id || pendingSubscriptionPaymentId);
+            cleanupSubscriptionPaymentReturn();
+            return;
+          }
+
+          setCurrentPage('pricing');
+        } catch (err) {
+          console.error('Error handling subscription Paymob return:', err);
+
+          try {
+            const subscriptionPayment = await pollSubscriptionPaymentStatus();
+
+            if (
+              subscriptionPayment?.status === 'paid' ||
+              subscriptionPayment?.status === 'completed' ||
+              subscriptionPayment?.status === 'active'
+            ) {
+              goToSubscriptionSuccess(subscriptionPayment.id);
+            } else if (
+              subscriptionPayment?.status === 'failed' ||
+              subscriptionPayment?.status === 'cancelled'
+            ) {
+              goToSubscriptionFailed(subscriptionPayment.id);
+            } else if (paymobSuccess) {
+              goToSubscriptionSuccess(subscriptionPayment?.id || pendingSubscriptionPaymentId);
+            } else {
+              goToSubscriptionFailed(subscriptionPayment?.id || pendingSubscriptionPaymentId);
+            }
+          } catch (fallbackErr) {
+            console.error('Fallback subscription check after catch failed:', fallbackErr);
+
+            if (paymobSuccess) {
+              goToSubscriptionSuccess(pendingSubscriptionPaymentId);
+            } else {
+              goToSubscriptionFailed(pendingSubscriptionPaymentId);
+            }
+          }
+        } finally {
+          cleanupSubscriptionPaymentReturn();
+        }
       }
     };
 
@@ -824,16 +1056,23 @@ function AppContent() {
   useEffect(() => {
     if (isHandlingPaymentReturn) return;
 
-    const pendingExpected =
-      (() => {
-        try {
-          return localStorage.getItem('pending_payment_return_expected') === 'true';
-        } catch {
-          return false;
-        }
-      })();
+    const pendingOrderExpected = (() => {
+      try {
+        return localStorage.getItem('pending_payment_return_expected') === 'true';
+      } catch {
+        return false;
+      }
+    })();
 
-    if (pendingExpected && hasPotentialPaymobParams()) {
+    const pendingSubscriptionExpected = (() => {
+      try {
+        return localStorage.getItem('pending_subscription_return_expected') === 'true';
+      } catch {
+        return false;
+      }
+    })();
+
+    if ((pendingOrderExpected || pendingSubscriptionExpected) && hasPotentialPaymobParams()) {
       return;
     }
 
@@ -952,6 +1191,28 @@ function AppContent() {
   const renderPage = () => {
     if (currentPage === 'affiliate-report') {
       return <MarketerAffiliateStatsPage />;
+    }
+
+    if (currentPage.startsWith('subscription-success-')) {
+      const paymentId = currentPage.replace('subscription-success-', '');
+      return (
+        <SubscriptionStatusPage
+          status="success"
+          paymentId={paymentId}
+          onNavigate={navigateWithContext}
+        />
+      );
+    }
+
+    if (currentPage.startsWith('subscription-failed-')) {
+      const paymentId = currentPage.replace('subscription-failed-', '');
+      return (
+        <SubscriptionStatusPage
+          status="failed"
+          paymentId={paymentId}
+          onNavigate={navigateWithContext}
+        />
+      );
     }
 
     if (currentPage.startsWith('product-slug-')) {
