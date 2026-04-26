@@ -106,6 +106,28 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     return Array.from(featureSet);
   };
 
+  const clearPendingSubscriptionState = () => {
+    try {
+      localStorage.removeItem('pending_subscription_payment_id');
+      localStorage.removeItem('pending_subscription_plan_id');
+      localStorage.removeItem('pending_subscription_return_expected');
+      localStorage.removeItem('pending_subscription_started_at');
+    } catch (error) {
+      console.error('Error clearing pending subscription state:', error);
+    }
+  };
+
+  const persistPendingSubscriptionState = (subscriptionPaymentId: string, planId: string) => {
+    try {
+      localStorage.setItem('pending_subscription_payment_id', subscriptionPaymentId);
+      localStorage.setItem('pending_subscription_plan_id', planId);
+      localStorage.setItem('pending_subscription_return_expected', 'true');
+      localStorage.setItem('pending_subscription_started_at', new Date().toISOString());
+    } catch (error) {
+      console.error('Error persisting pending subscription state:', error);
+    }
+  };
+
   const handleSelectPlan = async (plan: PlanWithExtras) => {
     if (!user) {
       onNavigate('auth');
@@ -118,7 +140,6 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
     const numericPrice = Number(plan.price || 0);
 
-    // حاليًا لا نفعّل الرجوع المجاني تلقائيًا
     if (numericPrice <= 0) {
       alert('هذه هي الباقة الأساسية الافتراضية حاليًا، والرجوع إليها تلقائيًا غير مفعّل بعد.');
       return;
@@ -126,8 +147,8 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
     try {
       setSubmittingPlanId(plan.id);
+      clearPendingSubscriptionState();
 
-      // 1) إنشاء سجل دفع اشتراك pending
       const { data: insertedPayment, error: insertError } = await supabase
         .from('subscription_payments')
         .insert({
@@ -153,7 +174,6 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
         return;
       }
 
-      // 2) استدعاء Edge Function لإنشاء رابط الدفع
       const { data: functionData, error: functionError } = await supabase.functions.invoke(
         'create-paymob-subscription-payment',
         {
@@ -165,20 +185,24 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
       if (functionError) {
         console.error('Error invoking subscription payment function:', functionError);
+        clearPendingSubscriptionState();
         alert('تعذر بدء عملية الدفع، حاول مرة أخرى.');
         return;
       }
 
       if (!functionData?.success || !functionData?.iframe_url) {
         console.error('Invalid function response:', functionData);
+        clearPendingSubscriptionState();
         alert('لم يتم إنشاء رابط الدفع بشكل صحيح.');
         return;
       }
 
-      // 3) تحويل المستخدم إلى صفحة دفع Paymob
+      persistPendingSubscriptionState(insertedPayment.id, plan.id);
+
       window.location.href = functionData.iframe_url;
     } catch (error) {
       console.error('Error selecting paid plan:', error);
+      clearPendingSubscriptionState();
       alert('حدث خطأ غير متوقع أثناء بدء الاشتراك.');
     } finally {
       setSubmittingPlanId(null);
