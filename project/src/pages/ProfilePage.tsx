@@ -621,26 +621,30 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     setSubscriptionLoading(true);
     try {
       const sellerProfile = profile as any;
-      let resolvedPlanId: string | null = sellerProfile?.plan_id || null;
+      const nowIso = new Date().toISOString();
 
-      if (!resolvedPlanId) {
-        const { data: latestSuccessfulPayment, error: paymentError } = await supabase
-          .from('subscription_payments')
-          .select('plan_id, status, created_at')
-          .eq('user_id', user.id)
-          .in('status', ['paid', 'success', 'completed', 'active'])
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      const { data: latestSuccessfulPayment, error: paymentError } = await supabase
+        .from('subscription_payments')
+        .select('plan_id, status, created_at, paid_at, payment_expires_at')
+        .eq('user_id', user.id)
+        .in('status', ['paid', 'success', 'completed', 'active'])
+        .order('paid_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-        if (paymentError) {
-          console.error('Error fetching latest successful subscription payment:', paymentError);
-        }
-
-        if (latestSuccessfulPayment?.plan_id) {
-          resolvedPlanId = latestSuccessfulPayment.plan_id;
-        }
+      if (paymentError) {
+        console.error('Error fetching latest successful subscription payment:', paymentError);
       }
+
+      const hasValidPaidSubscription = !!(
+        latestSuccessfulPayment?.plan_id &&
+        (!latestSuccessfulPayment?.payment_expires_at || latestSuccessfulPayment.payment_expires_at >= nowIso)
+      );
+
+      const resolvedPlanId: string | null = hasValidPaidSubscription
+        ? latestSuccessfulPayment?.plan_id || null
+        : sellerProfile?.plan_id || latestSuccessfulPayment?.plan_id || null;
 
       if (!resolvedPlanId) {
         setSellerPlan(null);
@@ -851,10 +855,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     if (!scopeLoading && user?.id) {
-      refreshProfile().catch((error) => {
-        console.error('Error refreshing profile before loading profile page data:', error);
-      });
-
       fetchProfileStats();
       fetchBankDetails();
       fetchIdentityVerification();
