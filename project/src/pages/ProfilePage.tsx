@@ -625,7 +625,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const { data: latestSuccessfulPayment, error: paymentError } = await supabase
         .from('subscription_payments')
-        .select('plan_id, status, created_at, paid_at, payment_expires_at')
+        .select('plan_id, status, created_at, paid_at, expires_at')
         .eq('user_id', user.id)
         .in('status', ['paid', 'success', 'completed', 'active'])
         .order('paid_at', { ascending: false, nullsFirst: false })
@@ -639,7 +639,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const hasValidPaidSubscription = !!(
         latestSuccessfulPayment?.plan_id &&
-        (!latestSuccessfulPayment?.payment_expires_at || latestSuccessfulPayment.payment_expires_at >= nowIso)
+        (!latestSuccessfulPayment?.expires_at || latestSuccessfulPayment.expires_at >= nowIso)
       );
 
       const resolvedPlanId: string | null = hasValidPaidSubscription
