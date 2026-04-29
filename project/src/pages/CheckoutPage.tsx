@@ -204,7 +204,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypal'>('card');
+  const [paymentMethod] = useState<'card' | 'paypal'>('card');
   const [scopeInfo, setScopeInfo] = useState<ScopeInfo | null>(null);
 
   const [couponCode, setCouponCode] = useState('');
@@ -212,11 +212,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const [couponSuccess, setCouponSuccess] = useState('');
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCouponState | null>(null);
-
-  const [formData, setFormData] = useState({
-    shippingAddress: '',
-    notes: '',
-  });
 
   useEffect(() => {
     const loadScopeAndCart = async () => {
@@ -353,7 +348,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     );
   }, [cartItems]);
 
-  const hasMultipleSellers = uniqueSellerIds.length > 1;
   const singleSellerId = uniqueSellerIds.length === 1 ? uniqueSellerIds[0] : null;
 
   const getCouponEligibleItems = (
@@ -787,7 +781,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           ].join(' | ')
         : '';
 
-      const finalNotes = [formData.notes?.trim(), couponNote].filter(Boolean).join('\n');
+      const finalNotes = [couponNote].filter(Boolean).join('\n');
 
       const orderPayload = {
         order_number: orderNumber,
@@ -802,7 +796,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         customer_name: profile?.name || '',
         customer_email: profile?.email || '',
         customer_phone: profile?.phone || '',
-        shipping_address: formData.shippingAddress || '',
+        shipping_address: '',
         notes: finalNotes || '',
         sale_source: scopeInfo ? 'direct' : 'marketplace',
         affiliate_link_id: orderAffiliate?.affiliate_link_id || null,
@@ -932,257 +926,188 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
         {scopeInfo && <StoreScopedBanner scopeInfo={scopeInfo} onNavigate={onNavigate} />}
 
-        <div className="mb-8">
+        <div className="mb-8 text-right">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">إتمام الطلب</h1>
           <p className="text-gray-600">
             {scopeInfo
-              ? `أكمل بيانات الدفع لإتمام الشراء من متجر ${scopeInfo.name}`
-              : 'أكمل بيانات الدفع لإتمام عملية الشراء'}
+              ? `أكمل الدفع لإتمام الشراء من متجر ${scopeInfo.name}`
+              : 'راجع طلبك ثم أكمل الدفع'}
           </p>
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 space-y-6">
-              <div className="bg-white rounded-xl p-6 shadow-sm">
-                <h3 className="text-xl font-bold text-gray-900 mb-6">طريقة الدفع</h3>
+          <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm">
+            <h3 className="text-xl font-bold text-gray-900 mb-6">ملخص الطلب</h3>
 
-                <div className="flex gap-4 mb-6">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('card')}
-                    className={`flex-1 px-4 py-3 rounded-lg font-semibold transition-colors ${
-                      paymentMethod === 'card'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
+            <div className="space-y-4 mb-6">
+              {cartItems.map((item) => {
+                const productTitle =
+                  (item.product as any)?.title ?? (item.product as any)?.name ?? '';
+
+                return (
+                  <div
+                    key={item.id}
+                    className="flex gap-3 p-4 border border-gray-100 rounded-xl"
                   >
-                    بطاقة ائتمانية
-                  </button>
+                    <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      {item.product?.thumbnail_url ? (
+                        <img
+                          src={item.product.thumbnail_url}
+                          alt={productTitle}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Package className="w-8 h-8 text-blue-600" />
+                      )}
+                    </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('paypal')}
-                    className={`flex-1 px-4 py-3 rounded-lg font-semibold transition-colors ${
-                      paymentMethod === 'paypal'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    PayPal
-                  </button>
-                </div>
+                    <div className="flex-1 min-w-0">
+                      {!scopeInfo && (
+                        <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
+                          <StoreIcon className="w-3 h-3" />
+                          <span>{item.store_name || 'متجر'}</span>
+                        </div>
+                      )}
 
-                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-                  {paymentMethod === 'card'
-                    ? 'سيتم تحويلك إلى صفحة الدفع الآمنة لإدخال بيانات البطاقة وإتمام العملية.'
-                    : 'سيتم تحويلك إلى صفحة PayPal لإتمام العملية.'}
-                </div>
-
-                <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-                  {scopeInfo
-                    ? `أنت الآن تُتم طلبًا خاصًا بمتجر ${scopeInfo.name} فقط.`
-                    : hasMultipleSellers
-                    ? 'السلة الحالية تحتوي منتجات من عدة تجار، وسيتم توزيع الأرباح تلقائيًا على كل تاجر حسب المنتجات الموجودة في الطلب.'
-                    : 'يمكنك إتمام الطلب بشكل طبيعي، وسيتم ربط الأرباح بالتاجر الخاص بهذا المنتج.'}
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">عنوان الشحن</label>
-                    <textarea
-                      value={formData.shippingAddress}
-                      onChange={(e) => setFormData({ ...formData, shippingAddress: e.target.value })}
-                      rows={3}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                    />
+                      <h4 className="font-semibold text-gray-900 text-sm md:text-base line-clamp-1">
+                        {productTitle}
+                      </h4>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {item.quantity} × {item.product?.price} {item.product?.currency || 'SAR'}
+                      </p>
+                      <p className="text-sm font-bold text-blue-600 mt-1">
+                        {(Number(item.product?.price || 0) * item.quantity).toFixed(2)}{' '}
+                        {item.product?.currency || 'SAR'}
+                      </p>
+                    </div>
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات إضافية</label>
-                    <textarea
-                      value={formData.notes}
-                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                      rows={3}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                    />
-                  </div>
-                </div>
-              </div>
+                );
+              })}
             </div>
 
-            <div className="lg:col-span-1">
-              <div className="bg-white rounded-xl p-6 shadow-sm sticky top-8">
-                <h3 className="text-xl font-bold text-gray-900 mb-6">ملخص الطلب</h3>
+            <div className="mb-6 p-4 border border-gray-200 rounded-xl bg-gray-50">
+              <div className="flex items-center gap-2 mb-3">
+                <Tag className="w-4 h-4 text-purple-600" />
+                <h4 className="font-semibold text-gray-900">كود الخصم</h4>
+              </div>
 
-                <div className="space-y-4 mb-6">
-                  {cartItems.map((item) => {
-                    const productTitle =
-                      (item.product as any)?.title ?? (item.product as any)?.name ?? '';
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={couponCode}
+                  onChange={(e) => {
+                    setCouponCode(e.target.value.toUpperCase());
+                    setCouponError('');
+                    if (couponSuccess && appliedCoupon) {
+                      const sameCode =
+                        e.target.value.trim().toUpperCase() ===
+                        appliedCoupon.coupon.code.trim().toUpperCase();
 
-                    return (
-                      <div key={item.id} className="flex gap-3">
-                        <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
-                          {item.product?.thumbnail_url ? (
-                            <img
-                              src={item.product.thumbnail_url}
-                              alt={productTitle}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <Package className="w-8 h-8 text-blue-600" />
-                          )}
-                        </div>
+                      if (!sameCode) {
+                        setCouponSuccess('');
+                        setAppliedCoupon(null);
+                      }
+                    }
+                  }}
+                  placeholder="أدخل كود الخصم"
+                  className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
 
-                        <div className="flex-1">
-                          {!scopeInfo && (
-                            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
-                              <StoreIcon className="w-3 h-3" />
-                              <span>{item.store_name || 'متجر'}</span>
-                            </div>
-                          )}
+                {appliedCoupon ? (
+                  <button
+                    type="button"
+                    onClick={handleRemoveCoupon}
+                    className="px-4 py-3 rounded-lg bg-red-50 text-red-600 font-semibold hover:bg-red-100 transition-colors"
+                  >
+                    إزالة
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleApplyCoupon}
+                    disabled={isApplyingCoupon}
+                    className="px-4 py-3 rounded-lg bg-purple-600 text-white font-semibold hover:bg-purple-700 transition-colors disabled:opacity-50"
+                  >
+                    {isApplyingCoupon ? 'جاري...' : 'تطبيق'}
+                  </button>
+                )}
+              </div>
 
-                          <h4 className="font-semibold text-gray-900 text-sm line-clamp-1">
-                            {productTitle}
-                          </h4>
-                          <p className="text-sm text-gray-600">
-                            {item.quantity} × {item.product?.price} {item.product?.currency || 'SAR'}
-                          </p>
-                          <p className="text-sm font-bold text-blue-600 mt-1">
-                            {(Number(item.product?.price || 0) * item.quantity).toFixed(2)}{' '}
-                            {item.product?.currency || 'SAR'}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
+              {couponError && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm mb-3">
+                  <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>{couponError}</span>
                 </div>
+              )}
 
-                <div className="mb-6 p-4 border border-gray-200 rounded-xl bg-gray-50">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Tag className="w-4 h-4 text-purple-600" />
-                    <h4 className="font-semibold text-gray-900">كود الخصم</h4>
+              {couponSuccess && appliedCoupon && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">
+                  <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-1">
+                    <p>{couponSuccess}</p>
+                    <p className="text-xs text-green-600">
+                      الكود: <span className="font-bold">{appliedCoupon.coupon.code}</span>
+                    </p>
                   </div>
-
-                  <div className="flex gap-2 mb-3">
-                    <input
-                      type="text"
-                      value={couponCode}
-                      onChange={(e) => {
-                        setCouponCode(e.target.value.toUpperCase());
-                        setCouponError('');
-                        if (couponSuccess && appliedCoupon) {
-                          const sameCode =
-                            e.target.value.trim().toUpperCase() ===
-                            appliedCoupon.coupon.code.trim().toUpperCase();
-
-                          if (!sameCode) {
-                            setCouponSuccess('');
-                            setAppliedCoupon(null);
-                          }
-                        }
-                      }}
-                      placeholder="أدخل كود الخصم"
-                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    />
-
-                    {appliedCoupon ? (
-                      <button
-                        type="button"
-                        onClick={handleRemoveCoupon}
-                        className="px-4 py-3 rounded-lg bg-red-50 text-red-600 font-semibold hover:bg-red-100 transition-colors"
-                      >
-                        إزالة
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleApplyCoupon}
-                        disabled={isApplyingCoupon}
-                        className="px-4 py-3 rounded-lg bg-purple-600 text-white font-semibold hover:bg-purple-700 transition-colors disabled:opacity-50"
-                      >
-                        {isApplyingCoupon ? 'جاري...' : 'تطبيق'}
-                      </button>
-                    )}
-                  </div>
-
-                  {couponError && (
-                    <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm mb-3">
-                      <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                      <span>{couponError}</span>
-                    </div>
-                  )}
-
-                  {couponSuccess && appliedCoupon && (
-                    <div className="flex items-start gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">
-                      <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                      <div className="space-y-1">
-                        <p>{couponSuccess}</p>
-                        <p className="text-xs text-green-600">
-                          الكود: <span className="font-bold">{appliedCoupon.coupon.code}</span>
-                        </p>
-                      </div>
-                    </div>
-                  )}
                 </div>
+              )}
+            </div>
 
-                <div className="border-t border-gray-200 pt-4 mb-6">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-gray-600">المجموع الفرعي</span>
-                    <span className="font-semibold">{formatMoney(totalAmount)}</span>
+            <div className="border-t border-gray-200 pt-4 mb-6 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">المجموع الفرعي</span>
+                <span className="font-semibold">{formatMoney(totalAmount)}</span>
+              </div>
+
+              {appliedCoupon && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">المبلغ المؤهل للخصم</span>
+                    <span className="font-semibold">{formatMoney(appliedCoupon.eligibleSubtotal)}</span>
                   </div>
-
-                  {appliedCoupon && (
-                    <>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-gray-600">المبلغ المؤهل للخصم</span>
-                        <span className="font-semibold">{formatMoney(appliedCoupon.eligibleSubtotal)}</span>
-                      </div>
-
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-green-700 font-medium">الخصم</span>
-                        <span className="font-bold text-green-700">- {formatMoney(discountAmount)}</span>
-                      </div>
-                    </>
-                  )}
 
                   <div className="flex items-center justify-between">
-                    <span className="text-lg font-bold text-gray-900">المجموع الكلي</span>
-                    <span className="text-2xl font-bold text-blue-600">
-                      {formatMoney(finalAmount)}
-                    </span>
+                    <span className="text-green-700 font-medium">الخصم</span>
+                    <span className="font-bold text-green-700">- {formatMoney(discountAmount)}</span>
                   </div>
-                </div>
+                </>
+              )}
 
-                {error && (
-                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
-                    <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-red-600 break-words">{error}</p>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={processing}
-                  className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {processing ? (
-                    <>
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>جاري المعالجة...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CreditCard className="w-5 h-5" />
-                      <span>إتمام الدفع</span>
-                    </>
-                  )}
-                </button>
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-lg font-bold text-gray-900">المجموع الكلي</span>
+                <span className="text-2xl font-bold text-blue-600">
+                  {formatMoney(finalAmount)}
+                </span>
               </div>
             </div>
+
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-600 break-words">{error}</p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={processing}
+              className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {processing ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <span>جاري المعالجة...</span>
+                </>
+              ) : (
+                <>
+                  <CreditCard className="w-5 h-5" />
+                  <span>إتمام الدفع</span>
+                </>
+              )}
+            </button>
           </div>
         </form>
       </div>
