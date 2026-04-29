@@ -905,11 +905,21 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
       const storeIds = safeArray(storesData).map((store: any) => store?.id).filter(Boolean);
 
-      const { data: sellerStatsData, error: sellerStatsErr } = await supabase.rpc('get_seller_stats', {
-        seller_id: profile.id,
-      });
+      let sellerStatsData: any = null;
 
-      if (sellerStatsErr) console.error('get_seller_stats rpc error:', sellerStatsErr);
+      try {
+        const sellerStatsResponse = await supabase.rpc('get_seller_stats', {
+          seller_id: profile.id,
+        });
+
+        if (sellerStatsResponse.error) {
+          console.error('get_seller_stats rpc error:', sellerStatsResponse.error);
+        } else {
+          sellerStatsData = sellerStatsResponse.data;
+        }
+      } catch (error) {
+        console.error('get_seller_stats unexpected error:', error);
+      }
 
       const { data: fallbackOrdersData, error: fallbackOrdersErr } = await supabase
         .from('orders')
@@ -2297,47 +2307,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
     return () => {
       document.body.style.overflow = previousBodyOverflow;
-    };
-  }, [editingStoreId, showCreateStoreModal]);
-
-  useEffect(() => {
-    const isStoreModalOpen = Boolean(editingStoreId) || showCreateStoreModal;
-    if (!isStoreModalOpen) return;
-
-    const hiddenLabels = [
-      'عرض هذا المتجر في السوق العام',
-      'المنتجات المرتبطة بالمتجر',
-      'اختر المنتجات التي تريد ربطها بهذا المتجر',
-      'لا توجد منتجات لديك حالياً',
-      'يمكنك تعديل صورة المتجر من داخل نافذة تعديل المتجر',
-    ];
-
-    const hideStoreModalExtras = () => {
-      const elements = Array.from(document.querySelectorAll('label, p, span, div, h1, h2, h3, h4, h5, h6')) as HTMLElement[];
-
-      elements.forEach((element) => {
-        const content = (element.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!content) return;
-        if (!hiddenLabels.some((label) => content.includes(label))) return;
-
-        let target: HTMLElement | null = element;
-        for (let i = 0; i < 5 && target?.parentElement; i += 1) {
-          const parent = target.parentElement as HTMLElement;
-          const parentText = (parent.textContent || '').replace(/\s+/g, ' ').trim();
-          if (parentText.includes(content)) target = parent;
-        }
-
-        if (target) target.style.display = 'none';
-      });
-    };
-
-    const initial = window.setTimeout(hideStoreModalExtras, 50);
-    const observer = new MutationObserver(() => hideStoreModalExtras());
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    return () => {
-      window.clearTimeout(initial);
-      observer.disconnect();
     };
   }, [editingStoreId, showCreateStoreModal]);
 
