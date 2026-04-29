@@ -81,9 +81,11 @@ const isAuthRoute = (page: string) =>
   page === 'auth-forgot-password' ||
   page === 'auth-reset-password';
 
-const parsePathToPage = (pathname: string) => {
+const parsePathToPage = (pathname: string, search: string = window.location.search) => {
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   const segments = normalizedPath.split('/').filter(Boolean);
+  const searchParams = new URLSearchParams(search);
+  const requestedTab = searchParams.get('tab');
 
   if (segments.length === 0) return 'home';
 
@@ -103,6 +105,9 @@ const parsePathToPage = (pathname: string) => {
     const storeSlug = decodeURIComponent(segments[1]);
 
     if (segments[2] === 'profile') {
+      if (requestedTab === 'orders') {
+        return `store-profile-orders-tab-${storeSlug}`;
+      }
       return `store-profile-${storeSlug}`;
     }
 
@@ -141,6 +146,7 @@ const parsePathToPage = (pathname: string) => {
     if (segments[1] === 'orders') return 'orders';
     if (segments[1] === 'favorites') return 'favorites';
     if (segments[1] === 'viewed-products') return 'viewed-products';
+    if (requestedTab === 'orders') return 'profile-orders-tab';
     return 'profile';
   }
 
@@ -245,6 +251,7 @@ const getStoredStoreContext = () => {
 const getStoreSlugFromScopedPage = (page: string): string | null => {
   const prefixes = [
     'storefront-',
+    'store-profile-orders-tab-',
     'store-profile-',
     'store-orders-',
     'store-favorites-',
@@ -281,6 +288,8 @@ const getActiveStoreSlugFromContext = (page: string): string | null => {
       page.startsWith('product-slug-') ||
       page.startsWith('product-') ||
       page === 'profile' ||
+      page === 'profile-orders-tab' ||
+      page.startsWith('store-profile-orders-tab-') ||
       page === 'orders' ||
       page === 'favorites' ||
       page === 'viewed-products' ||
@@ -366,6 +375,10 @@ const getPublicPathFromPage = (page: string) => {
     return `/s/${encodeURIComponent(page.replace('storefront-', ''))}`;
   }
 
+  if (page.startsWith('store-profile-orders-tab-')) {
+    return `/s/${encodeURIComponent(page.replace('store-profile-orders-tab-', ''))}/profile?tab=orders`;
+  }
+
   if (page.startsWith('store-profile-')) {
     return `/s/${encodeURIComponent(page.replace('store-profile-', ''))}/profile`;
   }
@@ -428,6 +441,7 @@ const getPublicPathFromPage = (page: string) => {
     return `/payment/${orderId}`;
   }
 
+  if (page === 'profile-orders-tab') return '/profile?tab=orders';
   if (page === 'profile') return '/profile';
   if (page === 'orders') return '/profile/orders';
   if (page === 'favorites') return '/profile/favorites';
@@ -575,7 +589,7 @@ const SubscriptionStatusPage: React.FC<{
 
 function AppContent() {
   const { user, profile, loading } = useAuth();
-  const [currentPage, setCurrentPage] = useState(() => parsePathToPage(window.location.pathname));
+  const [currentPage, setCurrentPage] = useState(() => parsePathToPage(window.location.pathname, window.location.search));
   const [hasBankDetails, setHasBankDetails] = useState<boolean | null>(null);
   const [isHandlingPaymentReturn, setIsHandlingPaymentReturn] = useState(false);
   const hasInitializedRouteSync = useRef(false);
@@ -604,6 +618,11 @@ function AppContent() {
       return;
     }
 
+    if (page === 'profile-orders-tab') {
+      setCurrentPage(`store-profile-orders-tab-${activeStoreSlug}`);
+      return;
+    }
+
     if (page === 'orders') {
       setCurrentPage(`store-orders-${activeStoreSlug}`);
       return;
@@ -629,7 +648,7 @@ function AppContent() {
 
   useEffect(() => {
     const handlePopState = () => {
-      setCurrentPage(parsePathToPage(window.location.pathname));
+      setCurrentPage(parsePathToPage(window.location.pathname, window.location.search));
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -1235,6 +1254,10 @@ function AppContent() {
       return <StorefrontPage storeSlug={storeSlugValue} onNavigate={navigateWithContext} />;
     }
 
+    if (currentPage.startsWith('store-profile-orders-tab-')) {
+      return <ProfilePage onNavigate={navigateWithContext} />;
+    }
+
     if (currentPage.startsWith('store-profile-')) {
       return <ProfilePage onNavigate={navigateWithContext} />;
     }
@@ -1439,6 +1462,7 @@ function AppContent() {
       case 'support':
         return <SupportPage />;
 
+      case 'profile-orders-tab':
       case 'profile':
         return <ProfilePage onNavigate={navigateWithContext} />;
 
