@@ -12,14 +12,6 @@ interface CreateProductModalProps {
   onSuccess: () => void;
 }
 
-interface DiscountCoupon {
-  id: string;
-  code: string;
-  discount_type: string;
-  discount_value: number;
-  is_active: boolean;
-}
-
 // Cache for detected product columns (local to this component)
 let detectedProductColumns: string[] | null = null;
 
@@ -53,7 +45,7 @@ function randomId() {
 
 async function uploadToStorage(params: {
   bucket: string;
-  userId: string;     // MUST be auth.uid() (session.user.id)
+  userId: string;
   productId: string;
   file: File;
 }) {
@@ -62,8 +54,6 @@ async function uploadToStorage(params: {
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
   const base = safeFileName(file.name.replace(/\.[^/.]+$/, '')) || 'file';
   const fileName = `${base}-${randomId()}.${ext}`;
-
-  // IMPORTANT: first folder = auth user id (matches "own folder" policy)
   const path = `${userId}/${productId}/${fileName}`;
 
   const { error: uploadError } = await supabase.storage
@@ -96,7 +86,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
   const { profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [stores, setStores] = useState<Store[]>([]);
-  const [coupons, setCoupons] = useState<DiscountCoupon[]>([]);
   const [error, setError] = useState('');
 
   const [formData, setFormData] = useState({
@@ -110,13 +99,11 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
   const [images, setImages] = useState<ProductImage[]>([]);
   const [attachments, setAttachments] = useState<ProductAttachment[]>([]);
-  const [selectedCouponId, setSelectedCouponId] = useState<string>('');
 
   useEffect(() => {
     if (isOpen) {
       resetForm();
       fetchStores();
-      fetchCoupons();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -132,7 +119,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     });
     setImages([]);
     setAttachments([]);
-    setSelectedCouponId('');
     setError('');
     setLoading(false);
   };
@@ -151,24 +137,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       return;
     }
     if (data) setStores(data);
-  };
-
-  const fetchCoupons = async () => {
-    if (!profile) return;
-
-    const { data, error } = await supabase
-      .from('discount_coupons')
-      .select('id, code, discount_type, discount_value, is_active')
-      .eq('user_id', profile.id)
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      // لو الجدول غير موجود عندك، لا نوقف إنشاء المنتج
-      console.error('fetchCoupons error:', error);
-      return;
-    }
-    if (data) setCoupons(data);
   };
 
   const isFormValid = () => {
@@ -232,7 +200,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       return;
     }
 
-    // ✅ IMPORTANT: get the AUTH user id (auth.uid()) for Storage folder policies
     const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
     if (sessionErr) {
       console.error('getSession error:', sessionErr);
@@ -297,9 +264,11 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
       const productPayload: any = {};
       productPayload[nameColumn] = formData.name.trim();
+
       if (descriptionColumn && formData.description?.trim()) {
         productPayload[descriptionColumn] = formData.description.trim();
       }
+
       productPayload[priceColumn] = price;
 
       if (availableColumns.includes('currency')) productPayload['currency'] = formData.currency;
@@ -307,7 +276,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       if (availableColumns.includes('is_active')) productPayload['is_active'] = true;
       if (availableColumns.includes('store_id')) productPayload['store_id'] = formData.store_id || null;
 
-      // NOTE: keep merchant/profile id for your app logic
       productPayload[merchantColumn] = profile.id;
 
       console.log('✅ Final payload:', productPayload);
@@ -330,7 +298,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
         display_order: typeof img.display_order === 'number' ? img.display_order : idx,
       }));
 
-      if (!preparedImages.some(i => i.is_primary) && preparedImages.length > 0) {
+      if (!preparedImages.some((i) => i.is_primary) && preparedImages.length > 0) {
         preparedImages[0].is_primary = true;
       }
 
@@ -423,19 +391,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
       if (attachmentsError) throw attachmentsError;
 
-      if (selectedCouponId && selectedCouponId !== 'none') {
-        const { error: couponError } = await supabase
-          .from('coupon_products')
-          .insert({
-            coupon_id: selectedCouponId,
-            product_id: createdProductId,
-          });
-
-        if (couponError) {
-          console.error('Error linking coupon:', couponError);
-        }
-      }
-
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -491,7 +446,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             </div>
           )}
 
-          {/* 1. معلومات المنتج الأساسية */}
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">1. معلومات المنتج الأساسية</h3>
@@ -556,7 +510,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             </div>
           </div>
 
-          {/* 2. صور المنتج */}
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">2. صور المنتج</h3>
@@ -566,7 +519,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             <ProductImagesManager images={images} onChange={setImages} maxImages={8} />
           </div>
 
-          {/* 3. مرفقات المنتج الرقمي */}
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">3. مرفقات المنتج الرقمي</h3>
@@ -576,7 +528,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             <ProductAttachmentsManager attachments={attachments} onChange={setAttachments} />
           </div>
 
-          {/* 4. التسعير والظهور */}
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">4. التسعير والظهور</h3>
@@ -613,41 +564,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             </div>
           </div>
 
-          {/* 5. كوبونات الخصم */}
-          <div className="space-y-6">
-            <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">5. كوبونات الخصم</h3>
-              <p className="text-sm text-gray-500 mt-1">اختر كوبون خصم لربطه بهذا المنتج (اختياري)</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                كوبون الخصم
-              </label>
-              <select
-                value={selectedCouponId}
-                onChange={(e) => setSelectedCouponId(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">عدم إضافة كوبونات خصم</option>
-                {coupons.map((coupon) => (
-                  <option key={coupon.id} value={coupon.id}>
-                    {coupon.code} - {coupon.discount_type === 'percentage'
-                      ? `${coupon.discount_value}%`
-                      : `${coupon.discount_value} ريال`}
-                  </option>
-                ))}
-              </select>
-
-              {coupons.length === 0 && (
-                <p className="text-xs text-gray-500 mt-2">
-                  لا توجد كوبونات خصم نشطة. يمكنك إنشاء كوبونات من صفحة إدارة الكوبونات
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Validation Messages */}
           {!isFormValid() && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-sm font-medium text-blue-900 mb-2">لإتمام إنشاء المنتج، يجب:</p>
@@ -660,7 +576,6 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             </div>
           )}
 
-          {/* Actions */}
           <div className="flex items-center gap-4 pt-6 border-t border-gray-200">
             <button
               type="button"
