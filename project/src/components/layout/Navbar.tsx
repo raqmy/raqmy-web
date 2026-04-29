@@ -30,6 +30,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
 
   const scopedStoreSlug = getScopedStoreSlug(currentPage);
   const avatarUrl = ((profile as any)?.avatar_url as string) || '';
+  const isSeller = !!user && profile?.role === 'seller';
 
   const clearStoreContext = () => {
     try {
@@ -146,16 +147,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
                 المتجر العام
               </button>
 
-              <button
-                onClick={() => onNavigate('pricing')}
-                className={`text-sm font-medium transition-colors ${
-                  currentPage === 'pricing'
-                    ? 'text-blue-600'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                الباقات
-              </button>
+              {isSeller && (
+                <button
+                  onClick={() => onNavigate('pricing')}
+                  className={`text-sm font-medium transition-colors ${
+                    currentPage === 'pricing'
+                      ? 'text-blue-600'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  الباقات
+                </button>
+              )}
             </div>
           </div>
 
