@@ -136,12 +136,21 @@ const normalizeBrowserPath = (path: string) => {
   return normalized === '' ? '/' : normalized;
 };
 
-const buildProfilePath = (scopeInfo: ScopeInfo | null) => {
-  if (scopeInfo?.slug) {
-    return `/s/${scopeInfo.slug}/profile`;
+const buildProfilePath = (scopeInfo: ScopeInfo | null, requestedTab?: 'orders' | null) => {
+  const basePath = scopeInfo?.slug ? `/s/${scopeInfo.slug}/profile` : '/profile';
+
+  if (requestedTab === 'orders') {
+    return `${basePath}?tab=orders`;
   }
 
-  return '/profile';
+  return basePath;
+};
+
+const getRequestedProfileTab = (): 'overview' | 'orders' => {
+  if (typeof window === 'undefined') return 'overview';
+
+  const searchParams = new URLSearchParams(window.location.search);
+  return searchParams.get('tab') === 'orders' ? 'orders' : 'overview';
 };
 
 const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
@@ -323,10 +332,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   useEffect(() => {
     if (scopeLoading || typeof window === 'undefined') return;
 
-    const targetPath = normalizeBrowserPath(buildProfilePath(scopeInfo));
-    const currentPath = normalizeBrowserPath(window.location.pathname);
+    const requestedTab = getRequestedProfileTab();
+    const targetPath = buildProfilePath(scopeInfo, requestedTab === 'orders' ? 'orders' : null);
+    const currentPathWithSearch = `${normalizeBrowserPath(window.location.pathname)}${window.location.search}`;
 
-    if (currentPath !== targetPath) {
+    setActiveTab(requestedTab);
+
+    if (currentPathWithSearch !== targetPath) {
       window.history.replaceState(window.history.state, '', targetPath);
     }
   }, [scopeLoading, scopeInfo]);
@@ -346,6 +358,20 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showAvatarMenu]);
+
+  const updateProfileTab = (tab: 'overview' | 'orders' | 'favorites' | 'viewed' | 'settings') => {
+    setActiveTab(tab);
+
+    if (typeof window === 'undefined') return;
+
+    const requestedTab = tab === 'orders' ? 'orders' : null;
+    const targetPath = buildProfilePath(scopeInfo, requestedTab);
+    const currentPathWithSearch = `${normalizeBrowserPath(window.location.pathname)}${window.location.search}`;
+
+    if (currentPathWithSearch !== targetPath) {
+      window.history.replaceState(window.history.state, '', targetPath);
+    }
+  };
 
   const fetchProductImageMapByIds = async (productIds: string[]) => {
     const cleanIds = [...new Set(productIds.filter(Boolean))];
@@ -1950,7 +1976,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-sm p-4 space-y-2">
               <button
-                onClick={() => setActiveTab('overview')}
+                onClick={() => updateProfileTab('overview')}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
                   activeTab === 'overview'
                     ? 'bg-blue-50 text-blue-600'
@@ -1962,7 +1988,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
               </button>
 
               <button
-                onClick={() => setActiveTab('orders')}
+                onClick={() => updateProfileTab('orders')}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
                   activeTab === 'orders'
                     ? 'bg-blue-50 text-blue-600'
@@ -1974,7 +2000,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
               </button>
 
               <button
-                onClick={() => setActiveTab('favorites')}
+                onClick={() => updateProfileTab('favorites')}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
                   activeTab === 'favorites'
                     ? 'bg-blue-50 text-blue-600'
@@ -1986,7 +2012,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
               </button>
 
               <button
-                onClick={() => setActiveTab('viewed')}
+                onClick={() => updateProfileTab('viewed')}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
                   activeTab === 'viewed'
                     ? 'bg-blue-50 text-blue-600'
@@ -2000,7 +2026,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
               <div className="border-t border-gray-200 my-2"></div>
 
               <button
-                onClick={() => setActiveTab('settings')}
+                onClick={() => updateProfileTab('settings')}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
                   activeTab === 'settings'
                     ? 'bg-blue-50 text-blue-600'
