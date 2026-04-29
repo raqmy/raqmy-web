@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { TrendingUp, Shield, Zap, Star, ArrowLeft, Download } from 'lucide-react';
+import { TrendingUp, Shield, Zap, ArrowLeft, Download } from 'lucide-react';
 import { supabase, Product } from '../lib/supabase';
 
 interface HomePageProps {
@@ -189,13 +189,9 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                       {displayName}
                     </h3>
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-start">
                       <div className="text-2xl font-bold text-blue-600">
                         {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
-                      </div>
-                      <div className="flex items-center gap-1 text-sm text-gray-500">
-                        <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                        <span>4.8</span>
                       </div>
                     </div>
                   </div>
@@ -215,37 +211,4 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           </div>
         </section>
       ) : (
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-          <div className="text-center bg-gray-50 rounded-2xl p-12">
-            <Download className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">لا توجد منتجات حالياً</h3>
-            <p className="text-gray-600 mb-6">كن أول من ينشر منتج في المتجر العام</p>
-            <button
-              onClick={() => onNavigate('auth-signup')}
-              className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all"
-            >
-              ابدأ البيع الآن
-            </button>
-          </div>
-        </section>
-      )}
-
-      <section className="bg-gray-50 py-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-3xl p-12 text-center text-white">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">جاهز للبدء؟</h2>
-            <p className="text-lg md:text-xl mb-8 text-blue-100">
-              انضم إلى آلاف التجار الذين يثقون في منصة رقمي
-            </p>
-            <button
-              onClick={() => onNavigate('auth-signup')}
-              className="px-8 py-3 bg-white text-blue-600 rounded-xl font-semibold hover:bg-gray-100 transition-all shadow-lg"
-            >
-              أنشئ متجرك مجاناً
-            </button>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-};
+        <section className="max
