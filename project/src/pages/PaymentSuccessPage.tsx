@@ -287,7 +287,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
     }
   };
 
-  const ordersTarget = scopeInfo ? `store-orders-${scopeInfo.slug}` : 'orders';
+  const ordersTarget = scopeInfo ? `store-profile-orders-tab-${scopeInfo.slug}` : 'profile-orders-tab';
   const continueShoppingTarget = scopeInfo ? `storefront-${scopeInfo.slug}` : 'marketplace';
 
   const nextStepsText = useMemo(() => {
