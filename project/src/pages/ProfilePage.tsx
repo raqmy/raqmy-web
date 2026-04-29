@@ -616,59 +616,78 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   };
 
   const fetchSellerPlan = async () => {
-    if (!user || profile?.role !== 'seller') return;
+  if (!user || profile?.role !== 'seller') return;
 
-    setSubscriptionLoading(true);
-    try {
-      const sellerProfile = profile as any;
-      const nowIso = new Date().toISOString();
+  setSubscriptionLoading(true);
 
-      const { data: latestSuccessfulPayment, error: paymentError } = await supabase
-        .from('subscription_payments')
-        .select('plan_id, status, created_at, paid_at, expires_at')
-        .eq('user_id', user.id)
-        .in('status', ['paid', 'success', 'completed', 'active'])
-        .order('paid_at', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+  try {
+    const sellerProfile = profile as any;
+    const nowIso = new Date().toISOString();
 
-      if (paymentError) {
-        console.error('Error fetching latest successful subscription payment:', paymentError);
-      }
+    console.log('=== fetchSellerPlan START ===');
+    console.log('user.id:', user.id);
+    console.log('profile.role:', profile?.role);
+    console.log('profile.plan_id:', sellerProfile?.plan_id);
+    console.log('profile.subscription_status:', sellerProfile?.subscription_status);
+    console.log('profile.subscription_expires_at:', sellerProfile?.subscription_expires_at);
 
-      const hasValidPaidSubscription = !!(
-        latestSuccessfulPayment?.plan_id &&
-        (!latestSuccessfulPayment?.expires_at || latestSuccessfulPayment.expires_at >= nowIso)
-      );
+    const { data: latestSuccessfulPayment, error: paymentError } = await supabase
+      .from('subscription_payments')
+      .select('plan_id, status, created_at, paid_at, expires_at')
+      .eq('user_id', user.id)
+      .in('status', ['paid', 'success', 'completed', 'active'])
+      .order('paid_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-      const resolvedPlanId: string | null = hasValidPaidSubscription
-        ? latestSuccessfulPayment?.plan_id || null
-        : sellerProfile?.plan_id || latestSuccessfulPayment?.plan_id || null;
+    console.log('latestSuccessfulPayment:', latestSuccessfulPayment);
+    console.log('paymentError:', paymentError);
 
-      if (!resolvedPlanId) {
-        setSellerPlan(null);
-        return;
-      }
+    const hasValidPaidSubscription = !!(
+      latestSuccessfulPayment?.plan_id &&
+      (!latestSuccessfulPayment?.expires_at || latestSuccessfulPayment.expires_at >= nowIso)
+    );
 
-      const { data, error } = await supabase
-        .from('plans')
-        .select('id, name, title, slug, price')
-        .eq('id', resolvedPlanId)
-        .maybeSingle();
+    console.log('hasValidPaidSubscription:', hasValidPaidSubscription);
 
-      if (error) {
-        console.error('Error fetching seller plan:', error);
-        return;
-      }
+    const resolvedPlanId: string | null = hasValidPaidSubscription
+      ? latestSuccessfulPayment?.plan_id || null
+      : sellerProfile?.plan_id || latestSuccessfulPayment?.plan_id || null;
 
-      setSellerPlan((data as SellerPlanRecord) || null);
-    } catch (error) {
-      console.error('Error fetching seller plan:', error);
-    } finally {
-      setSubscriptionLoading(false);
+    console.log('resolvedPlanId:', resolvedPlanId);
+
+    if (!resolvedPlanId) {
+      console.log('No resolvedPlanId, setting sellerPlan = null');
+      setSellerPlan(null);
+      return;
     }
-  };
+
+    const { data, error } = await supabase
+      .from('plans')
+      .select('id, name, title, slug, price')
+      .eq('id', resolvedPlanId)
+      .maybeSingle();
+
+    console.log('plans query data:', data);
+    console.log('plans query error:', error);
+
+    if (error) {
+      console.error('Error fetching seller plan:', error);
+      setSellerPlan(null);
+      return;
+    }
+
+    setSellerPlan((data as SellerPlanRecord) || null);
+    console.log('sellerPlan set to:', data);
+    console.log('=== fetchSellerPlan END ===');
+  } catch (error) {
+    console.error('Error fetching seller plan:', error);
+    setSellerPlan(null);
+  } finally {
+    setSubscriptionLoading(false);
+  }
+};
 
   const fetchOrders = async () => {
     if (!user) return;
