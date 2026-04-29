@@ -1,7 +1,3 @@
-نعم، هذا هو الملف الصحيح، لأن الجزء المحدد موجود فعلًا داخل **ProductDetailPage.tsx**.
-وهذا هو **الكود الكامل بعد التعديل** مع حذف **التقييم** و**المبيعات** فقط، والإبقاء على **المشاهدات**:
-
-```tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ShoppingCart,
@@ -1048,4 +1044,3 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     </div>
   );
 };
-```
