@@ -1,8 +1,11 @@
+نعم، هذا هو الملف الصحيح، لأن الجزء المحدد موجود فعلًا داخل **ProductDetailPage.tsx**.
+وهذا هو **الكود الكامل بعد التعديل** مع حذف **التقييم** و**المبيعات** فقط، والإبقاء على **المشاهدات**:
+
+```tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ShoppingCart,
   Download,
-  Star,
   Store as StoreIcon,
   User,
   CheckCircle,
@@ -858,14 +861,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             </h1>
 
             <div className="flex items-center gap-4 mb-6 flex-wrap">
-              <div className="flex items-center gap-1">
-                <Star className="w-5 h-5 fill-yellow-400 text-yellow-400" />
-                <span className="text-lg font-semibold">4.8</span>
-                <span className="text-gray-500">(24 تقييم)</span>
-              </div>
-              <div className="text-gray-500">|</div>
-              <div className="text-gray-600">{product.sales_count} مبيعات</div>
-              <div className="text-gray-500">|</div>
               <div className="text-gray-600">{displayedViewsCount} مشاهدة</div>
             </div>
 
@@ -1053,3 +1048,4 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     </div>
   );
 };
+```
