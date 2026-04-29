@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Store as StoreIcon, AlertCircle, Loader2 } from 'lucide-react';
+import { X, Store as StoreIcon, AlertCircle, Loader2, ImagePlus, Trash2 } from 'lucide-react';
 import { supabase, StoreCategory, UserLimits } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -18,6 +18,12 @@ const FALLBACK_CATEGORIES: StoreCategory[] = [
   } as StoreCategory,
 ];
 
+const STORE_IMAGES_BUCKET = 'store-images';
+const STORE_IMAGE_URL_FIELDS = ['store_image_url', 'logo_url', 'image_url', 'cover_image', 'cover_url'] as const;
+const STORE_IMAGE_PATH_FIELDS = ['store_image_path', 'logo_path', 'image_path', 'cover_image_path', 'cover_path'] as const;
+
+type StoreRecord = Record<string, any>;
+
 export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
   isOpen,
   onClose,
@@ -28,6 +34,8 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
   const [categories, setCategories] = useState<StoreCategory[]>(FALLBACK_CATEGORIES);
   const [limits, setLimits] = useState<UserLimits | null>(null);
   const [error, setError] = useState('');
+  const [storeImageFile, setStoreImageFile] = useState<File | null>(null);
+  const [storeImagePreview, setStoreImagePreview] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -47,6 +55,20 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
     fetchCategories();
     fetchUserLimits();
   }, [isOpen, profile?.id]);
+
+  useEffect(() => {
+    if (!storeImageFile) {
+      setStoreImagePreview('');
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(storeImageFile);
+    setStoreImagePreview(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [storeImageFile]);
 
   const fetchCategories = async () => {
     try {
@@ -113,6 +135,8 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
       instagram: '',
       telegram: '',
     });
+    setStoreImageFile(null);
+    setStoreImagePreview('');
     setError('');
     setLoading(false);
   };
@@ -128,9 +152,95 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
     return latinSlug || 'store';
   };
 
+  const resolveStoreImageFields = (store: StoreRecord) => {
+    const existingUrlField = STORE_IMAGE_URL_FIELDS.find((field) => field in store);
+    const existingPathField = STORE_IMAGE_PATH_FIELDS.find((field) => field in store);
+
+    return {
+      urlField: existingUrlField || 'logo_url',
+      pathField: existingPathField || null,
+    };
+  };
+
+  const updateStoreImageReference = async (
+    store: StoreRecord,
+    nextUrl: string | null,
+    nextPath: string | null
+  ) => {
+    const { urlField, pathField } = resolveStoreImageFields(store);
+    const updatePayload: Record<string, any> = {
+      [urlField]: nextUrl,
+    };
+
+    if (pathField) {
+      updatePayload[pathField] = nextPath;
+    }
+
+    let { error } = await supabase.from('stores').update(updatePayload).eq('id', store.id);
+
+    if (!error) return;
+
+    const fallbackFields = STORE_IMAGE_URL_FIELDS.filter((field) => field !== urlField);
+    for (const field of fallbackFields) {
+      const fallbackPayload: Record<string, any> = {
+        [field]: nextUrl,
+      };
+
+      if (pathField) {
+        fallbackPayload[pathField] = nextPath;
+      }
+
+      const response = await supabase.from('stores').update(fallbackPayload).eq('id', store.id);
+      if (!response.error) return;
+      error = response.error;
+    }
+
+    throw error;
+  };
+
+  const uploadStoreImage = async (store: StoreRecord, file: File) => {
+    if (!profile?.id) throw new Error('يجب تسجيل الدخول أولاً');
+
+    const fileExt = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
+    const safeExt = (fileExt || 'jpg').toLowerCase();
+    const filePath = `${profile.id}/${store.id}-${Date.now()}.${safeExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(STORE_IMAGES_BUCKET)
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from(STORE_IMAGES_BUCKET).getPublicUrl(filePath);
+    const publicUrl = data?.publicUrl || '';
+
+    await updateStoreImageReference(store, publicUrl, filePath);
+  };
+
   const handleClose = () => {
     resetForm();
     onClose();
+  };
+
+  const handleImageChange = (file: File | null) => {
+    setError('');
+
+    if (!file) {
+      setStoreImageFile(null);
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setError('يرجى اختيار ملف صورة صحيح للمتجر');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError('حجم صورة المتجر يجب ألا يتجاوز 5MB');
+      return;
+    }
+
+    setStoreImageFile(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -180,9 +290,21 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
         is_active: true,
       };
 
-      const { error: insertError } = await supabase.from('stores').insert(payload as any);
+      const { data: createdStore, error: insertError } = await supabase
+        .from('stores')
+        .insert(payload as any)
+        .select('*')
+        .single();
 
       if (insertError) throw insertError;
+
+      if (createdStore && storeImageFile) {
+        try {
+          await uploadStoreImage(createdStore, storeImageFile);
+        } catch (imageError) {
+          console.error('Store image upload after create error:', imageError);
+        }
+      }
 
       resetForm();
       onSuccess();
@@ -237,6 +359,60 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
+              صورة المتجر
+            </label>
+
+            <div className="border border-gray-200 rounded-xl p-4 bg-gray-50">
+              <div className="flex items-start gap-4">
+                <div className="w-24 h-24 rounded-xl overflow-hidden border border-gray-200 bg-white flex items-center justify-center shrink-0">
+                  {storeImagePreview ? (
+                    <img
+                      src={storeImagePreview}
+                      alt="معاينة صورة المتجر"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <StoreIcon className="w-10 h-10 text-blue-600" />
+                  )}
+                </div>
+
+                <div className="flex-1">
+                  <p className="text-sm text-gray-700 mb-3">
+                    أضف صورة لمتجرك لتظهر في لوحة التحكم وواجهة المتجر.
+                  </p>
+
+                  <div className="flex flex-wrap gap-3">
+                    <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer">
+                      <ImagePlus className="w-4 h-4" />
+                      <span>{storeImageFile ? 'تغيير الصورة' : 'رفع صورة'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleImageChange(e.target.files?.[0] || null)}
+                      />
+                    </label>
+
+                    {storeImageFile && (
+                      <button
+                        type="button"
+                        onClick={() => handleImageChange(null)}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-100 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>حذف الصورة</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-gray-500 mt-3">الحد الأقصى لحجم الصورة: 5MB</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               اسم المتجر <span className="text-red-500">*</span>
             </label>
             <input
@@ -260,112 +436,6 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="اكتب وصفاً مختصراً عن متجرك ونوع المنتجات التي تقدمها"
             />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                تصنيف المتجر
-              </label>
-              <select
-                value={formData.category}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.name || 'other'}>
-                    {(cat.icon || '🏪')} {cat.name_ar || cat.name || 'أخرى'}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                العملة الافتراضية
-              </label>
-              <select
-                value={formData.default_currency}
-                onChange={(e) =>
-                  setFormData({ ...formData, default_currency: e.target.value })
-                }
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="SAR">ريال سعودي (SAR)</option>
-                <option value="USD">دولار أمريكي (USD)</option>
-                <option value="EUR">يورو (EUR)</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
-            <input
-              type="checkbox"
-              id="show_in_marketplace"
-              checked={formData.show_in_marketplace}
-              onChange={(e) =>
-                setFormData({ ...formData, show_in_marketplace: e.target.checked })
-              }
-              className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-            />
-            <label htmlFor="show_in_marketplace" className="text-sm text-gray-700 cursor-pointer">
-              عرض هذا المتجر في السوق العام (يمكنك إلغاء التفعيل لاحقاً)
-            </label>
-          </div>
-
-          <div className="border-t border-gray-200 pt-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">وسائل التواصل (اختيارية)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  البريد الإلكتروني التجاري
-                </label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="store@example.com"
-                  dir="ltr"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Twitter / X</label>
-                <input
-                  type="text"
-                  value={formData.twitter}
-                  onChange={(e) => setFormData({ ...formData, twitter: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="@username"
-                  dir="ltr"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Instagram</label>
-                <input
-                  type="text"
-                  value={formData.instagram}
-                  onChange={(e) => setFormData({ ...formData, instagram: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="@username"
-                  dir="ltr"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Telegram</label>
-                <input
-                  type="text"
-                  value={formData.telegram}
-                  onChange={(e) => setFormData({ ...formData, telegram: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="@username"
-                  dir="ltr"
-                />
-              </div>
-            </div>
           </div>
 
           <div className="flex items-center gap-4 pt-6 border-t border-gray-200">
