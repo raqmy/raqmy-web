@@ -411,31 +411,35 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto">
       <div className="min-h-screen flex items-center justify-center p-4 sm:p-6">
         <div className="bg-white rounded-xl w-full max-w-2xl h-[calc(100vh-2rem)] sm:h-[calc(100vh-3rem)] shadow-2xl flex flex-col">
-          <div className="sticky top-0 z-10 bg-white border-b border-gray-200 p-6 shrink-0 rounded-t-xl">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <StoreIcon className="w-5 h-5 text-blue-600" />
-                </div>
-                <h2 className="text-2xl font-bold text-gray-900">تعديل المتجر</h2>
-              </div>
-
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-5 shrink-0 rounded-t-xl">
+            <div className="flex items-start justify-between gap-4">
               <button
                 onClick={onClose}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-gray-400 hover:text-gray-600 transition-colors shrink-0"
                 type="button"
               >
                 <X className="w-6 h-6" />
               </button>
-            </div>
 
-            {store && (
-              <CopyLinkButton
-                url={`${window.location.origin}/#/storefront-${store.slug}`}
-                label="نسخ رابط المتجر"
-                variant="minimal"
-              />
-            )}
+              <div className="flex flex-col items-end flex-1 min-w-0">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-2xl font-bold text-gray-900">تعديل المتجر</h2>
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                    <StoreIcon className="w-5 h-5 text-blue-600" />
+                  </div>
+                </div>
+
+                {store && (
+                  <div className="mt-3">
+                    <CopyLinkButton
+                      url={`${window.location.origin}/#/storefront-${store.slug}`}
+                      label="نسخ رابط المتجر"
+                      variant="minimal"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto">
