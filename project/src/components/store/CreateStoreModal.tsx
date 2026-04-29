@@ -9,6 +9,15 @@ interface CreateStoreModalProps {
   onSuccess: () => void;
 }
 
+const FALLBACK_CATEGORIES: StoreCategory[] = [
+  {
+    id: 'fallback-other',
+    name: 'other',
+    name_ar: 'أخرى',
+    icon: '🏪',
+  } as StoreCategory,
+];
+
 export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
   isOpen,
   onClose,
@@ -16,7 +25,7 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
 }) => {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [categories, setCategories] = useState<StoreCategory[]>([]);
+  const [categories, setCategories] = useState<StoreCategory[]>(FALLBACK_CATEGORIES);
   const [limits, setLimits] = useState<UserLimits | null>(null);
   const [error, setError] = useState('');
   const [formData, setFormData] = useState({
@@ -32,46 +41,108 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
   });
 
   useEffect(() => {
-    if (isOpen) {
-      fetchCategories();
-      fetchUserLimits();
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+
+    setError('');
+    fetchCategories();
+    fetchUserLimits();
+  }, [isOpen, profile?.id]);
 
   const fetchCategories = async () => {
-    const { data } = await supabase
-      .from('store_categories')
-      .select('*')
-      .order('name_ar');
-    if (data) setCategories(data);
+    try {
+      const { data, error } = await supabase
+        .from('store_categories')
+        .select('*')
+        .order('name_ar');
+
+      if (error) {
+        console.error('fetchCategories error:', error);
+        setCategories(FALLBACK_CATEGORIES);
+        return;
+      }
+
+      if (Array.isArray(data) && data.length > 0) {
+        setCategories(data);
+        return;
+      }
+
+      setCategories(FALLBACK_CATEGORIES);
+    } catch (err) {
+      console.error('fetchCategories exception:', err);
+      setCategories(FALLBACK_CATEGORIES);
+    }
   };
 
   const fetchUserLimits = async () => {
-    if (!profile) return;
-    const { data } = await supabase.rpc('get_user_limits', {
-      p_user_id: profile.id,
-    });
-    if (data && data.length > 0) {
-      setLimits(data[0]);
+    if (!profile?.id) {
+      setLimits(null);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.rpc('get_user_limits', {
+        p_user_id: profile.id,
+      });
+
+      if (error) {
+        console.error('fetchUserLimits error:', error);
+        setLimits(null);
+        return;
+      }
+
+      if (Array.isArray(data) && data.length > 0) {
+        setLimits(data[0]);
+      } else {
+        setLimits(null);
+      }
+    } catch (err) {
+      console.error('fetchUserLimits exception:', err);
+      setLimits(null);
     }
   };
 
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      description: '',
+      category: 'other',
+      default_currency: 'SAR',
+      show_in_marketplace: true,
+      email: '',
+      twitter: '',
+      instagram: '',
+      telegram: '',
+    });
+    setError('');
+    setLoading(false);
+  };
+
   const generateSlug = (name: string) => {
-    return name
+    const latinSlug = name
       .toLowerCase()
       .replace(/[^a-z0-9\s-]/g, '')
       .replace(/\s+/g, '-')
       .replace(/-+/g, '-')
       .trim();
+
+    return latinSlug || 'store';
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!profile) return;
+    if (!profile?.id) {
+      setError('تعذر التحقق من بيانات الحساب. حاول تسجيل الدخول مرة أخرى.');
+      return;
+    }
 
-    if (limits && !limits.can_create_store) {
+    if (limits && limits.can_create_store === false) {
       setError(
         `لقد وصلت للحد الأقصى من المتاجر (${limits.max_stores}). قم بترقية باقتك للحصول على المزيد.`
       );
@@ -88,45 +159,37 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
     try {
       const slug = generateSlug(formData.name);
 
-      const { error: insertError } = await supabase.from('stores').insert({
+      const payload = {
         user_id: profile.id,
-        name: formData.name,
+        name: formData.name.trim(),
         slug: `${profile.id.slice(0, 8)}-${slug}`,
-        description: formData.description || null,
-        category: formData.category,
-        default_currency: formData.default_currency,
-        show_in_marketplace: formData.show_in_marketplace,
-        email: formData.email || null,
+        description: formData.description.trim() || null,
+        category: formData.category || 'other',
+        default_currency: formData.default_currency || 'SAR',
+        show_in_marketplace: !!formData.show_in_marketplace,
+        email: formData.email.trim() || null,
         social_links: {
-          twitter: formData.twitter || undefined,
-          instagram: formData.instagram || undefined,
-          telegram: formData.telegram || undefined,
+          twitter: formData.twitter.trim() || undefined,
+          instagram: formData.instagram.trim() || undefined,
+          telegram: formData.telegram.trim() || undefined,
         },
         payment_methods: {
           hyperpay: true,
           paypal: false,
         },
         is_active: true,
-      } as any);
+      };
+
+      const { error: insertError } = await supabase.from('stores').insert(payload as any);
 
       if (insertError) throw insertError;
 
+      resetForm();
       onSuccess();
       onClose();
-      setFormData({
-        name: '',
-        description: '',
-        category: 'other',
-        default_currency: 'SAR',
-        show_in_marketplace: true,
-        email: '',
-        twitter: '',
-        instagram: '',
-        telegram: '',
-      });
     } catch (err: any) {
       console.error('Error creating store:', err);
-      setError(err.message || 'حدث خطأ أثناء إنشاء المتجر');
+      setError(err?.message || 'حدث خطأ أثناء إنشاء المتجر');
     } finally {
       setLoading(false);
     }
@@ -134,19 +197,23 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
 
   if (!isOpen) return null;
 
+  const canCreateStore = limits ? limits.can_create_store !== false : true;
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex items-center justify-between">
+        <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
               <StoreIcon className="w-5 h-5 text-blue-600" />
             </div>
             <h2 className="text-2xl font-bold text-gray-900">إنشاء متجر جديد</h2>
           </div>
+
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
+            type="button"
           >
             <X className="w-6 h-6" />
           </button>
@@ -206,8 +273,8 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 {categories.map((cat) => (
-                  <option key={cat.id} value={cat.name}>
-                    {cat.icon} {cat.name_ar}
+                  <option key={cat.id} value={cat.name || 'other'}>
+                    {(cat.icon || '🏪')} {cat.name_ar || cat.name || 'أخرى'}
                   </option>
                 ))}
               </select>
@@ -304,14 +371,14 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
           <div className="flex items-center gap-4 pt-6 border-t border-gray-200">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
             >
               إلغاء
             </button>
             <button
               type="submit"
-              disabled={loading || (limits && !limits.can_create_store)}
+              disabled={loading || !canCreateStore}
               className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
