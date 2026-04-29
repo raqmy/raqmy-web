@@ -665,7 +665,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     const { data, error } = await supabase
       .from('plans')
-      .select('id, name, title, slug, price')
+      .select('id, name, slug, price')
       .eq('id', resolvedPlanId)
       .maybeSingle();
 
