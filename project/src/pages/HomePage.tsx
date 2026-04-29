@@ -189,7 +189,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                       {displayName}
                     </h3>
 
-                    <div className="flex items-center justify-start">
+                    <div className="flex items-center justify-between">
                       <div className="text-2xl font-bold text-blue-600">
                         {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
                       </div>
@@ -211,4 +211,63 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           </div>
         </section>
       ) : (
-        <section className="max
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+          <div className="text-center bg-gray-50 rounded-2xl p-12">
+            <Download className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-2xl font-bold text-gray-900 mb-2">لا توجد منتجات حالياً</h3>
+            <p className="text-gray-600 mb-6">كن أول من ينشر منتج في المتجر العام</p>
+            <button
+              onClick={() => onNavigate('auth-signup')}
+              className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all"
+            >
+              ابدأ البيع الآن
+            </button>
+          </div>
+        </section>
+      )}
+
+      <section className="bg-gray-50 py-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 text-center">
+              <div className="w-14 h-14 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <TrendingUp className="w-7 h-7 text-blue-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">نمو مستدام</h3>
+              <p className="text-gray-600">أدوات تساعدك على تنمية متجرك الرقمي وتحقيق المزيد من المبيعات</p>
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 text-center">
+              <div className="w-14 h-14 bg-green-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Shield className="w-7 h-7 text-green-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">ثقة وأمان</h3>
+              <p className="text-gray-600">منصة موثوقة لحماية المنتجات الرقمية وتقديم تجربة شراء احترافية</p>
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 text-center">
+              <div className="w-14 h-14 bg-purple-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Zap className="w-7 h-7 text-purple-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">سرعة ومرونة</h3>
+              <p className="text-gray-600">ابدأ البيع بسرعة واستفد من تجربة سلسة للتاجر والعميل في كل خطوة</p>
+            </div>
+          </div>
+
+          <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-3xl p-12 text-center text-white">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">جاهز للبدء؟</h2>
+            <p className="text-lg md:text-xl mb-8 text-blue-100">
+              انضم إلى آلاف التجار الذين يثقون في منصة رقمي
+            </p>
+            <button
+              onClick={() => onNavigate('auth-signup')}
+              className="px-8 py-3 bg-white text-blue-600 rounded-xl font-semibold hover:bg-gray-100 transition-all shadow-lg"
+            >
+              أنشئ متجرك مجاناً
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+};
