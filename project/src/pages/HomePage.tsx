@@ -22,13 +22,17 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
   const fetchFeaturedProducts = async () => {
     try {
+      const MAX_VISIBLE_PRODUCTS = 8;
+      const INITIAL_CANDIDATES_LIMIT = 24;
+      const MAX_PRODUCTS_PER_SELLER = 2;
+
       const { data, error } = await supabase
         .from('products')
         .select('*')
         .eq('is_active', true)
         .eq('visibility', 'marketplace')
         .order('created_at', { ascending: false })
-        .limit(8);
+        .limit(INITIAL_CANDIDATES_LIMIT);
 
       if (error) {
         console.error('Error fetching featured products:', error);
@@ -63,46 +67,133 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
         }
       });
 
-      const enrichedProducts = await Promise.all(
-        data.map(async (product: any) => {
-          let store = null;
-          let seller = null;
+      const storeIds = Array.from(
+        new Set(
+          data
+            .map((product: any) => product.store_id)
+            .filter((storeId: any) => !!storeId)
+        )
+      );
 
-          if (product.store_id) {
-            const { data: storeData } = await supabase
+      const sellerIds = Array.from(
+        new Set(
+          data
+            .map((product: any) => product.user_id ?? product.merchant_id)
+            .filter((sellerId: any) => !!sellerId)
+        )
+      );
+
+      const [storesResponse, sellersResponse] = await Promise.all([
+        storeIds.length > 0
+          ? supabase
               .from('stores')
               .select('id, name, slug, category')
-              .eq('id', product.store_id)
-              .maybeSingle();
-            store = storeData;
-          }
-
-          const sellerId = product.user_id ?? product.merchant_id ?? null;
-
-          if (sellerId) {
-            const { data: userData } = await supabase
+              .in('id', storeIds)
+          : Promise.resolve({ data: [], error: null } as any),
+        sellerIds.length > 0
+          ? supabase
               .from('users_profile')
               .select('id, name')
-              .eq('id', sellerId)
-              .maybeSingle();
-            seller = userData;
-          }
+              .in('id', sellerIds)
+          : Promise.resolve({ data: [], error: null } as any),
+      ]);
 
-          const finalThumbnail =
-            product.thumbnail_url && String(product.thumbnail_url).trim() !== ''
-              ? product.thumbnail_url
-              : imageMap.get(product.id) ?? null;
+      if (storesResponse.error) {
+        console.error('Error fetching stores for homepage:', storesResponse.error);
+      }
+
+      if (sellersResponse.error) {
+        console.error('Error fetching sellers for homepage:', sellersResponse.error);
+      }
+
+      const storeMap = new Map<string, any>();
+      (storesResponse.data || []).forEach((store: any) => {
+        storeMap.set(store.id, store);
+      });
+
+      const sellerMap = new Map<string, any>();
+      (sellersResponse.data || []).forEach((seller: any) => {
+        sellerMap.set(seller.id, seller);
+      });
+
+      const enrichedProducts: FeaturedProduct[] = data.map((product: any) => {
+        const sellerId = product.user_id ?? product.merchant_id ?? null;
+        const finalThumbnail =
+          product.thumbnail_url && String(product.thumbnail_url).trim() !== ''
+            ? product.thumbnail_url
+            : imageMap.get(product.id) ?? null;
+
+        return {
+          ...product,
+          thumbnail_url: finalThumbnail,
+          store: product.store_id ? storeMap.get(product.store_id) ?? null : null,
+          seller: sellerId ? sellerMap.get(sellerId) ?? null : null,
+        };
+      });
+
+      const validProducts = enrichedProducts.filter((product: any) => {
+        const title = String(product.title ?? product.name ?? '').trim();
+        const price = Number(product.price ?? 0);
+
+        return title.length > 0 && price > 0;
+      });
+
+      const scoredProducts = validProducts
+        .map((product: any, index: number) => {
+          const hasImage = !!product.thumbnail_url;
+          const hasStore = !!product.store;
+          const hasSeller = !!product.seller;
+          const createdAtValue = product.created_at
+            ? new Date(product.created_at).getTime()
+            : 0;
 
           return {
             ...product,
-            thumbnail_url: finalThumbnail,
-            store,
-            seller,
+            __sortIndex: index,
+            __score:
+              (hasImage ? 1000 : 0) +
+              (hasStore ? 50 : 0) +
+              (hasSeller ? 25 : 0) +
+              createdAtValue,
           };
         })
-      );
+        .sort((a: any, b: any) => {
+          if (b.__score !== a.__score) return b.__score - a.__score;
+          return a.__sortIndex - b.__sortIndex;
+        });
 
-      setFeaturedProducts(enrichedProducts as FeaturedProduct[]);
+      const selectedProducts: FeaturedProduct[] = [];
+      const sellerCountMap = new Map<string, number>();
+
+      for (const product of scoredProducts) {
+        if (selectedProducts.length >= MAX_VISIBLE_PRODUCTS) break;
+
+        const sellerId = String(product.user_id ?? product.merchant_id ?? 'unknown-seller');
+        const currentSellerCount = sellerCountMap.get(sellerId) ?? 0;
+
+        if (currentSellerCount >= MAX_PRODUCTS_PER_SELLER) {
+          continue;
+        }
+
+        selectedProducts.push(product);
+        sellerCountMap.set(sellerId, currentSellerCount + 1);
+      }
+
+      if (selectedProducts.length < MAX_VISIBLE_PRODUCTS) {
+        const selectedIds = new Set(selectedProducts.map((product: any) => product.id));
+
+        for (const product of scoredProducts) {
+          if (selectedProducts.length >= MAX_VISIBLE_PRODUCTS) break;
+          if (selectedIds.has(product.id)) continue;
+
+          selectedProducts.push(product);
+          selectedIds.add(product.id);
+        }
+      }
+
+      const cleanedProducts = selectedProducts.map(({ __score, __sortIndex, ...product }: any) => product);
+
+      setFeaturedProducts(cleanedProducts);
     } catch (error) {
       console.error('Error fetching featured products:', error);
       setFeaturedProducts([]);
@@ -152,7 +243,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           <div className="flex items-center justify-between mb-12">
             <div>
               <h2 className="text-3xl font-bold text-gray-900 mb-2">المنتجات الرقمية</h2>
-              <p className="text-gray-600">اكتشف أحدث المنتجات من السوق العام</p>
+              <p className="text-gray-600">منتجات مختارة من السوق العام بشكل أذكى وأكثر تنوعًا</p>
             </div>
             <button
               onClick={() => onNavigate('marketplace')}
