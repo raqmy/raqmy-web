@@ -2311,6 +2311,66 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   }, [editingStoreId, showCreateStoreModal]);
 
   useEffect(() => {
+    const isStoreModalOpen = Boolean(editingStoreId) || showCreateStoreModal;
+    if (!isStoreModalOpen || typeof document === 'undefined') return;
+
+    const hiddenStoreFieldLabels = [
+      'تصنيف المتجر',
+      'العملة الافتراضية',
+      'عرض هذا المتجر في السوق العام',
+      'وسائل التواصل',
+      'وسائل التواصل (اختيارية)',
+      'البريد الإلكتروني التجاري',
+      'Twitter / X',
+      'Instagram',
+      'Telegram',
+    ];
+
+    const hideStoreModalExtras = () => {
+      const modalRoots = Array.from(document.querySelectorAll('.fixed.inset-0')) as HTMLElement[];
+
+      modalRoots.forEach((modalRoot) => {
+        const modalText = (modalRoot.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!modalText.includes('إنشاء متجر جديد') && !modalText.includes('تعديل المتجر')) {
+          return;
+        }
+
+        const elements = Array.from(
+          modalRoot.querySelectorAll('label, p, span, div, h1, h2, h3, h4, h5, h6')
+        ) as HTMLElement[];
+
+        elements.forEach((element) => {
+          const content = (element.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!content) return;
+          if (!hiddenStoreFieldLabels.some((label) => content.includes(label))) return;
+
+          let target: HTMLElement | null = element;
+          for (let i = 0; i < 6 && target?.parentElement; i += 1) {
+            const parent = target.parentElement as HTMLElement;
+            const parentText = (parent.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!parentText.includes(content)) break;
+            target = parent;
+          }
+
+          if (target) {
+            target.style.display = 'none';
+          }
+        });
+      });
+    };
+
+    const initialTimer = window.setTimeout(hideStoreModalExtras, 50);
+    const observer = new MutationObserver(() => hideStoreModalExtras());
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      window.clearTimeout(initialTimer);
+      observer.disconnect();
+    };
+  }, [editingStoreId, showCreateStoreModal]);
+
+
+  useEffect(() => {
     if (!storeImageMenuOpenId) return;
 
     const handleOutsideClick = (event: MouseEvent) => {
