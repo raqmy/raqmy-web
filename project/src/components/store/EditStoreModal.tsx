@@ -8,7 +8,7 @@ import {
   Camera,
   Upload,
 } from 'lucide-react';
-import { supabase, Store, StoreCategory } from '../../lib/supabase';
+import { supabase, Store } from '../../lib/supabase';
 import { CopyLinkButton } from '../shared/CopyLinkButton';
 
 interface EditStoreModalProps {
@@ -48,7 +48,6 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [categories, setCategories] = useState<StoreCategory[]>([]);
   const [error, setError] = useState('');
   const [store, setStore] = useState<StoreRow | null>(null);
 
@@ -61,19 +60,11 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    category: 'other',
-    default_currency: 'SAR',
-    email: '',
-    twitter: '',
-    instagram: '',
-    telegram: '',
-    is_active: true,
   });
 
   useEffect(() => {
     if (isOpen && storeId) {
       fetchStore();
-      fetchCategories();
     }
   }, [isOpen, storeId]);
 
@@ -349,29 +340,8 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
       setFormData({
         name: storeData.name || '',
         description: storeData.description || '',
-        category: storeData.category || 'other',
-        default_currency: storeData.default_currency || 'SAR',
-        email: storeData.email || '',
-        twitter: storeData.social_links?.twitter || '',
-        instagram: storeData.social_links?.instagram || '',
-        telegram: storeData.social_links?.telegram || '',
-        is_active: storeData.is_active ?? true,
       });
     }
-  };
-
-  const fetchCategories = async () => {
-    const { data, error: fetchError } = await supabase
-      .from('store_categories')
-      .select('*')
-      .order('name_ar');
-
-    if (fetchError) {
-      console.error('fetchCategories error:', fetchError);
-      return;
-    }
-
-    if (data) setCategories(data);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -388,15 +358,6 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
         .update({
           name: formData.name,
           description: formData.description || null,
-          category: formData.category,
-          default_currency: formData.default_currency,
-          email: formData.email || null,
-          social_links: {
-            twitter: formData.twitter || undefined,
-            instagram: formData.instagram || undefined,
-            telegram: formData.telegram || undefined,
-          },
-          is_active: formData.is_active,
         } as any)
         .eq('id', storeId);
 
@@ -583,116 +544,6 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
                   rows={4}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    تصنيف المتجر
-                  </label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    {categories.map((cat) => (
-                      <option key={cat.id} value={cat.name}>
-                        {cat.icon} {cat.name_ar}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    العملة الافتراضية
-                  </label>
-                  <select
-                    value={formData.default_currency}
-                    onChange={(e) =>
-                      setFormData({ ...formData, default_currency: e.target.value })
-                    }
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="SAR">ريال سعودي (SAR)</option>
-                    <option value="USD">دولار أمريكي (USD)</option>
-                    <option value="EUR">يورو (EUR)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
-                <input
-                  type="checkbox"
-                  id="is_active_store_edit"
-                  checked={formData.is_active}
-                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-                />
-                <label
-                  htmlFor="is_active_store_edit"
-                  className="text-sm text-gray-700 cursor-pointer"
-                >
-                  المتجر نشط
-                </label>
-              </div>
-
-              <div className="border-t border-gray-200 pt-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">وسائل التواصل</h3>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      البريد الإلكتروني
-                    </label>
-                    <input
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      dir="ltr"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Twitter / X
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.twitter}
-                      onChange={(e) => setFormData({ ...formData, twitter: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      dir="ltr"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Instagram
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.instagram}
-                      onChange={(e) => setFormData({ ...formData, instagram: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      dir="ltr"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Telegram
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.telegram}
-                      onChange={(e) => setFormData({ ...formData, telegram: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      dir="ltr"
-                    />
-                  </div>
-                </div>
               </div>
 
               <div className="flex items-center gap-4 pt-6 pb-2 border-t border-gray-200">
