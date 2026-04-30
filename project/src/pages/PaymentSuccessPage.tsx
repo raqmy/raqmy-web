@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Package, Home, ShoppingBag, Store as StoreIcon, ArrowLeft } from 'lucide-react';
+import {
+  CheckCircle,
+  Package,
+  Home,
+  ShoppingBag,
+  Store as StoreIcon,
+  ArrowLeft,
+  AlertTriangle,
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface PaymentSuccessPageProps {
@@ -12,6 +20,8 @@ interface ProductLite {
   name?: string | null;
   title?: string | null;
   price?: number | null;
+  quantity_limit?: number | null;
+  quantity_sold?: number | null;
 }
 
 interface Order {
@@ -43,6 +53,9 @@ interface OrderItemView {
   product_price: number;
   quantity: number;
   subtotal: number;
+  quantity_limit: number | null;
+  quantity_sold: number;
+  remaining_quantity: number | null;
 }
 
 type ScopeInfo = {
@@ -58,7 +71,10 @@ const RETRY_DELAY_MS = 1500;
 
 const getActiveStoreScopeSlug = () => {
   try {
-    return sessionStorage.getItem('active_store_slug');
+    const sessionSlug = sessionStorage.getItem('active_store_slug');
+    const pendingSlug = localStorage.getItem('pending_payment_store_slug');
+
+    return sessionSlug || pendingSlug || null;
   } catch {
     return null;
   }
@@ -104,6 +120,43 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   return null;
 };
 
+const getQuantityLimit = (product: ProductLite | null | undefined) => {
+  const rawLimit = product?.quantity_limit;
+
+  if (rawLimit === null || rawLimit === undefined) {
+    return null;
+  }
+
+  const limit = Number(rawLimit);
+
+  if (!Number.isFinite(limit) || limit < 0) {
+    return null;
+  }
+
+  return Math.floor(limit);
+};
+
+const getQuantitySold = (product: ProductLite | null | undefined) => {
+  const sold = Number(product?.quantity_sold || 0);
+
+  if (!Number.isFinite(sold) || sold < 0) {
+    return 0;
+  }
+
+  return Math.floor(sold);
+};
+
+const getRemainingQuantity = (product: ProductLite | null | undefined) => {
+  const limit = getQuantityLimit(product);
+
+  if (limit === null) {
+    return null;
+  }
+
+  const sold = getQuantitySold(product);
+  return Math.max(limit - sold, 0);
+};
+
 const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: string) => void }> = ({
   scopeInfo,
   onNavigate,
@@ -141,18 +194,18 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
   const [scopeInfo, setScopeInfo] = useState<ScopeInfo | null>(null);
 
   useEffect(() => {
-    localStorage.removeItem('pending_payment_order_id');
-    localStorage.removeItem('pending_payment_started_at');
-    localStorage.removeItem('pending_payment_return_expected');
-  }, []);
-
-  useEffect(() => {
     const loadScope = async () => {
       const resolved = await resolveStoreScope();
       setScopeInfo(resolved);
     };
 
     void loadScope();
+  }, []);
+
+  useEffect(() => {
+    localStorage.removeItem('pending_payment_order_id');
+    localStorage.removeItem('pending_payment_started_at');
+    localStorage.removeItem('pending_payment_return_expected');
   }, []);
 
   useEffect(() => {
@@ -163,6 +216,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
     }
 
     void fetchOrderDetailsWithRetry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -240,7 +294,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
       if (productIds.length > 0) {
         const { data: productsData, error: productsError } = await supabase
           .from('products')
-          .select('id, name, title, price')
+          .select('id, name, title, price, quantity_limit, quantity_sold')
           .in('id', productIds);
 
         if (productsError) {
@@ -264,6 +318,10 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
           product?.name ||
           'منتج';
 
+        const quantityLimit = getQuantityLimit(product);
+        const quantitySold = getQuantitySold(product);
+        const remainingQuantity = getRemainingQuantity(product);
+
         return {
           id: item.id,
           product_id: item.product_id,
@@ -271,6 +329,9 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
           product_price: unitPrice,
           quantity,
           subtotal,
+          quantity_limit: quantityLimit,
+          quantity_sold: quantitySold,
+          remaining_quantity: remainingQuantity,
         };
       });
 
@@ -296,6 +357,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
         'تم تسجيل الطلب بنجاح داخل حسابك',
         `يمكنك الدخول إلى صفحة "مشترياتي" داخل متجر ${scopeInfo.name} للوصول إلى ملفات المنتجات المدفوعة`,
         'إذا كان المنتج رقميًا فستظهر مرفقاته بعد التحقق من حالة الشراء',
+        'تم تحديث عدد المبيعات من جهة نظام الدفع بعد تأكيد نجاح العملية',
       ];
     }
 
@@ -303,8 +365,36 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
       'تم تسجيل الطلب بنجاح داخل حسابك',
       'يمكنك الدخول إلى صفحة "مشترياتي" للوصول إلى ملفات المنتجات المدفوعة',
       'إذا كان المنتج رقميًا فستظهر مرفقاته بعد التحقق من حالة الشراء',
+      'تم تحديث عدد المبيعات من جهة نظام الدفع بعد تأكيد نجاح العملية',
     ];
   }, [scopeInfo]);
+
+  const renderQuantityStatus = (item: OrderItemView) => {
+    if (item.quantity_limit === null) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+          <CheckCircle className="w-3.5 h-3.5" />
+          متاح بدون حد
+        </span>
+      );
+    }
+
+    if (item.remaining_quantity !== null && item.remaining_quantity <= 0) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          نفدت الكمية بعد هذا الطلب
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+        <Package className="w-3.5 h-3.5" />
+        المتبقي بعد الشراء: {item.remaining_quantity}
+      </span>
+    );
+  };
 
   if (loading) {
     return (
@@ -376,6 +466,10 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
               )}
             </div>
 
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
+              تم تأكيد الدفع، وسيتم احتساب عدد المبيعات من خلال Webhook الدفع حتى لا يتم تكرار زيادة الكمية عند تحديث الصفحة.
+            </div>
+
             <div className="border-t border-gray-200 pt-6">
               <h3 className="text-lg font-bold text-gray-900 mb-4">معلومات العميل</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -409,18 +503,31 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
                   orderItems.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                      className="p-4 bg-gray-50 rounded-lg"
                     >
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-gray-900">{item.product_name}</h4>
-                        <p className="text-sm text-gray-600">
-                          الكمية: {item.quantity} × {item.product_price.toFixed(2)} ريال
-                        </p>
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-gray-900">{item.product_name}</h4>
+                          <p className="text-sm text-gray-600">
+                            الكمية: {item.quantity} × {item.product_price.toFixed(2)} ريال
+                          </p>
+                        </div>
+
+                        <div className="text-left">
+                          <p className="text-lg font-bold text-blue-600">
+                            {item.subtotal.toFixed(2)} ريال
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-left">
-                        <p className="text-lg font-bold text-blue-600">
-                          {item.subtotal.toFixed(2)} ريال
-                        </p>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {renderQuantityStatus(item)}
+
+                        {item.quantity_limit !== null && (
+                          <span className="text-xs text-gray-500">
+                            المباع الآن: {item.quantity_sold} / الحد: {item.quantity_limit}
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))
