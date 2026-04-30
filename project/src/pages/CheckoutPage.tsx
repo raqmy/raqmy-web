@@ -9,6 +9,7 @@ import {
   Tag,
   CheckCircle2,
   XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Product } from '../lib/supabase';
@@ -28,9 +29,14 @@ interface ScopeInfo {
 interface ProductWithMeta extends Product {
   slug?: string | null;
   title?: string | null;
+  name?: string | null;
   thumbnail_url?: string | null;
   store_id?: string | null;
   user_id?: string | null;
+  merchant_id?: string | null;
+  quantity_limit?: number | null;
+  quantity_sold?: number | null;
+  is_active?: boolean | null;
 }
 
 interface CartItem {
@@ -159,7 +165,8 @@ const productMatchesScope = (
     return product.store_id === scope.storeId;
   }
 
-  return (product.user_id as string | null) === scope.merchantUserId;
+  const productOwnerId = product.user_id || product.merchant_id || null;
+  return productOwnerId === scope.merchantUserId;
 };
 
 const formatMoney = (value: number) => `${Number(value || 0).toFixed(2)} ريال`;
@@ -167,6 +174,76 @@ const formatMoney = (value: number) => `${Number(value || 0).toFixed(2)} ريا�
 const normalizeDateOnly = (value?: string | null) => {
   if (!value) return null;
   return new Date(`${value}T00:00:00`);
+};
+
+const getProductTitle = (product: ProductWithMeta | null | undefined) => {
+  return product?.title || product?.name || 'منتج';
+};
+
+const getProductSellerId = (product: ProductWithMeta | null | undefined) => {
+  return product?.user_id || product?.merchant_id || null;
+};
+
+const getQuantityLimit = (product: ProductWithMeta | null | undefined) => {
+  const limit = Number(product?.quantity_limit);
+
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return null;
+  }
+
+  return Math.floor(limit);
+};
+
+const getQuantitySold = (product: ProductWithMeta | null | undefined) => {
+  const sold = Number(product?.quantity_sold || 0);
+
+  if (!Number.isFinite(sold) || sold < 0) {
+    return 0;
+  }
+
+  return Math.floor(sold);
+};
+
+const getRemainingQuantity = (product: ProductWithMeta | null | undefined) => {
+  const limit = getQuantityLimit(product);
+
+  if (limit === null) {
+    return null;
+  }
+
+  const sold = getQuantitySold(product);
+  return Math.max(limit - sold, 0);
+};
+
+const isCartItemQuantityInvalid = (item: CartItem) => {
+  if (!item.product) return true;
+
+  const remaining = getRemainingQuantity(item.product);
+
+  if (remaining === null) return false;
+
+  return remaining <= 0 || item.quantity > remaining;
+};
+
+const getCartItemQuantityIssueMessage = (item: CartItem) => {
+  if (!item.product) {
+    return 'يوجد منتج غير متاح في السلة. احذفه ثم حاول إتمام الطلب مرة أخرى.';
+  }
+
+  const productTitle = getProductTitle(item.product);
+  const remaining = getRemainingQuantity(item.product);
+
+  if (remaining === null) return '';
+
+  if (remaining <= 0) {
+    return `المنتج "${productTitle}" نفدت كميته ولا يمكن شراؤه حالياً.`;
+  }
+
+  if (item.quantity > remaining) {
+    return `الكمية المطلوبة من المنتج "${productTitle}" أكبر من المتبقي. المتبقي حالياً ${remaining} فقط.`;
+  }
+
+  return '';
 };
 
 const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: string) => void }> = ({
@@ -251,12 +328,17 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
   const fetchCartItems = async (resolvedScope?: ScopeInfo | null) => {
     try {
+      if (!profile?.id) {
+        setCartItems([]);
+        return;
+      }
+
       const scope = resolvedScope === undefined ? scopeInfo : resolvedScope;
 
       const { data: cartData, error: cartError } = await supabase
         .from('cart_items')
         .select('*')
-        .eq('user_id', profile!.id);
+        .eq('user_id', profile.id);
 
       if (cartError) throw cartError;
 
@@ -274,7 +356,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
         const storeIds = Array.from(new Set(allProducts.map((p) => p.store_id).filter(Boolean))) as string[];
 
-        const userIds = Array.from(new Set(allProducts.map((p) => p.user_id).filter(Boolean))) as string[];
+        const userIds = Array.from(
+          new Set(allProducts.map((p) => p.user_id || p.merchant_id).filter(Boolean))
+        ) as string[];
 
         const [storesRes, merchantsRes] = await Promise.all([
           storeIds.length > 0
@@ -288,6 +372,14 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
             : Promise.resolve({ data: [], error: null } as any),
         ]);
 
+        if (storesRes.error) {
+          console.error('stores fetch error:', storesRes.error);
+        }
+
+        if (merchantsRes.error) {
+          console.error('merchants fetch error:', merchantsRes.error);
+        }
+
         const storesMap = new Map<string, any>(((storesRes.data || []) as any[]).map((store) => [store.id, store]));
 
         const merchantsMap = new Map<string, any>(
@@ -300,7 +392,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
             if (!product || !productMatchesScope(product, scope || null)) return null;
 
             const storeRecord = product.store_id ? storesMap.get(product.store_id) : null;
-            const merchantRecord = product.user_id ? merchantsMap.get(product.user_id) : null;
+            const productOwnerId = product.user_id || product.merchant_id || null;
+            const merchantRecord = productOwnerId ? merchantsMap.get(productOwnerId) : null;
 
             const storeName =
               storeRecord?.name ||
@@ -312,6 +405,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
             return {
               ...item,
+              quantity: Math.max(Number(item.quantity || 1), 1),
               product,
               store_name: storeName,
               store_slug: storeSlug,
@@ -332,6 +426,35 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     }
   };
 
+  const refreshCartProductsBeforePayment = async () => {
+    if (cartItems.length === 0) return cartItems;
+
+    const productIds = cartItems.map((item) => item.product_id).filter(Boolean);
+
+    const { data: latestProducts, error: latestProductsError } = await supabase
+      .from('products')
+      .select('*')
+      .in('id', productIds);
+
+    if (latestProductsError) {
+      console.error('latest products fetch before payment error:', latestProductsError);
+      throw latestProductsError;
+    }
+
+    const latestProductsMap = new Map<string, ProductWithMeta>(
+      ((latestProducts || []) as ProductWithMeta[]).map((product) => [product.id, product])
+    );
+
+    const refreshedItems = cartItems.map((item) => ({
+      ...item,
+      product: latestProductsMap.get(item.product_id) || null,
+    }));
+
+    setCartItems(refreshedItems);
+
+    return refreshedItems;
+  };
+
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
       return total + Number(item.product?.price || 0) * item.quantity;
@@ -342,9 +465,26 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const discountAmount = appliedCoupon?.discountAmount || 0;
   const finalAmount = Math.max(0, Number((totalAmount - discountAmount).toFixed(2)));
 
+  const quantityInvalidItems = useMemo(() => {
+    return cartItems.filter(isCartItemQuantityInvalid);
+  }, [cartItems]);
+
+  const quantityIssueMessage = useMemo(() => {
+    if (quantityInvalidItems.length === 0) return '';
+
+    const firstIssue = quantityInvalidItems[0];
+    return getCartItemQuantityIssueMessage(firstIssue) || 'يوجد منتج غير متاح أو كمية غير صالحة داخل الطلب.';
+  }, [quantityInvalidItems]);
+
+  const canSubmitCheckout = cartItems.length > 0 && quantityInvalidItems.length === 0 && !processing;
+
   const uniqueSellerIds = useMemo(() => {
     return Array.from(
-      new Set(cartItems.map((item) => item.product?.user_id).filter((id): id is string => !!id))
+      new Set(
+        cartItems
+          .map((item) => getProductSellerId(item.product))
+          .filter((id): id is string => !!id)
+      )
     );
   }, [cartItems]);
 
@@ -404,6 +544,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
     if (cartItems.length === 0) {
       setCouponError('لا يمكن تطبيق الكوبون لأن السلة فارغة');
+      return;
+    }
+
+    if (quantityInvalidItems.length > 0) {
+      setCouponError('لا يمكن تطبيق الكوبون قبل تعديل الكميات غير المتاحة في الطلب');
       return;
     }
 
@@ -615,6 +760,19 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     });
   };
 
+  const validateQuantityBeforePayment = async () => {
+    const refreshedItems = await refreshCartProductsBeforePayment();
+
+    const invalidItem = refreshedItems.find(isCartItemQuantityInvalid);
+
+    if (invalidItem) {
+      const message = getCartItemQuantityIssueMessage(invalidItem);
+      throw new Error(message || 'يوجد منتج غير متاح أو كمية غير صالحة داخل الطلب.');
+    }
+
+    return refreshedItems;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -629,21 +787,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    const missingProduct = cartItems.find((i) => !i.product);
-    if (missingProduct) {
-      setError('حدث خطأ: بعض المنتجات غير موجودة. رجاءً حدّث الصفحة وحاول مرة أخرى.');
-      return;
-    }
-
-    const missingPrice = cartItems.find((i) => (i.product?.price ?? null) === null);
-    if (missingPrice) {
-      setError('حدث خطأ: سعر أحد المنتجات غير موجود. رجاءً راجع بيانات المنتج.');
-      return;
-    }
-
-    const missingSeller = cartItems.find((i) => !i.product?.user_id);
-    if (missingSeller) {
-      setError('حدث خطأ: تعذر تحديد التاجر لأحد المنتجات.');
+    if (quantityInvalidItems.length > 0) {
+      setError(quantityIssueMessage || 'يوجد منتج غير متاح أو كمية غير صالحة داخل الطلب.');
       return;
     }
 
@@ -655,6 +800,26 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setProcessing(true);
 
     try {
+      const validatedCartItems = await validateQuantityBeforePayment();
+
+      const missingProduct = validatedCartItems.find((i) => !i.product);
+      if (missingProduct) {
+        setError('حدث خطأ: بعض المنتجات غير موجودة. رجاءً حدّث الصفحة وحاول مرة أخرى.');
+        return;
+      }
+
+      const missingPrice = validatedCartItems.find((i) => (i.product?.price ?? null) === null);
+      if (missingPrice) {
+        setError('حدث خطأ: سعر أحد المنتجات غير موجود. رجاءً راجع بيانات المنتج.');
+        return;
+      }
+
+      const missingSeller = validatedCartItems.find((i) => !getProductSellerId(i.product));
+      if (missingSeller) {
+        setError('حدث خطأ: تعذر تحديد التاجر لأحد المنتجات.');
+        return;
+      }
+
       const affiliateLocalData = getAffiliateLocalData();
       const visitorToken =
         affiliateLocalData?.visitor_token ||
@@ -667,8 +832,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         })();
 
       const resolvedAttributionsByItem = await Promise.all(
-        cartItems.map(async (item) => {
-          const sellerId = item.product?.user_id || null;
+        validatedCartItems.map(async (item) => {
+          const sellerId = getProductSellerId(item.product);
           const productId = item.product?.id || item.product_id || null;
           const storeId = item.product?.store_id || null;
 
@@ -700,7 +865,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         })
       );
 
-      const itemPricings = getOrderItemPricings(cartItems, appliedCoupon);
+      const itemPricings = getOrderItemPricings(validatedCartItems, appliedCoupon);
 
       const { data: orderNumberData, error: orderNumberError } = await supabase.rpc(
         'generate_order_number'
@@ -721,13 +886,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
       const couponEligibleItemIds = new Set(
         getCouponEligibleItems(
-          cartItems,
+          validatedCartItems,
           appliedCoupon?.eligibleProductIds || [],
           appliedCoupon?.eligibleStoreIds || []
         ).map((item) => item.id)
       );
 
-      const itemAffiliateFallbacks = cartItems.map((item) => {
+      const itemAffiliateFallbacks = validatedCartItems.map((item) => {
         const eligibleForCouponAffiliate =
           !!appliedCoupon &&
           couponEligibleItemIds.has(item.id) &&
@@ -755,10 +920,20 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           !!item && (!!item.affiliate_link_id || !!item.affiliate_marketer_id)
       );
 
+      const currentUniqueSellerIds = Array.from(
+        new Set(
+          validatedCartItems
+            .map((item) => getProductSellerId(item.product))
+            .filter((id): id is string => !!id)
+        )
+      );
+
+      const currentSingleSellerId = currentUniqueSellerIds.length === 1 ? currentUniqueSellerIds[0] : null;
+
       const canUseOrderLevelAffiliate =
-        uniqueSellerIds.length === 1 &&
+        currentUniqueSellerIds.length === 1 &&
         validItemAttributions.length > 0 &&
-        validItemAttributions.length === cartItems.length &&
+        validItemAttributions.length === validatedCartItems.length &&
         validItemAttributions.every(
           (item) =>
             item.attribution_id === validItemAttributions[0].attribution_id &&
@@ -781,13 +956,23 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           ].join(' | ')
         : '';
 
-      const finalNotes = [couponNote].filter(Boolean).join('\n');
+      const quantityNote = validatedCartItems
+        .map((item) => {
+          const limit = getQuantityLimit(item.product);
+          const sold = getQuantitySold(item.product);
+          if (limit === null) return null;
+          return `Product ${item.product_id}: ordered ${item.quantity}, quantity_limit ${limit}, quantity_sold_before_order ${sold}`;
+        })
+        .filter(Boolean)
+        .join(' | ');
+
+      const finalNotes = [couponNote, quantityNote].filter(Boolean).join('\n');
 
       const orderPayload = {
         order_number: orderNumber,
         user_id: profile.id,
-        seller_id: singleSellerId,
-        merchant_id: singleSellerId,
+        seller_id: currentSingleSellerId,
+        merchant_id: currentSingleSellerId,
         total_amount: finalAmount,
         status: 'pending_payment',
         currency: 'SAR',
@@ -821,9 +1006,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         throw orderError;
       }
 
-      const orderItems = cartItems.map((item, index) => {
+      const orderItems = validatedCartItems.map((item, index) => {
         const originalPrice = Number(item.product!.price);
-        const sellerId = item.product!.user_id!;
+        const sellerId = getProductSellerId(item.product)!;
         const itemAffiliate = mergedItemAffiliations[index];
         const pricing = itemPricings[index];
 
@@ -835,7 +1020,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           price: pricing.discountedUnitPrice,
           product_price: originalPrice,
           subtotal: pricing.discountedSubtotal,
-          product_name: (item.product as any)?.title ?? (item.product as any)?.name ?? 'منتج',
+          product_name: getProductTitle(item.product),
           affiliate_link_id: itemAffiliate?.affiliate_link_id || null,
           affiliate_marketer_id: itemAffiliate?.affiliate_marketer_id || null,
           affiliate_rule_id: itemAffiliate?.affiliate_rule_id || null,
@@ -856,7 +1041,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       }
 
       if (scopeInfo) {
-        const scopedProductIds = cartItems.map((item) => item.product_id);
+        const scopedProductIds = validatedCartItems.map((item) => item.product_id);
 
         const { error: cartDeleteError } = await supabase
           .from('cart_items')
@@ -885,6 +1070,49 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     } finally {
       setProcessing(false);
     }
+  };
+
+  const renderQuantityStatus = (item: CartItem) => {
+    const remaining = getRemainingQuantity(item.product);
+    const isInvalid = isCartItemQuantityInvalid(item);
+
+    if (!item.product) {
+      return (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          <span>غير متاح</span>
+        </div>
+      );
+    }
+
+    if (remaining === null) {
+      return (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          <span>متاح بدون حد</span>
+        </div>
+      );
+    }
+
+    if (remaining <= 0) {
+      return (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          <span>نفدت الكمية</span>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+          isInvalid ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'
+        }`}
+      >
+        {isInvalid ? <AlertTriangle className="w-3.5 h-3.5" /> : <Package className="w-3.5 h-3.5" />}
+        <span>{isInvalid ? `المتبقي ${remaining} فقط` : `المتبقي ${remaining}`}</span>
+      </div>
+    );
   };
 
   if (loading) {
@@ -942,15 +1170,24 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm">
             <h3 className="text-xl font-bold text-gray-900 mb-6">ملخص الطلب</h3>
 
+            {quantityIssueMessage && (
+              <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <span>{quantityIssueMessage}</span>
+              </div>
+            )}
+
             <div className="space-y-4 mb-6">
               {cartItems.map((item) => {
-                const productTitle =
-                  (item.product as any)?.title ?? (item.product as any)?.name ?? '';
+                const productTitle = getProductTitle(item.product);
+                const isInvalid = isCartItemQuantityInvalid(item);
 
                 return (
                   <div
                     key={item.id}
-                    className="flex gap-3 p-4 border border-gray-100 rounded-xl"
+                    className={`flex gap-3 p-4 border rounded-xl ${
+                      isInvalid ? 'border-red-200 bg-red-50/40' : 'border-gray-100'
+                    }`}
                   >
                     <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
                       {item.product?.thumbnail_url ? (
@@ -975,13 +1212,23 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                       <h4 className="font-semibold text-gray-900 text-sm md:text-base line-clamp-1">
                         {productTitle}
                       </h4>
+
                       <p className="text-sm text-gray-600 mt-1">
                         {item.quantity} × {item.product?.price} {item.product?.currency || 'SAR'}
                       </p>
+
                       <p className="text-sm font-bold text-blue-600 mt-1">
                         {(Number(item.product?.price || 0) * item.quantity).toFixed(2)}{' '}
                         {item.product?.currency || 'SAR'}
                       </p>
+
+                      {renderQuantityStatus(item)}
+
+                      {isInvalid && (
+                        <p className="mt-2 text-xs text-red-700">
+                          {getCartItemQuantityIssueMessage(item)}
+                        </p>
+                      )}
                     </div>
                   </div>
                 );
@@ -1028,13 +1275,20 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                   <button
                     type="button"
                     onClick={handleApplyCoupon}
-                    disabled={isApplyingCoupon}
-                    className="px-4 py-3 rounded-lg bg-purple-600 text-white font-semibold hover:bg-purple-700 transition-colors disabled:opacity-50"
+                    disabled={isApplyingCoupon || quantityInvalidItems.length > 0}
+                    className="px-4 py-3 rounded-lg bg-purple-600 text-white font-semibold hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isApplyingCoupon ? 'جاري...' : 'تطبيق'}
                   </button>
                 )}
               </div>
+
+              {quantityInvalidItems.length > 0 && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm mb-3">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>عدّل الكميات غير المتاحة قبل تطبيق كود الخصم أو إتمام الدفع.</span>
+                </div>
+              )}
 
               {couponError && (
                 <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm mb-3">
@@ -1093,7 +1347,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
             <button
               type="submit"
-              disabled={processing}
+              disabled={!canSubmitCheckout}
               className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {processing ? (
