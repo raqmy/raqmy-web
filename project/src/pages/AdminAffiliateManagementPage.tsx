@@ -92,6 +92,8 @@ type AffiliateRuleTierRow = {
   rule_id: string;
   day_from?: number | null;
   day_to?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
   commission_type?: 'percentage' | 'fixed' | string | null;
   commission_value?: number | null;
   is_active?: boolean | null;
@@ -116,8 +118,8 @@ type StoreOption = {
 type TierDraft = {
   id?: string;
   localId: string;
-  day_from: string;
-  day_to: string;
+  start_date: string;
+  end_date: string;
   commission_type: 'percentage' | 'fixed';
   commission_value: string;
   is_active: boolean;
@@ -234,6 +236,29 @@ const conversionRate = (clicks?: number | null, sales?: number | null) => {
 };
 
 const createLocalTierId = () => Math.random().toString(36).slice(2, 10);
+
+const getTodayDateInputValue = () => {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  const localDate = new Date(now.getTime() - offset * 60 * 1000);
+  return localDate.toISOString().slice(0, 10);
+};
+
+const formatDateForDisplay = (value?: string | null) => {
+  if (!value) return 'مفتوح';
+  try {
+    return new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('ar-SA');
+  } catch {
+    return value;
+  }
+};
+
+const buildLegacyDayRangeFromDateTier = (tier: TierDraft) => ({
+  day_from: 0,
+  day_to: 999999,
+  start_date: tier.start_date || null,
+  end_date: tier.end_date || null,
+});
 
 const uniqueIds = (values: Array<string | null | undefined>) =>
   [...new Set(values.filter((value): value is string => Boolean(value)))];
@@ -535,6 +560,7 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
         .from('affiliate_rule_tiers')
         .select('*')
         .in('rule_id', ruleIds)
+        .order('start_date', { ascending: true, nullsFirst: false })
         .order('day_from', { ascending: true });
 
       if (tiersError) {
@@ -1438,7 +1464,7 @@ const UnifiedCampaignsList: React.FC<{
                 <div className="mt-5 rounded-3xl border border-gray-200 bg-white p-5">
                   <div className="flex items-center gap-2 mb-4">
                     <CalendarRange className="w-5 h-5 text-gray-500" />
-                    <h4 className="font-bold text-gray-900">شرائح العمولة حسب الأيام</h4>
+                    <h4 className="font-bold text-gray-900">شرائح العمولة حسب التاريخ</h4>
                   </div>
 
                   {!campaign.rule?.tiers || campaign.rule.tiers.length === 0 ? (
@@ -1452,15 +1478,8 @@ const UnifiedCampaignsList: React.FC<{
                           key={tier.id}
                           className="grid grid-cols-1 md:grid-cols-4 gap-3 rounded-2xl border border-gray-100 bg-gray-50/70 px-4 py-4"
                         >
-                          <MiniInfo label="من اليوم" value={String(tier.day_from ?? 0)} />
-                          <MiniInfo
-                            label="إلى اليوم"
-                            value={
-                              tier.day_to !== null && tier.day_to !== undefined
-                                ? String(tier.day_to)
-                                : 'مفتوح'
-                            }
-                          />
+                          <MiniInfo label="من التاريخ" value={formatDateForDisplay(tier.start_date)} />
+                          <MiniInfo label="إلى التاريخ" value={formatDateForDisplay(tier.end_date)} />
                           <MiniInfo
                             label="العمولة"
                             value={formatCommission(tier.commission_type, tier.commission_value)}
@@ -1566,8 +1585,8 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
     campaign?.rule?.tiers?.map((tier) => ({
       id: tier.id,
       localId: tier.id || createLocalTierId(),
-      day_from: tier.day_from?.toString() ?? '0',
-      day_to: tier.day_to?.toString() ?? '',
+      start_date: tier.start_date ? tier.start_date.slice(0, 10) : '',
+      end_date: tier.end_date ? tier.end_date.slice(0, 10) : '',
       commission_type: (tier.commission_type as 'percentage' | 'fixed') || 'percentage',
       commission_value: tier.commission_value?.toString() ?? '',
       is_active: tier.is_active ?? true,
@@ -1639,8 +1658,8 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
       ...prev,
       {
         localId: createLocalTierId(),
-        day_from: '0',
-        day_to: '',
+        start_date: getTodayDateInputValue(),
+        end_date: '',
         commission_type: 'percentage',
         commission_value: '',
         is_active: true,
@@ -1658,21 +1677,57 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
     setTiers((prev) => prev.filter((tier) => tier.localId !== localId));
   };
 
-  const validateTiers = () => {
-    for (const tier of tiers) {
-      if (tier.commission_value.trim() === '') {
-        throw new Error('كل شريحة يجب أن تحتوي على قيمة عمولة');
-      }
+const validateTiers = () => {
+  const today = getTodayDateInputValue();
 
-      if (Number(tier.day_from) < 0) {
-        throw new Error('يوم البداية في الشرائح لا يمكن أن يكون أقل من 0');
-      }
+  const normalized = tiers
+    .map((tier) => ({
+      ...tier,
+      startDate: tier.start_date.trim(),
+      endDate: tier.end_date.trim(),
+      commissionValueNum: Number(tier.commission_value),
+    }))
+    .sort((a, b) => a.startDate.localeCompare(b.startDate));
 
-      if (tier.day_to.trim() !== '' && Number(tier.day_to) < Number(tier.day_from)) {
-        throw new Error('يوم النهاية يجب أن يكون أكبر من أو يساوي يوم البداية');
-      }
+  for (const tier of normalized) {
+    if (!tier.startDate) {
+      throw new Error('كل شريحة يجب أن تحتوي على تاريخ بداية');
     }
-  };
+
+    if (tier.startDate < today) {
+      throw new Error('لا يمكن اختيار تاريخ بداية سابق لتاريخ اليوم');
+    }
+
+    if (tier.endDate && tier.endDate < today) {
+      throw new Error('لا يمكن اختيار تاريخ نهاية سابق لتاريخ اليوم');
+    }
+
+    if (tier.endDate && tier.endDate < tier.startDate) {
+      throw new Error('تاريخ النهاية يجب أن يكون أكبر من أو يساوي تاريخ البداية');
+    }
+
+    if (tier.commission_value.trim() === '') {
+      throw new Error('كل شريحة يجب أن تحتوي على قيمة عمولة');
+    }
+
+    if (Number.isNaN(tier.commissionValueNum) || tier.commissionValueNum < 0) {
+      throw new Error('قيمة العمولة في الشرائح غير صحيحة');
+    }
+  }
+
+  for (let i = 0; i < normalized.length - 1; i++) {
+    const current = normalized[i];
+    const next = normalized[i + 1];
+
+    if (!current.endDate) {
+      throw new Error('لا يمكن إضافة شريحة بعد شريحة بدون تاريخ نهاية');
+    }
+
+    if (next.startDate <= current.endDate) {
+      throw new Error('يوجد تداخل بين شرائح العمولة، عدّل التواريخ بحيث لا تتقاطع');
+    }
+  }
+};
 
   const createOrUpdateMarketer = async () => {
     if (!user?.id) throw new Error('المستخدم غير موجود');
@@ -1858,8 +1913,7 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
     for (const tier of tiers) {
       const tierPayload = {
         rule_id: ruleId,
-        day_from: Number(tier.day_from || 0),
-        day_to: tier.day_to.trim() === '' ? null : Number(tier.day_to),
+        ...buildLegacyDayRangeFromDateTier(tier),
         commission_type: tier.commission_type,
         commission_value: Number(tier.commission_value),
         is_active: tier.is_active,
@@ -2303,9 +2357,9 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
           <div className="mt-6 rounded-3xl border border-gray-200 p-5">
             <div className="flex items-center justify-between gap-4 mb-5">
               <div>
-                <h3 className="text-lg font-bold text-gray-900">شرائح العمولة حسب الأيام</h3>
+                <h3 className="text-lg font-bold text-gray-900">شرائح العمولة حسب التاريخ</h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  اختيارية. إذا لم تضف شرائح فسيتم استخدام العمولة الأساسية.
+                  اختيارية. إذا لم تضف شرائح فسيتم استخدام العمولة الأساسية، وإذا أضفت شريحة فسيتم تطبيقها حسب تاريخ الطلب.
                 </p>
               </div>
 
@@ -2341,31 +2395,38 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-2">من اليوم</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={tier.day_from}
-                          onChange={(e) => updateTier(tier.localId, { day_from: e.target.value })}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                        />
-                      </div>
+<div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+  <div>
+    <label className="block text-xs text-gray-500 mb-2">من التاريخ</label>
+    <input
+      type="date"
+      min={getTodayDateInputValue()}
+      value={tier.start_date}
+      onChange={(e) =>
+        updateTier(tier.localId, {
+          start_date: e.target.value,
+          end_date:
+            tier.end_date && e.target.value && tier.end_date < e.target.value
+              ? e.target.value
+              : tier.end_date,
+        })
+      }
+      className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+      required
+    />
+  </div>
 
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-2">إلى اليوم</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={tier.day_to}
-                          onChange={(e) => updateTier(tier.localId, { day_to: e.target.value })}
-                          className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-                          placeholder="مفتوح"
-                        />
-                      </div>
+  <div>
+    <label className="block text-xs text-gray-500 mb-2">إلى التاريخ</label>
+    <input
+      type="date"
+      min={tier.start_date || getTodayDateInputValue()}
+      value={tier.end_date}
+      onChange={(e) => updateTier(tier.localId, { end_date: e.target.value })}
+      className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+      placeholder="مفتوح"
+    />
+  </div>
 
                       <div>
                         <label className="block text-xs text-gray-500 mb-2">نوع العمولة</label>
