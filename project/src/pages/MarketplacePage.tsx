@@ -1,5 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Download, Star } from 'lucide-react';
+import {
+  Search,
+  Download,
+  AlertTriangle,
+  CheckCircle2,
+  Package,
+} from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 
 interface ProductWithDetails extends Product {
@@ -8,6 +14,8 @@ interface ProductWithDetails extends Product {
   thumbnail_url?: string | null;
   display_name?: string;
   slug?: string;
+  quantity_limit?: number | null;
+  quantity_sold?: number | null;
 }
 
 interface MarketplacePageProps {
@@ -39,6 +47,78 @@ const getMarketplaceFiltersFromUrl = () => {
   };
 };
 
+const getQuantityLimit = (product: ProductWithDetails | null | undefined) => {
+  const rawLimit = product?.quantity_limit;
+
+  if (rawLimit === null || rawLimit === undefined) {
+    return null;
+  }
+
+  const limit = Number(rawLimit);
+
+  if (!Number.isFinite(limit) || limit < 0) {
+    return null;
+  }
+
+  return Math.floor(limit);
+};
+
+const getQuantitySold = (product: ProductWithDetails | null | undefined) => {
+  const sold = Number(product?.quantity_sold || 0);
+
+  if (!Number.isFinite(sold) || sold < 0) {
+    return 0;
+  }
+
+  return Math.floor(sold);
+};
+
+const getRemainingQuantity = (product: ProductWithDetails | null | undefined) => {
+  const limit = getQuantityLimit(product);
+
+  if (limit === null) {
+    return null;
+  }
+
+  const sold = getQuantitySold(product);
+  return Math.max(limit - sold, 0);
+};
+
+const isProductSoldOut = (product: ProductWithDetails | null | undefined) => {
+  const remaining = getRemainingQuantity(product);
+  return remaining !== null && remaining <= 0;
+};
+
+const ProductAvailabilityBadge: React.FC<{ product: ProductWithDetails }> = ({ product }) => {
+  const remaining = getRemainingQuantity(product);
+  const soldOut = isProductSoldOut(product);
+
+  if (remaining === null) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700 border border-green-100">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        متاح بدون حد
+      </span>
+    );
+  }
+
+  if (soldOut) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 border border-red-100">
+        <AlertTriangle className="w-3.5 h-3.5" />
+        نفدت الكمية
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 border border-blue-100">
+      <Package className="w-3.5 h-3.5" />
+      المتبقي {remaining}
+    </span>
+  );
+};
+
 export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) => {
   const [products, setProducts] = useState<ProductWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +130,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
 
   useEffect(() => {
     fetchProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellerId]);
 
   const fetchProducts = async () => {
@@ -186,6 +267,13 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
       const aCreatedAt = new Date((a as any).created_at ?? 0).getTime();
       const bCreatedAt = new Date((b as any).created_at ?? 0).getTime();
 
+      const aSoldOut = isProductSoldOut(a);
+      const bSoldOut = isProductSoldOut(b);
+
+      if (aSoldOut !== bSoldOut) {
+        return aSoldOut ? 1 : -1;
+      }
+
       switch (sortBy) {
         case 'price_low':
           return aPrice - bPrice;
@@ -241,7 +329,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
                 >
                   <option value="newest">الأحدث</option>
-                  <option value="popular">الأكثر شعبية</option>
+                  <option value="popular">الأكثر مبيعاً</option>
                   <option value="price_low">السعر: من الأقل للأعلى</option>
                   <option value="price_high">السعر: من الأعلى للأقل</option>
                 </select>
@@ -266,42 +354,55 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {filteredProducts.map((product) => (
-              <div
-                key={product.id}
-                className="bg-white rounded-xl overflow-hidden shadow cursor-pointer hover:shadow-lg transition-shadow border border-gray-100"
-                onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
-              >
-                <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden">
-                  {product.thumbnail_url ? (
-                    <img
-                      src={product.thumbnail_url}
-                      alt={product.display_name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <Download className="w-12 h-12 text-gray-400" />
-                  )}
-                </div>
+            {filteredProducts.map((product) => {
+              const soldOut = isProductSoldOut(product);
 
-                <div className="p-4">
-                  <h3 className="font-bold text-lg text-gray-900 line-clamp-1 mb-2">
-                    {product.display_name}
-                  </h3>
+              return (
+                <div
+                  key={product.id}
+                  className="bg-white rounded-xl overflow-hidden shadow cursor-pointer hover:shadow-lg transition-shadow border border-gray-100"
+                  onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
+                >
+                  <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden relative">
+                    {soldOut && (
+                      <div className="absolute top-3 right-3 z-10 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow">
+                        نفدت الكمية
+                      </div>
+                    )}
 
-                  <div className="flex items-center justify-between">
-                    <div className="text-blue-600 font-bold text-xl">
-                      {Number(product.price ?? 0)} ريال
+                    {product.thumbnail_url ? (
+                      <img
+                        src={product.thumbnail_url}
+                        alt={product.display_name}
+                        className={`w-full h-full object-cover ${soldOut ? 'opacity-70 grayscale' : ''}`}
+                      />
+                    ) : (
+                      <Download className="w-12 h-12 text-gray-400" />
+                    )}
+                  </div>
+
+                  <div className="p-4">
+                    <h3 className="font-bold text-lg text-gray-900 line-clamp-1 mb-2">
+                      {product.display_name}
+                    </h3>
+
+                    {(product.store?.name || product.seller?.name) && (
+                      <p className="text-sm text-gray-500 line-clamp-1 mb-3">
+                        {product.store?.name || product.seller?.name}
+                      </p>
+                    )}
+
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                      <div className="text-blue-600 font-bold text-xl">
+                        {Number(product.price ?? 0)} ريال
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-1 text-sm text-gray-500">
-                      <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                      <span>4.8</span>
-                    </div>
+                    <ProductAvailabilityBadge product={product} />
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
