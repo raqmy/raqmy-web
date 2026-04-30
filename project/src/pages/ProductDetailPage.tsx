@@ -10,6 +10,7 @@ import {
   Heart,
   FileText,
   Lock,
+  AlertTriangle,
 } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,6 +25,8 @@ interface ProductWithDetails extends Product {
   slug?: string;
   store?: Store | null;
   seller?: UserProfile | null;
+  quantity_limit?: number | null;
+  quantity_sold?: number | null;
 }
 
 interface ProductImage {
@@ -82,6 +85,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   const storeContextSlug = useMemo(() => getStoreContextSlug(), [productId, productSlug]);
   const isStoreContext = !!storeContextSlug;
+
+  const quantityLimit = Number((product as any)?.quantity_limit ?? 0);
+  const quantitySold = Number((product as any)?.quantity_sold ?? 0);
+  const hasQuantityLimit = Boolean(product && (product as any)?.quantity_limit !== null && (product as any)?.quantity_limit !== undefined);
+  const remainingQuantity = hasQuantityLimit ? Math.max(quantityLimit - quantitySold, 0) : null;
+  const isSoldOut = hasQuantityLimit && remainingQuantity !== null && remainingQuantity <= 0;
 
   useEffect(() => {
     fetchProduct();
@@ -460,6 +469,15 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     }
   };
 
+  const ensureProductAvailable = () => {
+    if (isSoldOut) {
+      alert('عذراً، نفدت الكمية المتاحة من هذا المنتج حالياً.');
+      return false;
+    }
+
+    return true;
+  };
+
   const handleBuyNow = async () => {
     if (!user) {
       persistStoreContext();
@@ -477,6 +495,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       return;
     }
 
+    if (!ensureProductAvailable()) {
+      return;
+    }
+
     setPurchasing(true);
 
     try {
@@ -490,6 +512,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         .maybeSingle();
 
       if (existingItem) {
+        if (hasQuantityLimit && Number(existingItem.quantity || 0) + 1 > Number(remainingQuantity || 0)) {
+          alert('لا يمكن إضافة كمية أكبر من المتبقي لهذا المنتج.');
+          return;
+        }
+
         const { error } = await supabase
           .from('cart_items')
           .update({ quantity: existingItem.quantity + 1 })
@@ -638,6 +665,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       return;
     }
 
+    if (!ensureProductAvailable()) {
+      return;
+    }
+
     try {
       persistStoreContext();
 
@@ -649,6 +680,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         .maybeSingle();
 
       if (existingItem) {
+        if (hasQuantityLimit && Number(existingItem.quantity || 0) + 1 > Number(remainingQuantity || 0)) {
+          alert('لا يمكن إضافة كمية أكبر من المتبقي لهذا المنتج.');
+          return;
+        }
+
         const { error } = await supabase
           .from('cart_items')
           .update({ quantity: existingItem.quantity + 1 })
@@ -770,18 +806,24 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           <div className="space-y-4">
             <div className="bg-white rounded-xl overflow-hidden shadow-sm">
-              <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+              <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center relative">
+                {isSoldOut && (
+                  <div className="absolute top-4 right-4 z-10 rounded-full bg-red-600 px-4 py-2 text-sm font-bold text-white shadow-lg">
+                    نفدت الكمية
+                  </div>
+                )}
+
                 {images.length > 0 ? (
                   <img
                     src={images[selectedImageIndex]?.image_url}
                     alt={productTitle}
-                    className="w-full h-full object-cover"
+                    className={`w-full h-full object-cover ${isSoldOut ? 'opacity-70 grayscale' : ''}`}
                   />
                 ) : product.thumbnail_url ? (
                   <img
                     src={product.thumbnail_url}
                     alt={productTitle}
-                    className="w-full h-full object-cover"
+                    className={`w-full h-full object-cover ${isSoldOut ? 'opacity-70 grayscale' : ''}`}
                   />
                 ) : (
                   <Download className="w-24 h-24 text-blue-600" />
@@ -858,6 +900,24 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
             <div className="flex items-center gap-4 mb-6 flex-wrap">
               <div className="text-gray-600">{displayedViewsCount} مشاهدة</div>
+
+              {hasQuantityLimit ? (
+                isSoldOut ? (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-red-50 px-4 py-2 text-sm font-bold text-red-700 border border-red-100">
+                    <AlertTriangle className="w-4 h-4" />
+                    نفدت الكمية
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-green-50 px-4 py-2 text-sm font-bold text-green-700 border border-green-100">
+                    <CheckCircle className="w-4 h-4" />
+                    المتبقي للشراء: {remainingQuantity}
+                  </span>
+                )
+              ) : (
+                <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 border border-blue-100">
+                  متاح بدون حد
+                </span>
+              )}
             </div>
 
             <div className="mb-6">
@@ -876,6 +936,20 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               )}
             </div>
 
+            {isSoldOut && (
+              <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold mb-1">هذا المنتج غير متاح للشراء حالياً</p>
+                    <p className="text-sm leading-6">
+                      وصلت الكمية المحددة لهذا المنتج إلى الحد الأقصى، لذلك تم تعطيل الشراء والإضافة للسلة.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="mb-8 rounded-2xl border border-gray-200 bg-gray-50 p-6">
               <h2 className="text-lg font-bold text-gray-900 mb-3">وصف المنتج</h2>
               <p className="text-gray-700 leading-8 whitespace-pre-line">{productDescription}</p>
@@ -888,7 +962,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   <div>
                     <p className="font-semibold text-green-800 mb-1">تم شراء المنتج سابقًا</p>
                     <p className="text-sm text-green-700">
-                      يمكنك الوصول إلى المحتوى الآن، وما زال بإمكانك شراء المنتج مرة أخرى إذا رغبت.
+                      يمكنك الوصول إلى المحتوى الآن
+                      {!isSoldOut ? '، وما زال بإمكانك شراء المنتج مرة أخرى إذا رغبت.' : '.'}
                     </p>
                   </div>
                 </div>
@@ -898,13 +973,18 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             <div className="flex flex-col sm:flex-row gap-4 mb-8">
               <button
                 onClick={handleBuyNow}
-                disabled={purchasing || isOwner}
+                disabled={purchasing || isOwner || isSoldOut}
                 className="flex-1 px-6 py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {isOwner ? (
                   <>
                     <CheckCircle className="w-5 h-5" />
                     <span>هذا منتجك</span>
+                  </>
+                ) : isSoldOut ? (
+                  <>
+                    <AlertTriangle className="w-5 h-5" />
+                    <span>نفدت الكمية</span>
                   </>
                 ) : purchasing ? (
                   <span>جاري المعالجة...</span>
@@ -924,10 +1004,17 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               {!isOwner && (
                 <button
                   onClick={handleAddToCart}
-                  className="px-6 py-4 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50 flex items-center justify-center gap-2"
+                  disabled={isSoldOut}
+                  className="px-6 py-4 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   <ShoppingCart className="w-5 h-5" />
-                  <span>{hasPurchased ? 'أضف مرة أخرى إلى السلة' : 'أضف إلى السلة'}</span>
+                  <span>
+                    {isSoldOut
+                      ? 'غير متاح'
+                      : hasPurchased
+                      ? 'أضف مرة أخرى إلى السلة'
+                      : 'أضف إلى السلة'}
+                  </span>
                 </button>
               )}
 
@@ -957,6 +1044,20 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <div className="flex items-center justify-between">
                 <span>الترخيص</span>
                 <span className="font-medium text-gray-900">حسب وصف المنتج</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>توفر المنتج</span>
+                <span
+                  className={`font-medium ${
+                    isSoldOut ? 'text-red-600' : hasQuantityLimit ? 'text-green-700' : 'text-blue-700'
+                  }`}
+                >
+                  {isSoldOut
+                    ? 'نفدت الكمية'
+                    : hasQuantityLimit
+                    ? `متبقي ${remainingQuantity} من ${quantityLimit}`
+                    : 'متاح بدون حد'}
+                </span>
               </div>
             </div>
           </div>
@@ -1032,10 +1133,10 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </p>
               <button
                 onClick={handleBuyNow}
-                disabled={purchasing || isOwner}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                disabled={purchasing || isOwner || isSoldOut}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                اشترِ للوصول إلى المحتوى
+                {isSoldOut ? 'نفدت الكمية' : 'اشترِ للوصول إلى المحتوى'}
               </button>
             </div>
           )}
