@@ -118,9 +118,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
               aria-label="الذهاب إلى الرئيسية"
             >
               <img
-                src="/raqmy-icon.png"
+                src="/raqmy-logo.png"
                 alt="رقمي Raqmy"
-                className="h-14 w-14 object-contain"
+                className="h-14 w-14 rounded-xl object-contain shadow-sm"
                 onError={(event) => {
                   const target = event.currentTarget;
                   target.style.display = 'none';
