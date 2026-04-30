@@ -110,17 +110,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
+        <div className="flex justify-between items-center h-20">
           <div className="flex items-center gap-8">
             <button
               onClick={handleHomeNavigate}
-              className="flex items-center"
+              className="flex items-center justify-center"
               aria-label="الذهاب إلى الرئيسية"
             >
               <img
                 src="/raqmy-logo.png"
                 alt="رقمي Raqmy"
-                className="h-11 w-auto object-contain"
+                className="h-14 w-14 rounded-xl object-contain shadow-sm"
                 onError={(event) => {
                   const target = event.currentTarget;
                   target.style.display = 'none';
