@@ -241,13 +241,64 @@ const getTodayDateInputValue = () => {
   return localDate.toISOString().slice(0, 10);
 };
 
+const toArabicDigits = (value: string) =>
+  value.replace(/\d/g, (digit) => '٠١٢٣٤٥٦٧٨٩'[Number(digit)] || digit);
+
+const formatDateAsArabicDayMonthYear = (value?: string | null, fallback = 'اختر التاريخ') => {
+  if (!value) return fallback;
+
+  const normalized = value.slice(0, 10);
+  const [year, month, day] = normalized.split('-');
+
+  if (!year || !month || !day) return value;
+
+  return toArabicDigits(`${day} / ${month} / ${year}`);
+};
+
 const formatDateForDisplay = (value?: string | null) => {
   if (!value) return 'مفتوح';
-  try {
-    return new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('ar-SA');
-  } catch {
-    return value;
-  }
+  return formatDateAsArabicDayMonthYear(value, 'مفتوح');
+};
+
+type DateInputFieldProps = {
+  value: string;
+  onChange: (value: string) => void;
+  min?: string;
+  required?: boolean;
+  placeholder?: string;
+  className?: string;
+};
+
+const DateInputField: React.FC<DateInputFieldProps> = ({
+  value,
+  onChange,
+  min,
+  required = false,
+  placeholder = 'اختر التاريخ',
+  className = '',
+}) => {
+  const shownValue = value ? formatDateAsArabicDayMonthYear(value, placeholder) : placeholder;
+
+  return (
+    <div className={`relative ${className}`} dir="rtl">
+      <input
+        type="date"
+        min={min}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+        aria-label={placeholder}
+      />
+
+      <div className="pointer-events-none flex w-full items-center justify-between rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus-within:ring-2 focus-within:ring-blue-500">
+        <span className={value ? 'font-medium text-gray-900' : 'text-gray-400'}>
+          {shownValue}
+        </span>
+        <CalendarRange className="h-4 w-4 text-gray-500" />
+      </div>
+    </div>
+  );
 };
 
 const buildLegacyDayRangeFromDateTier = (tier: TierDraft) => ({
@@ -2421,33 +2472,30 @@ const validateTiers = () => {
 <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
   <div>
     <label className="block text-xs text-gray-500 mb-2">من التاريخ</label>
-    <input
-      type="date"
+    <DateInputField
       min={getTodayDateInputValue()}
       value={tier.start_date}
-      onChange={(e) =>
+      onChange={(value) =>
         updateTier(tier.localId, {
-          start_date: e.target.value,
+          start_date: value,
           end_date:
-            tier.end_date && e.target.value && tier.end_date < e.target.value
-              ? e.target.value
+            tier.end_date && value && tier.end_date < value
+              ? value
               : tier.end_date,
         })
       }
-      className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
+      placeholder="اختر تاريخ البداية"
       required
     />
   </div>
 
   <div>
     <label className="block text-xs text-gray-500 mb-2">إلى التاريخ</label>
-    <input
-      type="date"
+    <DateInputField
       min={tier.start_date || getTodayDateInputValue()}
       value={tier.end_date}
-      onChange={(e) => updateTier(tier.localId, { end_date: e.target.value })}
-      className="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white"
-      placeholder="مفتوح"
+      onChange={(value) => updateTier(tier.localId, { end_date: value })}
+      placeholder="تاريخ النهاية"
     />
   </div>
 
@@ -2531,16 +2579,16 @@ const validateTiers = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   تاريخ الانتهاء <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="date"
+                <DateInputField
+                  min={getTodayDateInputValue()}
                   value={formData.expiry_date}
-                  onChange={(e) =>
+                  onChange={(value) =>
                     setFormData((prev) => ({
                       ...prev,
-                      expiry_date: e.target.value,
+                      expiry_date: value,
                     }))
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="اختر تاريخ الانتهاء"
                 />
               </div>
             )}
