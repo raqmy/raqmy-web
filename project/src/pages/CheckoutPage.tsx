@@ -185,9 +185,15 @@ const getProductSellerId = (product: ProductWithMeta | null | undefined) => {
 };
 
 const getQuantityLimit = (product: ProductWithMeta | null | undefined) => {
-  const limit = Number(product?.quantity_limit);
+  const rawLimit = product?.quantity_limit;
 
-  if (!Number.isFinite(limit) || limit <= 0) {
+  if (rawLimit === null || rawLimit === undefined || rawLimit === '') {
+    return null;
+  }
+
+  const limit = Number(rawLimit);
+
+  if (!Number.isFinite(limit) || limit < 0) {
     return null;
   }
 
@@ -218,6 +224,10 @@ const getRemainingQuantity = (product: ProductWithMeta | null | undefined) => {
 const isCartItemQuantityInvalid = (item: CartItem) => {
   if (!item.product) return true;
 
+  if (item.product.is_active === false) {
+    return true;
+  }
+
   const remaining = getRemainingQuantity(item.product);
 
   if (remaining === null) return false;
@@ -231,6 +241,11 @@ const getCartItemQuantityIssueMessage = (item: CartItem) => {
   }
 
   const productTitle = getProductTitle(item.product);
+
+  if (item.product.is_active === false) {
+    return `المنتج "${productTitle}" غير نشط حالياً ولا يمكن شراؤه.`;
+  }
+
   const remaining = getRemainingQuantity(item.product);
 
   if (remaining === null) return '';
@@ -808,6 +823,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         return;
       }
 
+      const inactiveProduct = validatedCartItems.find((i) => i.product?.is_active === false);
+      if (inactiveProduct) {
+        setError(getCartItemQuantityIssueMessage(inactiveProduct));
+        return;
+      }
+
       const missingPrice = validatedCartItems.find((i) => (i.product?.price ?? null) === null);
       if (missingPrice) {
         setError('حدث خطأ: سعر أحد المنتجات غير موجود. رجاءً راجع بيانات المنتج.');
@@ -1081,6 +1102,15 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
           <AlertTriangle className="w-3.5 h-3.5" />
           <span>غير متاح</span>
+        </div>
+      );
+    }
+
+    if (item.product.is_active === false) {
+      return (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          <span>المنتج غير نشط</span>
         </div>
       );
     }
