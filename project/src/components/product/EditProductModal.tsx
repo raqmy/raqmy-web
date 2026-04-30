@@ -37,6 +37,8 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     store_id: '',
     visibility: 'marketplace',
     is_active: true,
+    quantity_limit_enabled: false,
+    quantity_limit: '',
   });
 
   const [images, setImages] = useState<ProductImage[]>([]);
@@ -57,6 +59,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       fetchProduct();
       fetchStores();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, productId]);
 
   const fetchProduct = async () => {
@@ -68,11 +71,14 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         .maybeSingle();
 
       if (error || !data) {
+        console.error('fetchProduct error:', error);
         setError('تعذر تحميل بيانات المنتج');
         return;
       }
 
       setProduct(data);
+
+      const quantityLimit = (data as any).quantity_limit;
 
       setFormData({
         name: safeStr((data as any).title ?? (data as any).name),
@@ -82,49 +88,66 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         store_id: safeStr((data as any).store_id),
         visibility: safeStr((data as any).visibility || 'marketplace'),
         is_active: Boolean((data as any).is_active),
+        quantity_limit_enabled: quantityLimit !== null && quantityLimit !== undefined,
+        quantity_limit: quantityLimit !== null && quantityLimit !== undefined ? safeStr(quantityLimit) : '',
       });
 
-      const { data: imgs } = await supabase
+      const { data: imgs, error: imgsError } = await supabase
         .from('product_images')
         .select('*')
         .eq('product_id', productId)
         .order('display_order');
 
-      if (imgs) {
+      if (imgsError) {
+        console.error('fetch product_images error:', imgsError);
+        setImages([]);
+        setExistingImageIds([]);
+      } else if (imgs) {
         setImages(
           imgs.map((img: any) => ({
             id: img.id,
             image_url: img.image_url,
-            is_primary: img.is_primary,
-            display_order: img.display_order,
+            is_primary: Boolean(img.is_primary),
+            display_order: Number(img.display_order ?? 0),
           }))
         );
 
         setExistingImageIds(imgs.map((img: any) => img.id));
+      } else {
+        setImages([]);
+        setExistingImageIds([]);
       }
 
-      const { data: atts } = await supabase
+      const { data: atts, error: attsError } = await supabase
         .from('product_attachments')
         .select('*')
         .eq('product_id', productId)
         .order('display_order');
 
-      if (atts) {
+      if (attsError) {
+        console.error('fetch product_attachments error:', attsError);
+        setAttachments([]);
+        setExistingAttachmentIds([]);
+      } else if (atts) {
         setAttachments(
           atts.map((att: any) => ({
             id: att.id,
-            title: att.title,
-            attachment_type: att.attachment_type,
-            file_url: att.file_url,
-            text_content: att.text_content,
-            file_size: att.file_size,
-            display_order: att.display_order,
+            title: safeStr(att.title),
+            attachment_type: safeStr(att.attachment_type),
+            file_url: att.file_url || undefined,
+            text_content: att.text_content || undefined,
+            file_size: att.file_size || undefined,
+            display_order: Number(att.display_order ?? 0),
           }))
         );
 
         setExistingAttachmentIds(atts.map((att: any) => att.id));
+      } else {
+        setAttachments([]);
+        setExistingAttachmentIds([]);
       }
-    } catch {
+    } catch (err) {
+      console.error('fetchProduct unexpected error:', err);
       setError('حدث خطأ أثناء تحميل المنتج');
     }
   };
@@ -132,21 +155,47 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const fetchStores = async () => {
     if (!profile) return;
 
-    const { data } = await supabase
-      .from('stores')
-      .select('*')
-      .eq('user_id', profile.id)
-      .eq('is_active', true);
+    try {
+      const { data, error } = await supabase
+        .from('stores')
+        .select('*')
+        .eq('user_id', profile.id)
+        .eq('is_active', true);
 
-    if (data) setStores(data);
+      if (error) {
+        console.error('fetchStores error:', error);
+        return;
+      }
+
+      if (data) setStores(data);
+    } catch (err) {
+      console.error('fetchStores unexpected error:', err);
+    }
+  };
+
+  const isQuantityLimitValid = () => {
+    if (!formData.quantity_limit_enabled) return true;
+
+    const value = Number(formData.quantity_limit);
+    return Number.isInteger(value) && value > 0;
+  };
+
+  const getQuantityLimitValue = () => {
+    if (!formData.quantity_limit_enabled) return null;
+
+    const value = Number(formData.quantity_limit);
+    if (!Number.isInteger(value) || value <= 0) return null;
+
+    return value;
   };
 
   const isFormValid = () => {
-    return (
+    return Boolean(
       safeTrim(formData.name) &&
-      safeTrim(formData.price) &&
-      images.length > 0 &&
-      attachments.length > 0
+        safeTrim(formData.price) &&
+        images.length > 0 &&
+        attachments.length > 0 &&
+        isQuantityLimitValid()
     );
   };
 
@@ -154,7 +203,18 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     e.preventDefault();
 
     if (!isFormValid()) {
-      setError('أكمل جميع الحقول المطلوبة');
+      setError('أكمل جميع الحقول المطلوبة وأضف صورة ومرفق واحد على الأقل');
+      return;
+    }
+
+    const price = parseFloat(safeStr(formData.price));
+    if (isNaN(price) || price < 0) {
+      setError('السعر غير صالح');
+      return;
+    }
+
+    if (formData.quantity_limit_enabled && !isQuantityLimitValid()) {
+      setError('حد المبيعات يجب أن يكون رقمًا صحيحًا أكبر من صفر، أو اختر بدون حد.');
       return;
     }
 
@@ -162,43 +222,65 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     setError('');
 
     try {
-      await supabase
+      const updatePayload: Record<string, any> = {
+        title: safeTrim(formData.name),
+        description: safeTrim(formData.description) ? safeTrim(formData.description) : null,
+        price,
+        currency: formData.currency || 'SAR',
+        store_id: formData.store_id || null,
+        visibility: formData.visibility || 'marketplace',
+        is_active: Boolean(formData.is_active),
+        quantity_limit: getQuantityLimitValue(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: updateError } = await supabase
         .from('products')
-        .update({
-          title: formData.name,
-          description: formData.description || null,
-          price: parseFloat(formData.price),
-          currency: formData.currency,
-          store_id: formData.store_id || null,
-          visibility: formData.visibility,
-          is_active: formData.is_active,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', productId);
+
+      if (updateError) {
+        throw updateError;
+      }
 
       const currentImageIds = images.filter((i) => i.id).map((i) => i.id!);
       const deleteImages = existingImageIds.filter((id) => !currentImageIds.includes(id));
 
       if (deleteImages.length) {
-        await supabase.from('product_images').delete().in('id', deleteImages);
+        const { error: deleteImagesError } = await supabase
+          .from('product_images')
+          .delete()
+          .in('id', deleteImages);
+
+        if (deleteImagesError) {
+          console.error('delete product_images error:', deleteImagesError);
+        }
       }
 
       for (const img of images) {
         if (img.id) {
-          await supabase
+          const { error: updateImageError } = await supabase
             .from('product_images')
             .update({
-              is_primary: img.is_primary,
-              display_order: img.display_order,
+              is_primary: Boolean(img.is_primary),
+              display_order: Number(img.display_order ?? 0),
             })
             .eq('id', img.id);
+
+          if (updateImageError) {
+            console.error('update product_images error:', updateImageError);
+          }
         } else {
-          await supabase.from('product_images').insert({
+          const { error: insertImageError } = await supabase.from('product_images').insert({
             product_id: productId,
             image_url: img.image_url,
-            is_primary: img.is_primary,
-            display_order: img.display_order,
+            is_primary: Boolean(img.is_primary),
+            display_order: Number(img.display_order ?? 0),
           });
+
+          if (insertImageError) {
+            console.error('insert product_images error:', insertImageError);
+          }
         }
       }
 
@@ -206,35 +288,58 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       const deleteAtts = existingAttachmentIds.filter((id) => !currentAttIds.includes(id));
 
       if (deleteAtts.length) {
-        await supabase.from('product_attachments').delete().in('id', deleteAtts);
+        const { error: deleteAttachmentsError } = await supabase
+          .from('product_attachments')
+          .delete()
+          .in('id', deleteAtts);
+
+        if (deleteAttachmentsError) {
+          console.error('delete product_attachments error:', deleteAttachmentsError);
+        }
       }
 
       for (const att of attachments) {
         if (att.id) {
-          await supabase
+          const { error: updateAttachmentError } = await supabase
             .from('product_attachments')
             .update({
-              title: att.title,
-              display_order: att.display_order,
+              title: safeStr(att.title),
+              display_order: Number(att.display_order ?? 0),
             })
             .eq('id', att.id);
+
+          if (updateAttachmentError) {
+            console.error('update product_attachments error:', updateAttachmentError);
+          }
         } else {
-          await supabase.from('product_attachments').insert({
+          const { error: insertAttachmentError } = await supabase.from('product_attachments').insert({
             product_id: productId,
-            title: att.title,
-            attachment_type: att.attachment_type,
+            title: safeStr(att.title),
+            attachment_type: safeStr(att.attachment_type),
             file_url: att.file_url || null,
             text_content: att.text_content || null,
             file_size: att.file_size || null,
-            display_order: att.display_order,
+            display_order: Number(att.display_order ?? 0),
           });
+
+          if (insertAttachmentError) {
+            console.error('insert product_attachments error:', insertAttachmentError);
+          }
         }
       }
 
       onSuccess();
       onClose();
-    } catch {
-      setError('حدث خطأ أثناء حفظ التعديلات');
+    } catch (err: any) {
+      console.error('Error updating product:', err);
+
+      const message = safeStr(err?.message);
+
+      if (message.includes('quantity_limit')) {
+        setError('تعذر حفظ حد المبيعات. تأكد أن عمود quantity_limit موجود في جدول products.');
+      } else {
+        setError(message || 'حدث خطأ أثناء حفظ التعديلات');
+      }
     } finally {
       setLoading(false);
     }
@@ -246,11 +351,17 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     setDeleting(true);
 
     try {
-      await supabase.from('products').delete().eq('id', productId);
+      const { error: deleteError } = await supabase.from('products').delete().eq('id', productId);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
       onDelete();
       onClose();
-    } catch {
-      setError('فشل حذف المنتج');
+    } catch (err: any) {
+      console.error('Error deleting product:', err);
+      setError(safeStr(err?.message) || 'فشل حذف المنتج');
     } finally {
       setDeleting(false);
     }
@@ -266,6 +377,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600 transition"
+              type="button"
             >
               <X className="w-6 h-6" />
             </button>
@@ -306,48 +418,67 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
               <p className="text-sm text-gray-500">أدخل المعلومات الأساسية</p>
             </div>
 
-            <input
-              type="text"
-              placeholder="اسم المنتج"
-              value={formData.name}
-              onChange={(e) =>
-                setFormData({ ...formData, name: e.target.value })
-              }
-              className="w-full px-4 py-3 border rounded-xl"
-            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                اسم المنتج <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="اسم المنتج"
+                value={formData.name}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
+                className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
 
-            <textarea
-              rows={4}
-              placeholder="وصف المنتج"
-              value={formData.description}
-              onChange={(e) =>
-                setFormData({ ...formData, description: e.target.value })
-              }
-              className="w-full px-4 py-3 border rounded-xl"
-            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">وصف المنتج</label>
+              <textarea
+                rows={4}
+                placeholder="وصف المنتج"
+                value={formData.description}
+                onChange={(e) =>
+                  setFormData({ ...formData, description: e.target.value })
+                }
+                className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
 
             <div className="grid md:grid-cols-2 gap-4">
-              <input
-                type="number"
-                placeholder="السعر"
-                value={formData.price}
-                onChange={(e) =>
-                  setFormData({ ...formData, price: e.target.value })
-                }
-                className="w-full px-4 py-3 border rounded-xl"
-              />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  السعر <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  placeholder="السعر"
+                  min="0"
+                  step="0.01"
+                  value={formData.price}
+                  onChange={(e) =>
+                    setFormData({ ...formData, price: e.target.value })
+                  }
+                  className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  dir="ltr"
+                />
+              </div>
 
-              <select
-                value={formData.currency}
-                onChange={(e) =>
-                  setFormData({ ...formData, currency: e.target.value })
-                }
-                className="w-full px-4 py-3 border rounded-xl"
-              >
-                <option value="SAR">ريال سعودي</option>
-                <option value="USD">دولار</option>
-                <option value="EUR">يورو</option>
-              </select>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">العملة</label>
+                <select
+                  value={formData.currency}
+                  onChange={(e) =>
+                    setFormData({ ...formData, currency: e.target.value })
+                  }
+                  className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="SAR">ريال سعودي</option>
+                  <option value="USD">دولار</option>
+                  <option value="EUR">يورو</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -373,34 +504,41 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
           <div className="space-y-6">
             <div className="pb-3 border-b">
               <h3 className="font-bold text-lg">4. التسعير والظهور</h3>
+              <p className="text-sm text-gray-500">حدد إعدادات النشر والعرض وحد المبيعات</p>
             </div>
 
-            <select
-              value={formData.store_id}
-              onChange={(e) =>
-                setFormData({ ...formData, store_id: e.target.value })
-              }
-              className="w-full px-4 py-3 border rounded-xl"
-            >
-              <option value="">منتج مستقل (بدون متجر)</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">المتجر التابع له</label>
+              <select
+                value={formData.store_id}
+                onChange={(e) =>
+                  setFormData({ ...formData, store_id: e.target.value })
+                }
+                className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">منتج مستقل (بدون متجر)</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-            <select
-              value={formData.visibility}
-              onChange={(e) =>
-                setFormData({ ...formData, visibility: e.target.value })
-              }
-              className="w-full px-4 py-3 border rounded-xl"
-            >
-              <option value="marketplace">عرض في السوق العام</option>
-              <option value="public">في المتجر فقط</option>
-              <option value="private">رابط مباشر فقط</option>
-            </select>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">الظهور</label>
+              <select
+                value={formData.visibility}
+                onChange={(e) =>
+                  setFormData({ ...formData, visibility: e.target.value })
+                }
+                className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="marketplace">عرض في السوق العام</option>
+                <option value="public">في المتجر فقط</option>
+                <option value="private">رابط مباشر فقط</option>
+              </select>
+            </div>
 
             <label className="flex items-center gap-3 bg-gray-50 p-4 rounded-xl">
               <input
@@ -409,14 +547,90 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 onChange={(e) =>
                   setFormData({ ...formData, is_active: e.target.checked })
                 }
+                className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
               />
               المنتج نشط
             </label>
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <label className="block text-sm font-medium text-gray-700 mb-3">حد المبيعات</label>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData({
+                      ...formData,
+                      quantity_limit_enabled: false,
+                      quantity_limit: '',
+                    })
+                  }
+                  className={`rounded-lg border px-4 py-3 text-sm font-semibold transition-colors ${
+                    !formData.quantity_limit_enabled
+                      ? 'border-blue-600 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  بدون حد
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData({
+                      ...formData,
+                      quantity_limit_enabled: true,
+                    })
+                  }
+                  className={`rounded-lg border px-4 py-3 text-sm font-semibold transition-colors ${
+                    formData.quantity_limit_enabled
+                      ? 'border-blue-600 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  عدد محدود
+                </button>
+              </div>
+
+              {formData.quantity_limit_enabled ? (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    الحد الأقصى للمبيعات <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={formData.quantity_limit}
+                    onChange={(e) => setFormData({ ...formData, quantity_limit: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="مثال: 100"
+                    dir="ltr"
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    عند الوصول لهذا العدد سيتم منع شراء المنتج حتى ترفع الحد أو تجعله بدون حد.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">
+                  المنتج متاح للبيع بدون حد أقصى لعدد مرات الشراء.
+                </p>
+              )}
+            </div>
           </div>
 
           {!isFormValid() && (
             <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-800">
-              أكمل الحقول المطلوبة وأضف صورة ومرفق واحد على الأقل
+              <p className="font-medium mb-2">لحفظ التغييرات، يجب:</p>
+              <ul className="space-y-1 mr-4">
+                {!safeTrim(formData.name) && <li>• إدخال اسم المنتج</li>}
+                {!safeTrim(formData.price) && <li>• إدخال السعر</li>}
+                {images.length === 0 && <li>• إضافة صورة واحدة على الأقل</li>}
+                {attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل</li>}
+                {formData.quantity_limit_enabled && !isQuantityLimitValid() && (
+                  <li>• إدخال حد مبيعات صحيح أكبر من صفر</li>
+                )}
+              </ul>
             </div>
           )}
 
@@ -425,9 +639,19 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
               type="button"
               onClick={handleDelete}
               disabled={deleting}
-              className="px-6 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700"
+              className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
             >
-              {deleting ? 'جاري الحذف...' : 'حذف المنتج'}
+              {deleting ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>جاري الحذف...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-5 h-5" />
+                  <span>حذف المنتج</span>
+                </>
+              )}
             </button>
 
             <div className="flex-1" />
@@ -435,17 +659,24 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-3 border rounded-xl font-semibold"
+              className="px-6 py-3 border rounded-xl font-semibold hover:bg-gray-50 transition-colors"
             >
               إلغاء
             </button>
 
             <button
               type="submit"
-              disabled={loading}
-              className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700"
+              disabled={loading || !isFormValid()}
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'جاري الحفظ...' : 'حفظ التغييرات'}
+              {loading ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>جاري الحفظ...</span>
+                </>
+              ) : (
+                'حفظ التغييرات'
+              )}
             </button>
           </div>
         </form>
