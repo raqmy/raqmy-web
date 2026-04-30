@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { TrendingUp, Shield, Zap, ArrowLeft, Download } from 'lucide-react';
+import {
+  TrendingUp,
+  Shield,
+  Zap,
+  ArrowLeft,
+  Download,
+  AlertTriangle,
+  CheckCircle2,
+  Package,
+} from 'lucide-react';
 import { supabase, Product } from '../lib/supabase';
 
 interface HomePageProps {
@@ -10,7 +19,81 @@ interface FeaturedProduct extends Product {
   thumbnail_url?: string | null;
   store?: any;
   seller?: any;
+  quantity_limit?: number | null;
+  quantity_sold?: number | null;
 }
+
+const getQuantityLimit = (product: FeaturedProduct | null | undefined) => {
+  const rawLimit = product?.quantity_limit;
+
+  if (rawLimit === null || rawLimit === undefined) {
+    return null;
+  }
+
+  const limit = Number(rawLimit);
+
+  if (!Number.isFinite(limit) || limit < 0) {
+    return null;
+  }
+
+  return Math.floor(limit);
+};
+
+const getQuantitySold = (product: FeaturedProduct | null | undefined) => {
+  const sold = Number(product?.quantity_sold || 0);
+
+  if (!Number.isFinite(sold) || sold < 0) {
+    return 0;
+  }
+
+  return Math.floor(sold);
+};
+
+const getRemainingQuantity = (product: FeaturedProduct | null | undefined) => {
+  const limit = getQuantityLimit(product);
+
+  if (limit === null) {
+    return null;
+  }
+
+  const sold = getQuantitySold(product);
+  return Math.max(limit - sold, 0);
+};
+
+const isProductSoldOut = (product: FeaturedProduct | null | undefined) => {
+  const remaining = getRemainingQuantity(product);
+  return remaining !== null && remaining <= 0;
+};
+
+const ProductAvailabilityBadge: React.FC<{ product: FeaturedProduct }> = ({ product }) => {
+  const remaining = getRemainingQuantity(product);
+  const soldOut = isProductSoldOut(product);
+
+  if (remaining === null) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700 border border-green-100">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        متاح بدون حد
+      </span>
+    );
+  }
+
+  if (soldOut) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 border border-red-100">
+        <AlertTriangle className="w-3.5 h-3.5" />
+        نفدت الكمية
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 border border-blue-100">
+      <Package className="w-3.5 h-3.5" />
+      المتبقي {remaining}
+    </span>
+  );
+};
 
 export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
   const [featuredProducts, setFeaturedProducts] = useState<FeaturedProduct[]>([]);
@@ -143,6 +226,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           const hasImage = !!product.thumbnail_url;
           const hasStore = !!product.store;
           const hasSeller = !!product.seller;
+          const soldOut = isProductSoldOut(product);
           const createdAtValue = product.created_at
             ? new Date(product.created_at).getTime()
             : 0;
@@ -151,6 +235,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             ...product,
             __sortIndex: index,
             __score:
+              (soldOut ? -5000000000000 : 0) +
               (hasImage ? 1000 : 0) +
               (hasStore ? 50 : 0) +
               (hasSeller ? 25 : 0) +
@@ -257,19 +342,26 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {featuredProducts.map((product: any) => {
               const displayName = product.title ?? product.name ?? 'منتج رقمي';
+              const soldOut = isProductSoldOut(product);
 
               return (
                 <div
                   key={product.id}
-                  className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow cursor-pointer"
+                  className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow cursor-pointer border border-gray-100"
                   onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
                 >
-                  <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+                  <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center relative overflow-hidden">
+                    {soldOut && (
+                      <div className="absolute top-3 right-3 z-10 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow">
+                        نفدت الكمية
+                      </div>
+                    )}
+
                     {product.thumbnail_url ? (
                       <img
                         src={product.thumbnail_url}
                         alt={displayName}
-                        className="w-full h-full object-cover"
+                        className={`w-full h-full object-cover ${soldOut ? 'opacity-70 grayscale' : ''}`}
                       />
                     ) : (
                       <Download className="w-16 h-16 text-blue-600" />
@@ -280,11 +372,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                       {displayName}
                     </h3>
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-3 mb-4">
                       <div className="text-2xl font-bold text-blue-600">
                         {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
                       </div>
                     </div>
+
+                    <ProductAvailabilityBadge product={product} />
                   </div>
                 </div>
               );
