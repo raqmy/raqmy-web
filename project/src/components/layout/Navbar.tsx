@@ -118,9 +118,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
               aria-label="الذهاب إلى الرئيسية"
             >
               <img
-                src="/raqmy-logo.png"
+                src="/raqmy-icon.png"
                 alt="رقمي Raqmy"
-                className="h-14 w-14 rounded-xl object-contain shadow-sm"
+                className="h-14 w-14 object-contain"
                 onError={(event) => {
                   const target = event.currentTarget;
                   target.style.display = 'none';
@@ -207,6 +207,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
                 >
                   <div className="w-8 h-8 rounded-full overflow-hidden bg-blue-600 flex items-center justify-center relative">
                     {renderProfileAvatar()}
+
                     <div
                       data-avatar-fallback
                       className={`absolute inset-0 items-center justify-center text-white ${
