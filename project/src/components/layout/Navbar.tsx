@@ -1,5 +1,5 @@
 import React from 'react';
-import { Store, User, LogOut, LayoutDashboard, ShoppingCart } from 'lucide-react';
+import { User, LogOut, LayoutDashboard, ShoppingCart } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface NavbarProps {
@@ -114,12 +114,28 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
           <div className="flex items-center gap-8">
             <button
               onClick={handleHomeNavigate}
-              className="flex items-center gap-2 text-2xl font-bold"
+              className="flex items-center"
+              aria-label="الذهاب إلى الرئيسية"
             >
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <Store className="w-6 h-6 text-white" />
-              </div>
-              <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              <img
+                src="/raqmy-logo.png"
+                alt="رقمي Raqmy"
+                className="h-11 w-auto object-contain"
+                onError={(event) => {
+                  const target = event.currentTarget;
+                  target.style.display = 'none';
+
+                  const fallback = target.parentElement?.querySelector('[data-logo-fallback]');
+                  if (fallback) {
+                    (fallback as HTMLElement).style.display = 'inline-flex';
+                  }
+                }}
+              />
+
+              <span
+                data-logo-fallback
+                className="hidden text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent"
+              >
                 رقمي
               </span>
             </button>
