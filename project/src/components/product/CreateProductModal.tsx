@@ -22,7 +22,9 @@ const FALLBACK_COLUMNS = [
   'price', 'amount',
   'visibility', 'is_active', 'store_id',
   'user_id', 'merchant_id', 'seller_id',
-  'currency'
+  'currency',
+  'quantity_limit',
+  'quantity_sold'
 ];
 
 const PRODUCT_IMAGES_BUCKET = 'product-images';
@@ -95,6 +97,8 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     currency: 'SAR',
     store_id: '',
     visibility: 'marketplace',
+    quantity_limit_enabled: false,
+    quantity_limit: '',
   });
 
   const [images, setImages] = useState<ProductImage[]>([]);
@@ -116,6 +120,8 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       currency: 'SAR',
       store_id: '',
       visibility: 'marketplace',
+      quantity_limit_enabled: false,
+      quantity_limit: '',
     });
     setImages([]);
     setAttachments([]);
@@ -139,12 +145,29 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     if (data) setStores(data);
   };
 
+  const isQuantityLimitValid = () => {
+    if (!formData.quantity_limit_enabled) return true;
+
+    const value = Number(formData.quantity_limit);
+    return Number.isInteger(value) && value > 0;
+  };
+
+  const getQuantityLimitValue = () => {
+    if (!formData.quantity_limit_enabled) return null;
+
+    const value = Number(formData.quantity_limit);
+    if (!Number.isInteger(value) || value <= 0) return null;
+
+    return value;
+  };
+
   const isFormValid = () => {
     return (
       formData.name.trim().length > 0 &&
       formData.price.trim().length > 0 &&
       images.length > 0 &&
-      attachments.length > 0
+      attachments.length > 0 &&
+      isQuantityLimitValid()
     );
   };
 
@@ -223,6 +246,11 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       return;
     }
 
+    if (formData.quantity_limit_enabled && !isQuantityLimitValid()) {
+      setError('حد المبيعات يجب أن يكون رقمًا صحيحًا أكبر من صفر، أو اختر بدون حد.');
+      return;
+    }
+
     setLoading(true);
 
     let createdProductId: string | null = null;
@@ -275,6 +303,14 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       if (availableColumns.includes('visibility')) productPayload['visibility'] = formData.visibility;
       if (availableColumns.includes('is_active')) productPayload['is_active'] = true;
       if (availableColumns.includes('store_id')) productPayload['store_id'] = formData.store_id || null;
+
+      if (availableColumns.includes('quantity_limit')) {
+        productPayload['quantity_limit'] = getQuantityLimitValue();
+      }
+
+      if (availableColumns.includes('quantity_sold')) {
+        productPayload['quantity_sold'] = 0;
+      }
 
       productPayload[merchantColumn] = profile.id;
 
@@ -479,128 +515,4 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  السعر <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.price}
-                  onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="0.00"
-                  required
-                  dir="ltr"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">العملة</label>
-                <select
-                  value={formData.currency}
-                  onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="SAR">ريال سعودي (SAR)</option>
-                  <option value="USD">دولار أمريكي (USD)</option>
-                  <option value="EUR">يورو (EUR)</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">2. صور المنتج</h3>
-              <p className="text-sm text-gray-500 mt-1">أضف صور توضيحية للمنتج</p>
-            </div>
-
-            <ProductImagesManager images={images} onChange={setImages} maxImages={8} />
-          </div>
-
-          <div className="space-y-6">
-            <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">3. مرفقات المنتج الرقمي</h3>
-              <p className="text-sm text-gray-500 mt-1">المحتوى الذي سيحصل عليه العميل بعد الشراء</p>
-            </div>
-
-            <ProductAttachmentsManager attachments={attachments} onChange={setAttachments} />
-          </div>
-
-          <div className="space-y-6">
-            <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">4. التسعير والظهور</h3>
-              <p className="text-sm text-gray-500 mt-1">حدد إعدادات النشر والعرض</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">المتجر التابع له</label>
-              <select
-                value={formData.store_id}
-                onChange={(e) => setFormData({ ...formData, store_id: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">منتج مستقل (بدون متجر)</option>
-                {stores.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {store.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">الظهور</label>
-              <select
-                value={formData.visibility}
-                onChange={(e) => setFormData({ ...formData, visibility: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="marketplace">عرض في السوق العام</option>
-                <option value="public">عام (يظهر في متجري فقط)</option>
-                <option value="private">خاص (رابط مباشر فقط)</option>
-              </select>
-            </div>
-          </div>
-
-          {!isFormValid() && (
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm font-medium text-blue-900 mb-2">لإتمام إنشاء المنتج، يجب:</p>
-              <ul className="text-sm text-blue-800 space-y-1 mr-4">
-                {!formData.name.trim() && <li>• إدخال اسم المنتج</li>}
-                {!formData.price.trim() && <li>• إدخال السعر</li>}
-                {images.length === 0 && <li>• إضافة صورة واحدة على الأقل</li>}
-                {attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل</li>}
-              </ul>
-            </div>
-          )}
-
-          <div className="flex items-center gap-4 pt-6 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
-            >
-              إلغاء
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !isFormValid()}
-              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>جاري الإضافة...</span>
-                </>
-              ) : (
-                'إضافة المنتج'
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
+                <label className="block
