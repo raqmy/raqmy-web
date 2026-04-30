@@ -1,5 +1,5 @@
 import React from 'react';
-import { Store, Mail } from 'lucide-react';
+import { Mail } from 'lucide-react';
 
 interface FooterProps {
   onNavigate: (page: string) => void;
@@ -11,15 +11,38 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="col-span-1 md:col-span-2">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <Store className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-2xl font-bold text-white">رقمي</span>
-            </div>
+            <button
+              onClick={() => onNavigate('home')}
+              className="flex items-center mb-4"
+              aria-label="الذهاب إلى الرئيسية"
+            >
+              <img
+                src="/raqmy-logo.png"
+                alt="رقمي Raqmy"
+                className="h-12 w-auto object-contain brightness-0 invert"
+                onError={(event) => {
+                  const target = event.currentTarget;
+                  target.style.display = 'none';
+
+                  const fallback = target.parentElement?.querySelector('[data-footer-logo-fallback]');
+                  if (fallback) {
+                    (fallback as HTMLElement).style.display = 'inline-flex';
+                  }
+                }}
+              />
+
+              <span
+                data-footer-logo-fallback
+                className="hidden text-2xl font-bold text-white"
+              >
+                رقمي
+              </span>
+            </button>
+
             <p className="text-gray-400 mb-4 max-w-md">
               منصة رقمي هي الحل الأمثل لبيع وشراء المنتجات الرقمية. انضم إلى آلاف التجار والعملاء الذين يثقون بنا.
             </p>
+
             <div className="flex items-center gap-2">
               <Mail className="w-4 h-4" />
               <span className="text-sm">raqmy.app@gmail.com</span>
