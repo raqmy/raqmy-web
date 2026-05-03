@@ -18,6 +18,8 @@ type PublicTier = {
   id: string;
   day_from?: number | null;
   day_to?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
   commission_type?: 'percentage' | 'fixed' | string | null;
   commission_value?: number | null;
   is_active?: boolean | null;
@@ -100,6 +102,8 @@ type AffiliateTierRow = {
   rule_id: string;
   day_from?: number | null;
   day_to?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
   commission_type?: 'percentage' | 'fixed' | string | null;
   commission_value?: number | null;
   is_active?: boolean | null;
@@ -193,6 +197,8 @@ const normalizeTier = (tier: any): PublicTier => ({
   id: String(tier.id),
   day_from: tier.day_from !== null && tier.day_from !== undefined ? Number(tier.day_from) : null,
   day_to: tier.day_to !== null && tier.day_to !== undefined ? Number(tier.day_to) : null,
+  start_date: tier.start_date ?? null,
+  end_date: tier.end_date ?? null,
   commission_type: tier.commission_type ?? null,
   commission_value:
     tier.commission_value !== null && tier.commission_value !== undefined
@@ -203,6 +209,10 @@ const normalizeTier = (tier: any): PublicTier => ({
 
 const sortTiers = (tiers: PublicTier[]) =>
   [...tiers].sort((a, b) => {
+    const aStart = a.start_date ? new Date(a.start_date).getTime() : 0;
+    const bStart = b.start_date ? new Date(b.start_date).getTime() : 0;
+    if (aStart !== bStart) return aStart - bStart;
+
     const aFrom = Number(a.day_from ?? 0);
     const bFrom = Number(b.day_from ?? 0);
     if (aFrom !== bFrom) return aFrom - bFrom;
@@ -211,6 +221,25 @@ const sortTiers = (tiers: PublicTier[]) =>
     const bTo = b.day_to === null || b.day_to === undefined ? 999999 : Number(b.day_to);
     return aTo - bTo;
   });
+
+const formatDateForDisplay = (value?: string | null) => {
+  if (!value) return 'مفتوح';
+  try {
+    return new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('ar-SA');
+  } catch {
+    return value;
+  }
+};
+
+const getTierStartLabel = (tier: PublicTier) =>
+  tier.start_date ? formatDateForDisplay(tier.start_date) : String(tier.day_from ?? 0);
+
+const getTierEndLabel = (tier: PublicTier) =>
+  tier.end_date
+    ? formatDateForDisplay(tier.end_date)
+    : tier.day_to !== null && tier.day_to !== undefined
+    ? String(tier.day_to)
+    : 'مفتوح';
 
 const selectBestRuleForLink = (
   link: Pick<AffiliateLinkRow, 'apply_to' | 'product_id' | 'store_id'>,
@@ -379,7 +408,7 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
 
     const { data: tiersData, error: tiersError } = await supabase
       .from('affiliate_rule_tiers')
-      .select('id, rule_id, day_from, day_to, commission_type, commission_value, is_active')
+      .select('id, rule_id, day_from, day_to, start_date, end_date, commission_type, commission_value, is_active')
       .eq('rule_id', selectedRule.id)
       .order('day_from', { ascending: true })
       .order('day_to', { ascending: true });
@@ -447,9 +476,9 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
         .filter(Boolean)
     ).size;
 
-    const earningsStatuses = new Set(['approved', 'paid']);
+    const ignoredCommissionStatuses = new Set(['rejected', 'cancelled', 'canceled', 'failed', 'void']);
     const totalCommissionEarnings = ((commissionRows || []) as AffiliateCommissionRowForStats[])
-      .filter((row) => earningsStatuses.has(String(row.status || '').toLowerCase()))
+      .filter((row) => !ignoredCommissionStatuses.has(String(row.status || '').toLowerCase()))
       .reduce((sum, row) => sum + Number(row.commission_amount || 0), 0);
 
     return {
@@ -726,7 +755,7 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
                 <InfoRow
                   icon={<CalendarRange className="w-4 h-4" />}
                   label="الصلاحية"
-                  value={data.rule.expires_at || 'بدون انتهاء'}
+                  value={data.rule.expires_at ? formatDateForDisplay(data.rule.expires_at) : 'بدون انتهاء'}
                 />
               </div>
             )}
@@ -777,14 +806,10 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
                     key={tier.id}
                     className="grid grid-cols-1 md:grid-cols-4 gap-3 rounded-2xl border border-gray-100 bg-gray-50/70 px-4 py-4"
                   >
-                    <MiniInfo label="من اليوم" value={String(tier.day_from ?? 0)} />
+                    <MiniInfo label={tier.start_date ? 'من تاريخ' : 'من اليوم'} value={getTierStartLabel(tier)} />
                     <MiniInfo
-                      label="إلى اليوم"
-                      value={
-                        tier.day_to !== null && tier.day_to !== undefined
-                          ? String(tier.day_to)
-                          : 'مفتوح'
-                      }
+                      label={tier.end_date ? 'إلى تاريخ' : 'إلى اليوم'}
+                      value={getTierEndLabel(tier)}
                     />
                     <MiniInfo
                       label="العمولة"
