@@ -304,6 +304,26 @@ const buildRuleName = (marketerName: string, scopeType: string) => {
   return `قاعدة ${marketerName || 'أفلييت'} - ${scopeLabel}`;
 };
 
+const getStoredLinkMetrics = (link?: AffiliateLinkRow | null): UnifiedCampaignMetrics => ({
+  clicks: Number(link?.clicks || 0),
+  sales: Number(link?.sales || 0),
+  earnings: Number(link?.earnings || 0),
+});
+
+const getStoredMarketerMetrics = (
+  marketer?: AffiliateMarketerRow | null
+): UnifiedCampaignMetrics => ({
+  clicks: Number(marketer?.total_clicks || 0),
+  sales: Number(marketer?.total_sales || 0),
+  earnings: Number(marketer?.total_earnings || 0),
+});
+
+const isCountableCommissionStatus = (status?: string | null) => {
+  const normalized = String(status || '').toLowerCase();
+  if (!normalized) return true;
+  return !['rejected', 'cancelled', 'canceled', 'failed', 'void'].includes(normalized);
+};
+
 const buildAffiliateOfferUrl = (campaign: UnifiedCampaignRow) => {
   if (typeof window === 'undefined' || !campaign.link) return '';
 
@@ -507,20 +527,25 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     setLoading(true);
 
     try {
-      await Promise.all([
+      const [marketersRows, linksRows] = await Promise.all([
         fetchMarketers(),
         fetchLinks(),
         fetchRules(),
-        fetchOrdersWithAffiliate(),
-        fetchAffiliateCommissions(),
-      ]);
+      ]).then(([marketersData, linksData]) => {
+        return [marketersData || [], linksData || []] as [
+          AffiliateMarketerRow[],
+          AffiliateLinkRow[]
+        ];
+      });
+
+      await fetchAffiliatePerformance(linksRows, marketersRows);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchMarketers = async () => {
-    if (!user?.id) return;
+  const fetchMarketers = async (): Promise<AffiliateMarketerRow[]> => {
+    if (!user?.id) return [];
 
     const { data, error } = await supabase
       .from('affiliate_marketers')
@@ -530,14 +555,17 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
 
     if (error) {
       console.error('Error fetching marketers:', error);
-      return;
+      setMarketers([]);
+      return [];
     }
 
-    setMarketers((data || []) as AffiliateMarketerRow[]);
+    const rows = (data || []) as AffiliateMarketerRow[];
+    setMarketers(rows);
+    return rows;
   };
 
-  const fetchLinks = async () => {
-    if (!user?.id) return;
+  const fetchLinks = async (): Promise<AffiliateLinkRow[]> => {
+    if (!user?.id) return [];
 
     const { data: rawLinks, error: linksError } = await supabase
       .from('affiliate_links')
@@ -547,14 +575,15 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
 
     if (linksError) {
       console.error('Error fetching links:', linksError);
-      return;
+      setLinks([]);
+      return [];
     }
 
     const linksRows = (rawLinks || []) as AffiliateLinkRow[];
 
     if (linksRows.length === 0) {
       setLinks([]);
-      return;
+      return [];
     }
 
     const marketerIds = uniqueIds(linksRows.map((item) => item.marketer_id));
@@ -614,10 +643,11 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     })) as AffiliateLinkRow[];
 
     setLinks(normalizedLinks);
+    return normalizedLinks;
   };
 
-  const fetchRules = async () => {
-    if (!user?.id) return;
+  const fetchRules = async (): Promise<AffiliateRuleRow[]> => {
+    if (!user?.id) return [];
 
     const { data: rawRules, error: rulesError } = await supabase
       .from('affiliate_rules')
@@ -628,14 +658,15 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
 
     if (rulesError) {
       console.error('Error fetching rules:', rulesError);
-      return;
+      setRules([]);
+      return [];
     }
 
     const rulesRows = (rawRules || []) as AffiliateRuleRow[];
 
     if (rulesRows.length === 0) {
       setRules([]);
-      return;
+      return [];
     }
 
     const ruleIds = uniqueIds(rulesRows.map((item) => item.id));
@@ -717,45 +748,89 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
     })) as AffiliateRuleRow[];
 
     setRules(normalizedRules);
+    return normalizedRules;
   };
 
-  const fetchOrdersWithAffiliate = async () => {
-    if (!user?.id) return;
+  const fetchAffiliatePerformance = async (
+    currentLinks: AffiliateLinkRow[],
+    currentMarketers: AffiliateMarketerRow[]
+  ) => {
+    const linkIds = uniqueIds(currentLinks.map((item) => item.id));
+    const marketerIds = uniqueIds(currentMarketers.map((item) => item.id));
 
-    const { data, error } = await supabase
-      .from('orders')
-      .select('id, affiliate_link_id, affiliate_marketer_id, status')
-      .eq('status', 'paid')
-      .eq('merchant_id', user.id)
-      .not('affiliate_link_id', 'is', null)
-      .not('affiliate_marketer_id', 'is', null)
-      .order('created_at', { ascending: false });
+    const ordersResult: OrderAffiliateRow[] = [];
+    const commissionsResult: AffiliateCommissionRow[] = [];
 
-    if (error) {
-      console.error('Error fetching affiliate orders:', error);
-      return;
+    if (linkIds.length > 0) {
+      const { data: ordersByLink, error: ordersByLinkError } = await supabase
+        .from('orders')
+        .select('id, affiliate_link_id, affiliate_marketer_id, status')
+        .eq('status', 'paid')
+        .in('affiliate_link_id', linkIds)
+        .order('created_at', { ascending: false });
+
+      if (ordersByLinkError) {
+        console.error('Error fetching affiliate orders by link:', ordersByLinkError);
+      } else {
+        ordersResult.push(...((ordersByLink || []) as OrderAffiliateRow[]));
+      }
+
+      const { data: commissionsByLink, error: commissionsByLinkError } = await supabase
+        .from('affiliate_commissions')
+        .select(
+          'id, order_id, order_item_id, seller_id, marketer_id, link_id, rule_id, commission_type, commission_value, commission_amount, status, approved_at, paid_at, created_at'
+        )
+        .in('link_id', linkIds)
+        .order('created_at', { ascending: false });
+
+      if (commissionsByLinkError) {
+        console.error('Error fetching affiliate commissions by link:', commissionsByLinkError);
+      } else {
+        commissionsResult.push(...((commissionsByLink || []) as AffiliateCommissionRow[]));
+      }
     }
 
-    setOrdersWithAffiliate((data || []) as OrderAffiliateRow[]);
-  };
+    if (marketerIds.length > 0) {
+      const { data: ordersByMarketer, error: ordersByMarketerError } = await supabase
+        .from('orders')
+        .select('id, affiliate_link_id, affiliate_marketer_id, status')
+        .eq('status', 'paid')
+        .in('affiliate_marketer_id', marketerIds)
+        .order('created_at', { ascending: false });
 
-  const fetchAffiliateCommissions = async () => {
-    if (!user?.id) return;
+      if (ordersByMarketerError) {
+        console.error('Error fetching affiliate orders by marketer:', ordersByMarketerError);
+      } else {
+        ordersResult.push(...((ordersByMarketer || []) as OrderAffiliateRow[]));
+      }
 
-    const { data, error } = await supabase
-      .from('affiliate_commissions')
-      .select(
-        'id, order_id, order_item_id, seller_id, marketer_id, link_id, rule_id, commission_type, commission_value, commission_amount, status, approved_at, paid_at, created_at'
-      )
-      .eq('seller_id', user.id)
-      .order('created_at', { ascending: false });
+      const { data: commissionsByMarketer, error: commissionsByMarketerError } = await supabase
+        .from('affiliate_commissions')
+        .select(
+          'id, order_id, order_item_id, seller_id, marketer_id, link_id, rule_id, commission_type, commission_value, commission_amount, status, approved_at, paid_at, created_at'
+        )
+        .in('marketer_id', marketerIds)
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching affiliate commissions:', error);
-      return;
+      if (commissionsByMarketerError) {
+        console.error('Error fetching affiliate commissions by marketer:', commissionsByMarketerError);
+      } else {
+        commissionsResult.push(...((commissionsByMarketer || []) as AffiliateCommissionRow[]));
+      }
     }
 
-    setAffiliateCommissions((data || []) as AffiliateCommissionRow[]);
+    const uniqueOrdersMap = new Map<string, OrderAffiliateRow>();
+    ordersResult.forEach((row) => {
+      if (row?.id) uniqueOrdersMap.set(row.id, row);
+    });
+
+    const uniqueCommissionsMap = new Map<string, AffiliateCommissionRow>();
+    commissionsResult.forEach((row) => {
+      if (row?.id) uniqueCommissionsMap.set(row.id, row);
+    });
+
+    setOrdersWithAffiliate(Array.from(uniqueOrdersMap.values()));
+    setAffiliateCommissions(Array.from(uniqueCommissionsMap.values()));
   };
 
   const handleDeleteCampaign = async (campaign: UnifiedCampaignRow) => {
@@ -801,35 +876,33 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
   const campaignMetricsMap = useMemo(() => {
     const map = new Map<string, UnifiedCampaignMetrics>();
 
-    const commissionApprovedStatuses = new Set(['approved', 'paid']);
-
     links.forEach((link) => {
-      const paidOrdersForLink = ordersWithAffiliate.filter(
+      const storedMetrics = getStoredLinkMetrics(link);
+
+      const relatedOrders = ordersWithAffiliate.filter(
         (order) =>
           String(order.affiliate_link_id || '') === String(link.id) &&
           String(order.affiliate_marketer_id || '') === String(link.marketer_id || '')
       );
 
-      const uniquePaidOrderIds = new Set(
-        paidOrdersForLink.map((order) => order.id).filter(Boolean)
-      );
+      const uniqueOrderIds = new Set(relatedOrders.map((order) => order.id).filter(Boolean));
 
-      const commissionsForLink = affiliateCommissions.filter(
+      const relatedCommissions = affiliateCommissions.filter(
         (commission) =>
           String(commission.link_id || '') === String(link.id) &&
           String(commission.marketer_id || '') === String(link.marketer_id || '') &&
-          commissionApprovedStatuses.has(String(commission.status || '').toLowerCase())
+          isCountableCommissionStatus(commission.status)
       );
 
-      const earnings = commissionsForLink.reduce(
-        (sum, row) => sum + Number(row.commission_amount || 0),
+      const commissionsEarnings = relatedCommissions.reduce(
+        (sum, item) => sum + Number(item.commission_amount || 0),
         0
       );
 
       map.set(link.id, {
-        clicks: Number(link.clicks || 0),
-        sales: uniquePaidOrderIds.size,
-        earnings,
+        clicks: Math.max(Number(storedMetrics.clicks || 0), Number(link.clicks || 0)),
+        sales: Math.max(uniqueOrderIds.size, Number(storedMetrics.sales || 0)),
+        earnings: commissionsEarnings > 0 ? commissionsEarnings : Number(storedMetrics.earnings || 0),
       });
     });
 
@@ -839,43 +912,41 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
   const marketerMetricsMap = useMemo(() => {
     const map = new Map<string, UnifiedCampaignMetrics>();
 
-    const commissionApprovedStatuses = new Set(['approved', 'paid']);
-
     marketers.forEach((marketer) => {
-      const marketerLinks = links.filter((link) => String(link.marketer_id || '') === String(marketer.id));
+      const storedMetrics = getStoredMarketerMetrics(marketer);
+      const marketerLinks = links.filter(
+        (link) => String(link.marketer_id || '') === String(marketer.id)
+      );
       const marketerLinkIds = new Set(marketerLinks.map((link) => link.id));
 
-      const clicks = marketerLinks.reduce((sum, link) => sum + Number(link.clicks || 0), 0);
-
-      const paidOrdersForMarketer = ordersWithAffiliate.filter(
-        (order) => String(order.affiliate_marketer_id || '') === String(marketer.id)
+      const clicksFromLinks = marketerLinks.reduce(
+        (sum, link) => sum + Number(link.clicks || 0),
+        0
       );
 
-      const uniquePaidOrderIds = new Set(
-        paidOrdersForMarketer
-          .filter((order) => {
-            if (!order.affiliate_link_id) return false;
-            return marketerLinkIds.has(String(order.affiliate_link_id));
-          })
-          .map((order) => order.id)
-          .filter(Boolean)
+      const relatedOrders = ordersWithAffiliate.filter(
+        (order) =>
+          String(order.affiliate_marketer_id || '') === String(marketer.id) &&
+          (!order.affiliate_link_id || marketerLinkIds.has(String(order.affiliate_link_id)))
       );
 
-      const commissionsForMarketer = affiliateCommissions.filter(
+      const uniqueOrderIds = new Set(relatedOrders.map((order) => order.id).filter(Boolean));
+
+      const relatedCommissions = affiliateCommissions.filter(
         (commission) =>
           String(commission.marketer_id || '') === String(marketer.id) &&
-          commissionApprovedStatuses.has(String(commission.status || '').toLowerCase())
+          isCountableCommissionStatus(commission.status)
       );
 
-      const earnings = commissionsForMarketer.reduce(
-        (sum, row) => sum + Number(row.commission_amount || 0),
+      const commissionsEarnings = relatedCommissions.reduce(
+        (sum, item) => sum + Number(item.commission_amount || 0),
         0
       );
 
       map.set(marketer.id, {
-        clicks,
-        sales: uniquePaidOrderIds.size,
-        earnings,
+        clicks: Math.max(clicksFromLinks, Number(storedMetrics.clicks || 0)),
+        sales: Math.max(uniqueOrderIds.size, Number(storedMetrics.sales || 0)),
+        earnings: commissionsEarnings > 0 ? commissionsEarnings : Number(storedMetrics.earnings || 0),
       });
     });
 
@@ -889,11 +960,7 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
       const rule = matchRuleForLink(link, rules);
       const marketerName = marketer?.name || link.marketer?.name || 'بدون مسوق';
       const scopeLabel = getApplyToLabel(link.apply_to);
-      const metrics = campaignMetricsMap.get(link.id) || {
-        clicks: Number(link.clicks || 0),
-        sales: 0,
-        earnings: 0,
-      };
+      const metrics = campaignMetricsMap.get(link.id) || getStoredLinkMetrics(link);
 
       return {
         id: `campaign-link-${link.id}`,
@@ -915,11 +982,8 @@ export const AffiliateManagementPage: React.FC<AffiliateManagementPageProps> = (
           marketers.find((marketer) => marketer.id === rule.marketer_id) || null;
 
         const metrics =
-          (marketer?.id && marketerMetricsMap.get(marketer.id)) || {
-            clicks: 0,
-            sales: 0,
-            earnings: 0,
-          };
+          (marketer?.id && marketerMetricsMap.get(marketer.id)) ||
+          getStoredMarketerMetrics(marketer);
 
         return {
           id: `campaign-rule-${rule.id}`,
