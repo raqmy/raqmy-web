@@ -227,7 +227,7 @@ const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
-const SELLER_DASHBOARD_CACHE_VERSION = 1;
+const SELLER_DASHBOARD_CACHE_VERSION = 2;
 const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
 
 const getSellerDashboardCacheKey = (profileId: string) => {
@@ -1702,21 +1702,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     try {
       setWithdrawalLimitLoading(true);
 
-      const [
-        statusResponse,
-        settingsResponse,
-        usedRequestsResponse,
-      ] = await Promise.all([
+      const [statusResponse, settingsResponse] = await Promise.all([
         supabase.rpc('get_my_withdrawal_limit_status'),
         supabase.rpc('get_withdrawal_limit_settings'),
-        supabase.rpc('get_user_withdrawal_requests_count_current_period', {
-          p_user_id: profile.id,
-        }),
       ]);
 
       const { data: statusData, error: statusError } = statusResponse;
       const { data: settingsData, error: settingsError } = settingsResponse;
-      const { data: usedRequestsData, error: usedRequestsError } = usedRequestsResponse;
 
       if (statusError) {
         console.error('get_my_withdrawal_limit_status rpc error:', statusError);
@@ -1724,13 +1716,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       if (settingsError) {
         console.error('get_withdrawal_limit_settings rpc error:', settingsError);
-      }
-
-      if (usedRequestsError) {
-        console.error(
-          'get_user_withdrawal_requests_count_current_period rpc error:',
-          usedRequestsError
-        );
       }
 
       const normalizedSettings = Array.isArray(settingsData)
@@ -1756,48 +1741,66 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       setWithdrawalLimitSettings(safeSettings);
 
-      const usedRequestsFromCountRpc = Number(usedRequestsData || 0);
+      const baseMaxRequests = Number(
+        normalizedStatusRaw?.max_requests ??
+          safeSettings?.max_requests ??
+          0
+      );
 
-      if (normalizedStatusRaw) {
+      const periodType =
+        normalizedStatusRaw?.period_type ||
+        safeSettings?.period_type ||
+        'monthly';
+
+      const periodStart =
+        normalizedStatusRaw?.period_start ||
+        safeSettings?.period_start ||
+        null;
+
+      const periodEnd =
+        normalizedStatusRaw?.period_end ||
+        safeSettings?.period_end ||
+        null;
+
+      let approvedRequestsQuery = supabase
+        .from('withdrawal_requests')
+        .select('id', { count: 'exact', head: true })
+        .eq('merchant_id', profile.id)
+        .eq('status', 'approved');
+
+      if (periodStart) {
+        approvedRequestsQuery = approvedRequestsQuery.gte('created_at', periodStart);
+      }
+
+      if (periodEnd) {
+        approvedRequestsQuery = approvedRequestsQuery.lt('created_at', periodEnd);
+      }
+
+      const { count: approvedRequestsCount, error: approvedRequestsError } = await approvedRequestsQuery;
+
+      if (approvedRequestsError) {
+        console.error('approved withdrawal requests count error:', approvedRequestsError);
+      }
+
+      const usedApprovedRequests = Number(approvedRequestsCount || 0);
+
+      if (normalizedStatusRaw || safeSettings) {
         const safeStatus: WithdrawalLimitStatusRow = {
-          is_enabled: Boolean(normalizedStatusRaw.is_enabled),
-          max_requests: Number(
-            normalizedStatusRaw.max_requests ??
-              safeSettings?.max_requests ??
-              0
-          ),
-          used_requests: usedRequestsFromCountRpc,
-          remaining_requests: Math.max(
-            Number(
-              normalizedStatusRaw.max_requests ??
-                safeSettings?.max_requests ??
-                0
-            ) - usedRequestsFromCountRpc,
-            0
-          ),
-          period_type:
-            normalizedStatusRaw.period_type ||
-            safeSettings?.period_type ||
-            'monthly',
+          is_enabled: Boolean(normalizedStatusRaw?.is_enabled ?? safeSettings?.is_enabled ?? false),
+          max_requests: baseMaxRequests,
+          used_requests: usedApprovedRequests,
+          remaining_requests: Math.max(baseMaxRequests - usedApprovedRequests, 0),
+          period_type: periodType,
           min_withdrawal_amount: Number(
-            normalizedStatusRaw.min_withdrawal_amount ??
+            normalizedStatusRaw?.min_withdrawal_amount ??
               safeSettings?.min_withdrawal_amount ??
               FALLBACK_MIN_WITHDRAWAL_AMOUNT
           ),
-          period_start: normalizedStatusRaw.period_start || null,
-          period_end: normalizedStatusRaw.period_end || null,
+          period_start: periodStart,
+          period_end: periodEnd,
         };
 
         setWithdrawalLimitStatus(safeStatus);
-      } else if (safeSettings) {
-        setWithdrawalLimitStatus({
-          ...safeSettings,
-          used_requests: usedRequestsFromCountRpc,
-          remaining_requests: Math.max(
-            Number(safeSettings.max_requests || 0) - usedRequestsFromCountRpc,
-            0
-          ),
-        });
       } else {
         setWithdrawalLimitStatus(null);
       }
