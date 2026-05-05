@@ -371,7 +371,7 @@ export const MerchantAgreementPage: React.FC = () => {
                 لأي استفسار يتعلق باتفاقية التاجر أو استخدام خدمات البيع في المنصة،
                 يمكن التواصل عبر:
               </p>
-              <p className="text-orange-600 font-semibold">raqmy.app@gmail.com</p>
+              <p className="text-orange-600 font-semibold">support.raqmy@gmail.com</p>
             </section>
 
             <div className="mt-12 pt-8 border-t border-gray-200">
