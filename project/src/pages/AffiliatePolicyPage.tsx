@@ -325,7 +325,7 @@ export const AffiliatePolicyPage: React.FC = () => {
               <p>
                 لأي استفسار يتعلق ببرنامج التسويق بالعمولة، يمكن التواصل عبر:
               </p>
-              <p className="text-orange-600 font-semibold">raqmy.app@gmail.com</p>
+              <p className="text-orange-600 font-semibold">support.raqmy@gmail.com</p>
             </section>
 
             <div className="mt-12 pt-8 border-t border-gray-200">
