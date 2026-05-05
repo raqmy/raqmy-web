@@ -1483,7 +1483,7 @@ function AppContent() {
         return <PrivacyPolicyPage />;
 
       case 'terms':
-        return <MerchantAgreementPage />;
+  return <TermsPage />;
 
       default:
         return <HomePage onNavigate={navigateWithContext} />;
