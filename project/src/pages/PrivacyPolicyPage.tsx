@@ -267,7 +267,7 @@ export const PrivacyPolicyPage: React.FC = () => {
                 لأي استفسار متعلق بالخصوصية أو البيانات الشخصية، يمكن التواصل عبر:
               </p>
               <p className="text-orange-600 font-semibold">
-                raqmy.app@gmail.com
+                support.raqmy@gmail.com
               </p>
             </section>
 
