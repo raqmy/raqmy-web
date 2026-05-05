@@ -44,7 +44,7 @@ export const SupportPage: React.FC = () => {
               href="mailto:raqmy.app@gmail.com"
               className="text-blue-600 font-semibold hover:text-blue-700"
             >
-              raqmy.app@gmail.com
+              support.raqmy@gmail.com
             </a>
           </div>
 
