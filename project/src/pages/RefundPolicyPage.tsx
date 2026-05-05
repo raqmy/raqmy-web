@@ -275,7 +275,7 @@ export const RefundPolicyPage: React.FC = () => {
               <p>
                 لطلبات الاسترجاع أو الشكاوى أو الاستفسارات، يمكن التواصل عبر:
               </p>
-              <p className="text-orange-600 font-semibold">raqmy.app@gmail.com</p>
+              <p className="text-orange-600 font-semibold">support.raqmy@gmail.com</p>
             </section>
 
             <div className="mt-12 pt-8 border-t border-gray-200">
