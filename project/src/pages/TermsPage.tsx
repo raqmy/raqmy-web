@@ -351,7 +351,7 @@ export const TermsPage: React.FC = () => {
                 بالخدمات عبر:
               </p>
               <p className="text-orange-600 font-semibold">
-                raqmy.app@gmail.com
+                support.raqmy@gmail.com
               </p>
             </section>
 
