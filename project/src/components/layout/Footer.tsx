@@ -1,4 +1,4 @@
-import React from 'react';
+import React from 'react'; 
 import { Mail } from 'lucide-react';
 
 interface FooterProps {
@@ -53,36 +53,16 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             <h3 className="text-white font-semibold mb-4">روابط سريعة</h3>
             <ul className="space-y-2">
               <li>
-                <button
-                  onClick={() => onNavigate('home')}
-                  className="hover:text-white transition-colors"
-                >
-                  الرئيسية
-                </button>
+                <button onClick={() => onNavigate('home')} className="hover:text-white transition-colors">الرئيسية</button>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('marketplace')}
-                  className="hover:text-white transition-colors"
-                >
-                  المتجر العام
-                </button>
+                <button onClick={() => onNavigate('marketplace')} className="hover:text-white transition-colors">المتجر العام</button>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('pricing')}
-                  className="hover:text-white transition-colors"
-                >
-                  الباقات
-                </button>
+                <button onClick={() => onNavigate('pricing')} className="hover:text-white transition-colors">الباقات</button>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('support')}
-                  className="hover:text-white transition-colors"
-                >
-                  الدعم
-                </button>
+                <button onClick={() => onNavigate('support')} className="hover:text-white transition-colors">الدعم</button>
               </li>
             </ul>
           </div>
@@ -91,53 +71,26 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             <h3 className="text-white font-semibold mb-4">قانوني</h3>
             <ul className="space-y-2">
               <li>
-                <button
-                  onClick={() => onNavigate('privacy-policy')}
-                  className="hover:text-white transition-colors"
-                >
-                  سياسة الخصوصية
-                </button>
+                <button onClick={() => onNavigate('privacy-policy')} className="hover:text-white transition-colors">سياسة الخصوصية</button>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('terms')}
-                  className="hover:text-white transition-colors"
-                >
-                  الشروط والأحكام
-                </button>
+                <button onClick={() => onNavigate('terms')} className="hover:text-white transition-colors">الشروط والأحكام</button>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('refund-policy')}
-                  className="hover:text-white transition-colors"
-                >
-                  سياسة الاسترجاع
-                </button>
+                <button onClick={() => onNavigate('refund-policy')} className="hover:text-white transition-colors">سياسة الاسترجاع</button>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('affiliate-policy')}
-                  className="hover:text-white transition-colors"
-                >
-                  اتفاقية التسويق بالعمولة
-                </button>
+                <button onClick={() => onNavigate('affiliate-policy')} className="hover:text-white transition-colors">اتفاقية التسويق بالعمولة</button>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('merchant-agreement')}
-                  className="hover:text-white transition-colors"
-                >
-                  اتفاقية التاجر
-                </button>
+                <button onClick={() => onNavigate('merchant-agreement')} className="hover:text-white transition-colors">اتفاقية التاجر</button>
               </li>
             </ul>
           </div>
         </div>
 
         <div className="border-t border-gray-800 mt-8 pt-8 text-center">
-          <p className="text-sm text-gray-400">
-            © 2026 رقمي. جميع الحقوق محفوظة.
-          </p>
+          <p className="text-sm text-gray-400">© 2026 رقمي. جميع الحقوق محفوظة.</p>
         </div>
       </div>
     </footer>
