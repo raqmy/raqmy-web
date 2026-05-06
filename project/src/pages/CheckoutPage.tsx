@@ -184,6 +184,15 @@ const getProductSellerId = (product: ProductWithMeta | null | undefined) => {
   return product?.user_id || product?.merchant_id || null;
 };
 
+const productBelongsToCouponOwner = (
+  product: ProductWithMeta | null | undefined,
+  coupon: DiscountCouponRow | null | undefined
+) => {
+  if (!product || !coupon?.user_id) return false;
+
+  return product.user_id === coupon.user_id || product.merchant_id === coupon.user_id;
+};
+
 const getQuantityLimit = (product: ProductWithMeta | null | undefined) => {
   const rawLimit = product?.quantity_limit;
 
@@ -493,32 +502,30 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
   const canSubmitCheckout = cartItems.length > 0 && quantityInvalidItems.length === 0 && !processing;
 
-  const uniqueSellerIds = useMemo(() => {
-    return Array.from(
-      new Set(
-        cartItems
-          .map((item) => getProductSellerId(item.product))
-          .filter((id): id is string => !!id)
-      )
-    );
-  }, [cartItems]);
-
-  const singleSellerId = uniqueSellerIds.length === 1 ? uniqueSellerIds[0] : null;
-
   const getCouponEligibleItems = (
     items: CartItem[],
+    coupon: DiscountCouponRow,
     productIds: string[],
     storeIds: string[]
   ): CartItem[] => {
     if (productIds.length > 0) {
-      return items.filter((item) => productIds.includes(item.product_id));
+      return items.filter(
+        (item) =>
+          productIds.includes(item.product_id) &&
+          productBelongsToCouponOwner(item.product, coupon)
+      );
     }
 
     if (storeIds.length > 0) {
-      return items.filter((item) => !!item.product?.store_id && storeIds.includes(item.product.store_id));
+      return items.filter(
+        (item) =>
+          !!item.product?.store_id &&
+          storeIds.includes(item.product.store_id) &&
+          productBelongsToCouponOwner(item.product, coupon)
+      );
     }
 
-    return items;
+    return items.filter((item) => productBelongsToCouponOwner(item.product, coupon));
   };
 
   const calculateCouponDiscount = (
@@ -575,7 +582,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         .select(
           'id, user_id, code, discount_type, discount_value, is_active, created_at, affiliate_marketer_id, affiliate_link_id, min_purchase_amount, max_discount_amount, usage_limit, used_count, start_date, end_date'
         )
-        .eq('code', normalizedCode)
+        .ilike('code', normalizedCode)
         .maybeSingle();
 
       if (couponFetchError) {
@@ -641,7 +648,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         .map((item: any) => item.store_id)
         .filter(Boolean) as string[];
 
-      const eligibleItems = getCouponEligibleItems(cartItems, eligibleProductIds, eligibleStoreIds);
+      const eligibleItems = getCouponEligibleItems(cartItems, coupon, eligibleProductIds, eligibleStoreIds);
 
       if (eligibleItems.length === 0) {
         setAppliedCoupon(null);
@@ -721,7 +728,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       });
     }
 
-    const eligibleItems = getCouponEligibleItems(items, applied.eligibleProductIds, applied.eligibleStoreIds);
+    const eligibleItems = getCouponEligibleItems(
+      items,
+      applied.coupon,
+      applied.eligibleProductIds,
+      applied.eligibleStoreIds
+    );
+
     const eligibleIds = new Set(eligibleItems.map((item) => item.id));
     const eligibleSubtotal = applied.eligibleSubtotal;
 
@@ -906,11 +919,14 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       }
 
       const couponEligibleItemIds = new Set(
-        getCouponEligibleItems(
-          validatedCartItems,
-          appliedCoupon?.eligibleProductIds || [],
-          appliedCoupon?.eligibleStoreIds || []
-        ).map((item) => item.id)
+        appliedCoupon
+          ? getCouponEligibleItems(
+              validatedCartItems,
+              appliedCoupon.coupon,
+              appliedCoupon.eligibleProductIds,
+              appliedCoupon.eligibleStoreIds
+            ).map((item) => item.id)
+          : []
       );
 
       const itemAffiliateFallbacks = validatedCartItems.map((item) => {
@@ -972,6 +988,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
             `Coupon Discount Type: ${appliedCoupon.coupon.discount_type}`,
             `Coupon Discount Value: ${appliedCoupon.coupon.discount_value}`,
             `Coupon Applied Discount: ${discountAmount.toFixed(2)}`,
+            `Coupon Eligible Subtotal: ${appliedCoupon.eligibleSubtotal.toFixed(2)}`,
+            `Coupon Owner User ID: ${appliedCoupon.coupon.user_id}`,
             `Order Original Total: ${totalAmount.toFixed(2)}`,
             `Order Final Total: ${finalAmount.toFixed(2)}`,
           ].join(' | ')
@@ -1005,6 +1023,14 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         shipping_address: '',
         notes: finalNotes || '',
         sale_source: scopeInfo ? 'direct' : 'marketplace',
+        coupon_id: appliedCoupon?.coupon.id || null,
+        coupon_code: appliedCoupon?.coupon.code || null,
+        coupon_discount_type: appliedCoupon?.coupon.discount_type || null,
+        coupon_discount_value: appliedCoupon?.coupon.discount_value || null,
+        coupon_discount_amount: appliedCoupon?.discountAmount || 0,
+        coupon_affiliate_marketer_id: appliedCoupon?.coupon.affiliate_marketer_id || null,
+        coupon_affiliate_link_id: appliedCoupon?.coupon.affiliate_link_id || null,
+        coupon_applied_at: appliedCoupon ? new Date().toISOString() : null,
         affiliate_link_id: orderAffiliate?.affiliate_link_id || null,
         affiliate_marketer_id: orderAffiliate?.affiliate_marketer_id || null,
         affiliate_rule_id: orderAffiliate?.affiliate_rule_id || null,
@@ -1047,7 +1073,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           affiliate_rule_id: itemAffiliate?.affiliate_rule_id || null,
           affiliate_attribution_id: itemAffiliate?.attribution_id || null,
           affiliate_ref_code:
-            itemAffiliate?.affiliate_ref_code || affiliateLocalData?.ref_code || appliedCoupon?.coupon.code || null,
+            itemAffiliate?.affiliate_ref_code || affiliateLocalData?.ref_code || null,
           affiliate_commission_amount: 0,
           affiliate_commission_status:
             itemAffiliate?.affiliate_link_id || itemAffiliate?.affiliate_marketer_id ? 'pending' : 'none',
