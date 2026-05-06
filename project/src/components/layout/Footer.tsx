@@ -1,4 +1,4 @@
-import React from 'react'; 
+import React from 'react';
 import { Mail } from 'lucide-react';
 
 interface FooterProps {
@@ -19,7 +19,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <img
                 src="/raqmy-logo.png"
                 alt="رقمي Raqmy"
-                className="h-12 w-auto object-contain brightness-0 invert"
+                className="h-14 w-auto object-contain rounded-xl"
                 onError={(event) => {
                   const target = event.currentTarget;
                   target.style.display = 'none';
