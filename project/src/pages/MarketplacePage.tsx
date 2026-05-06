@@ -2,9 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search,
   Download,
-  AlertTriangle,
-  CheckCircle2,
-  Package,
 } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 
@@ -87,36 +84,6 @@ const getRemainingQuantity = (product: ProductWithDetails | null | undefined) =>
 const isProductSoldOut = (product: ProductWithDetails | null | undefined) => {
   const remaining = getRemainingQuantity(product);
   return remaining !== null && remaining <= 0;
-};
-
-const ProductAvailabilityBadge: React.FC<{ product: ProductWithDetails }> = ({ product }) => {
-  const remaining = getRemainingQuantity(product);
-  const soldOut = isProductSoldOut(product);
-
-  if (remaining === null) {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700 border border-green-100">
-        <CheckCircle2 className="w-3.5 h-3.5" />
-        متاح بدون حد
-      </span>
-    );
-  }
-
-  if (soldOut) {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 border border-red-100">
-        <AlertTriangle className="w-3.5 h-3.5" />
-        نفدت الكمية
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 border border-blue-100">
-      <Package className="w-3.5 h-3.5" />
-      المتبقي {remaining}
-    </span>
-  );
 };
 
 export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) => {
@@ -397,8 +364,6 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                         {Number(product.price ?? 0)} ريال
                       </div>
                     </div>
-
-                    <ProductAvailabilityBadge product={product} />
                   </div>
                 </div>
               );
