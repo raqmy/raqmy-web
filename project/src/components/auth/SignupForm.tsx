@@ -23,6 +23,7 @@ interface SignupFormProps {
 }
 
 type SignupStep = 'basic-info' | 'email-verification' | 'completed';
+type AccountRole = 'customer' | 'seller';
 
 type AccountStatusResponse =
   | {
@@ -67,6 +68,14 @@ type EmailValidationResult =
       suggestedEmail?: string;
     };
 
+const normalizeAccountRole = (value?: string | null): AccountRole => {
+  if (value === 'seller' || value === 'merchant') {
+    return 'seller';
+  }
+
+  return 'customer';
+};
+
 export const SignupForm: React.FC<SignupFormProps> = ({
   onSwitchToLogin,
   initialData,
@@ -85,7 +94,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const [role, setRole] = useState<'customer' | 'seller'>('customer');
+  const [role, setRole] = useState<AccountRole>('customer');
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -273,6 +282,24 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     }
 
     if (existingProfile) {
+      const normalizedExistingRole = normalizeAccountRole(existingProfile.role);
+
+      if (existingProfile.role !== normalizedExistingRole) {
+        const { error: normalizeRoleError } = await supabase
+          .from('users_profile')
+          .update({ role: normalizedExistingRole })
+          .eq('id', authUser.id);
+
+        if (normalizeRoleError) {
+          throw new Error(`فشل تصحيح نوع الحساب: ${normalizeRoleError.message}`);
+        }
+
+        return {
+          ...existingProfile,
+          role: normalizedExistingRole,
+        };
+      }
+
       return existingProfile;
     }
 
@@ -282,8 +309,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       authUser.email?.split('@')[0] ||
       'مستخدم جديد';
 
-    const fallbackRole =
-      authUser.user_metadata?.role === 'seller' ? 'seller' : role;
+    const fallbackRole = normalizeAccountRole(authUser.user_metadata?.role ?? role);
 
     const { error: createProfileError } = await supabase
       .from('users_profile')
@@ -314,16 +340,26 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       throw new Error(`فشل قراءة بيانات الحساب بعد إنشائها: ${createdProfileError.message}`);
     }
 
-    return createdProfile;
+    return createdProfile
+      ? {
+          ...createdProfile,
+          role: normalizeAccountRole(createdProfile.role),
+        }
+      : createdProfile;
   };
 
   const markSignupCompleted = async (authUser: any) => {
     const profile = await ensureProfileForUser(authUser);
+    const normalizedProfileRole = normalizeAccountRole(profile?.role ?? authUser.user_metadata?.role ?? role);
 
-    if (!profile?.signup_completed) {
+    const shouldUpdateProfile =
+      !profile?.signup_completed || profile?.role !== normalizedProfileRole;
+
+    if (shouldUpdateProfile) {
       const { error: updateProfileError } = await supabase
         .from('users_profile')
         .update({
+          role: normalizedProfileRole,
           signup_completed: true,
         })
         .eq('id', authUser.id);
@@ -339,7 +375,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
     setEmail(normalizedEmail);
     setName((prev) => prev || profile?.name || authUser.user_metadata?.name || '');
-    setRole((profile?.role === 'seller' ? 'seller' : 'customer') as 'customer' | 'seller');
+    setRole(normalizedProfileRole);
 
     clearAuthHashFromUrl();
     setStep('completed');
@@ -554,7 +590,10 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
     try {
       const normalizedEmail = emailValidation.normalizedEmail;
+      const normalizedRole = normalizeAccountRole(role);
+
       setEmail(normalizedEmail);
+      setRole(normalizedRole);
 
       const statusResult = await checkAccountStatus(normalizedEmail);
 
@@ -584,7 +623,8 @@ export const SignupForm: React.FC<SignupFormProps> = ({
           emailRedirectTo: `${window.location.origin}/auth/signup`,
           data: {
             name: name.trim(),
-            role,
+            role: normalizedRole,
+            account_type: normalizedRole,
           },
         },
       });
