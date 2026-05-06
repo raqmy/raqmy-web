@@ -901,7 +901,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             <div className="flex items-center gap-4 mb-6 flex-wrap">
               <div className="text-gray-600">{displayedViewsCount} مشاهدة</div>
 
-              {hasQuantityLimit ? (
+              {hasQuantityLimit && (
                 isSoldOut ? (
                   <span className="inline-flex items-center gap-2 rounded-full bg-red-50 px-4 py-2 text-sm font-bold text-red-700 border border-red-100">
                     <AlertTriangle className="w-4 h-4" />
@@ -913,10 +913,6 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     المتبقي للشراء: {remainingQuantity}
                   </span>
                 )
-              ) : (
-                <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 border border-blue-100">
-                  متاح بدون حد
-                </span>
               )}
             </div>
 
@@ -1056,7 +1052,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     ? 'نفدت الكمية'
                     : hasQuantityLimit
                     ? `متبقي ${remainingQuantity} من ${quantityLimit}`
-                    : 'متاح بدون حد'}
+                    : ''}
                 </span>
               </div>
             </div>
