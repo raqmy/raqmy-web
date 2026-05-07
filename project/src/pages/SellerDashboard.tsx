@@ -2056,45 +2056,40 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   const buildLedgerDescription = (entry: WalletLedgerRow) => {
     const parts: string[] = [];
-    const cleanNotes = String(entry.notes || '').trim();
     const meta = entry.order_id ? earningsOrderMeta[entry.order_id] : null;
 
     if (entry.entry_type === 'sale_credit') {
-      parts.push('هذا القيد يمثل إيداع صافي قيمة الطلب في محفظتك بعد خصم عمولة المنصة فقط.');
+      parts.push('تم إضافة صافي قيمة الطلب إلى محفظتك بعد خصم عمولة المنصة.');
 
       if (entry.status === 'pending' && entry.available_at) {
-        parts.push('المبلغ مسجل الآن في الرصيد المعلق، وسينتقل تلقائيًا إلى الرصيد المتاح بعد انتهاء مدة التعليق.');
+        parts.push('المبلغ حالياً في الرصيد المعلق، وسيصبح متاحاً للسحب بعد انتهاء مدة التعليق.');
       } else if (entry.status === 'completed' || entry.status === 'approved') {
-        parts.push('تم اعتماد هذا الإيداع وأصبح ضمن رصيدك المتاح للسحب أو الاستخدام.');
+        parts.push('المبلغ أصبح ضمن رصيدك المتاح.');
       }
 
       if (meta?.affiliateLabel) {
         const affiliateText = meta.affiliateAmount
-          ? `توجد على هذا الطلب عمولة تسويق مستحقة للمسوق ${meta.affiliateLabel} بقيمة ${formatCurrency(meta.affiliateAmount)}، لكنها لا تُخصم تلقائيًا من هذا القيد داخل محفظتك.`
-          : `هذا الطلب مرتبط بالمسوق ${meta.affiliateLabel}، وعمولته مسجلة داخل النظام بشكل منفصل عن هذا الإيداع.`;
+          ? `توجد عمولة تسويق مرتبطة بهذا الطلب للمسوق ${meta.affiliateLabel} بقيمة ${formatCurrency(meta.affiliateAmount)}، وتظهر في تقارير التسويق بالعمولة.`
+          : `هذا الطلب مرتبط بالمسوق ${meta.affiliateLabel}، وتظهر تفاصيله في تقارير التسويق بالعمولة.`;
         parts.push(affiliateText);
       }
 
       if (meta?.couponLabel) {
         const couponText = meta.couponAmount
-          ? `تم استخدام كوبون ${meta.couponLabel} بقيمة خصم ${formatCurrency(meta.couponAmount)} على هذا الطلب.`
+          ? `تم استخدام كوبون ${meta.couponLabel} بخصم ${formatCurrency(meta.couponAmount)} على هذا الطلب.`
           : `تم استخدام كوبون ${meta.couponLabel} على هذا الطلب.`;
         parts.push(couponText);
       }
     } else if (entry.entry_type === 'withdrawal_request') {
-      parts.push('هذا القيد يعني أنه تم إنشاء طلب سحب من رصيدك المتاح، والمبلغ الآن بانتظار مراجعة الإدارة.');
+      parts.push('تم إنشاء طلب سحب، والمبلغ الآن قيد المراجعة من الإدارة.');
 
       if (entry.status === 'pending') {
-        parts.push('لن يتم تحويل المبلغ إلى حسابك البنكي إلا بعد اعتماد الطلب.');
+        parts.push('سيتم تحويل المبلغ إلى حسابك البنكي بعد اعتماد الطلب.');
       }
     } else if (entry.entry_type === 'withdrawal_completed') {
-      parts.push('هذا القيد يعني أن طلب السحب تم اعتماده ومعالجته، وتم خصم المبلغ من محفظتك وتحويله حسب بياناتك البنكية المعتمدة.');
+      parts.push('تم اعتماد طلب السحب وتحويل المبلغ إلى حسابك البنكي.');
     } else if (entry.entry_type === 'withdrawal_rejected') {
-      parts.push('هذا القيد يعني أن طلب السحب تم رفضه، وتمت إعادة المبلغ إلى محفظتك أو إلغاء أثر الطلب بحسب حالة المعالجة.');
-    }
-
-    if (cleanNotes) {
-      parts.push(cleanNotes);
+      parts.push('تم رفض طلب السحب، وتمت إعادة المبلغ إلى رصيدك المتاح.');
     }
 
     return parts.join(' ');
