@@ -2422,10 +2422,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                         </div>
 
                         <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div className="text-sm text-gray-500">
-                            يمكنك تعديل الاسم والصورة الشخصية والبريد الإلكتروني من هذه الصفحة
-                          </div>
-
                           <div className="flex flex-wrap gap-3">
                             <button
                               onClick={handleUpdateProfile}
@@ -2593,7 +2589,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                             </div>
                             <div>
                               <h3 className="text-lg font-bold text-gray-900">التحقق من الهوية</h3>
-                              <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
                             </div>
                           </div>
 
@@ -2854,7 +2849,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                             </div>
                             <div>
                               <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
-                              <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
                             </div>
                           </div>
 
@@ -3036,7 +3030,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                             </div>
                             <div>
                               <h3 className="text-lg font-bold text-gray-900">الاشتراك والخطة</h3>
-                              <p className="text-sm text-gray-500">هذا القسم يظهر للتاجر فقط</p>
                             </div>
                           </div>
 
