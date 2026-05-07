@@ -2779,7 +2779,15 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                     </div>
                                   </div>
 
-                                  <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm leading-7">
+                                  <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm leading-7 flex items-start gap-3">
+                                    <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                                    <div>
+                                      <span className="font-bold">ملاحظة:</span>{' '}
+                                      يُسمح للنساء فقط بتغطية صورة الوجه في مستند الهوية.
+                                    </div>
+                                  </div>
+
+                                  <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm leading-7">
                                     بعد الإرسال سيتم تحويل الطلب إلى حالة{' '}
                                     <span className="font-bold">قيد المراجعة</span>.
                                     ويمكنك تعديل الطلب وإعادة إرساله إذا تم رفضه لاحقاً.
