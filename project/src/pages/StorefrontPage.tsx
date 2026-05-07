@@ -593,6 +593,24 @@ interface StorefrontAuthModalProps {
   onSwitchMode: () => void;
 }
 
+const getFriendlyStorefrontAuthError = (message?: string) => {
+  const normalized = String(message || '').toLowerCase();
+
+  if (normalized.includes('invalid login credentials')) {
+    return 'فشل تسجيل الدخول. تأكد من صحة البريد الإلكتروني وكلمة المرور، أو أنشئ حسابًا جديدًا إذا لم يكن لديك حساب.';
+  }
+
+  if (normalized.includes('email not confirmed')) {
+    return 'يجب تأكيد البريد الإلكتروني أولًا قبل تسجيل الدخول.';
+  }
+
+  if (normalized.includes('user already registered') || normalized.includes('already registered')) {
+    return 'هذا البريد الإلكتروني مسجل مسبقًا. سجّل الدخول بدل إنشاء حساب جديد.';
+  }
+
+  return message || 'حدث خطأ أثناء المعالجة';
+};
+
 const StorefrontAuthModal: React.FC<StorefrontAuthModalProps> = ({
   mode,
   onClose,
@@ -645,7 +663,7 @@ const StorefrontAuthModal: React.FC<StorefrontAuthModalProps> = ({
       }
     } catch (err: any) {
       console.error('Auth error:', err);
-      setError(err.message || 'حدث خطأ أثناء المعالجة');
+      setError(getFriendlyStorefrontAuthError(err?.message));
     } finally {
       setLoading(false);
     }
