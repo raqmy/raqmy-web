@@ -389,16 +389,12 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
       return [
         'تم تسجيل الطلب بنجاح داخل حسابك',
         `يمكنك الدخول إلى صفحة "مشترياتي" للوصول إلى ملفات المنتجات المدفوعة`,
-        'إذا كان المنتج رقميًا فستظهر مرفقاته بعد التحقق من حالة الشراء',
-        'تم تحديث عدد المبيعات من جهة نظام الدفع بعد تأكيد نجاح العملية',
       ];
     }
 
     return [
       'تم تسجيل الطلب بنجاح داخل حسابك',
       'يمكنك الدخول إلى صفحة "مشترياتي" للوصول إلى ملفات المنتجات المدفوعة',
-      'إذا كان المنتج رقميًا فستظهر مرفقاته بعد التحقق من حالة الشراء',
-      'تم تحديث عدد المبيعات من جهة نظام الدفع بعد تأكيد نجاح العملية',
     ];
   }, [scopeInfo]);
 
@@ -497,10 +493,6 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
                   <p className="text-sm font-mono text-blue-800">{order.payment_reference}</p>
                 </div>
               )}
-            </div>
-
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
-              تم تأكيد الدفع، وسيتم احتساب عدد المبيعات من خلال Webhook الدفع حتى لا يتم تكرار زيادة الكمية عند تحديث الصفحة.
             </div>
 
             <div className="border-t border-gray-200 pt-6">
