@@ -24,7 +24,6 @@ interface ScopeInfo {
   source: 'stores' | 'merchants';
   storeId: string | null;
   merchantUserId: string | null;
-  imageUrl?: string | null;
 }
 
 interface ProductWithMeta extends Product {
@@ -105,28 +104,6 @@ const getActiveStoreScopeSlug = () => {
   }
 };
 
-const getStoreImageUrl = (storeRecord: any): string | null => {
-  if (!storeRecord) return null;
-
-  const candidates = [
-    storeRecord.store_image_url,
-    storeRecord.image_url,
-    storeRecord.logo_url,
-    storeRecord.thumbnail_url,
-    storeRecord.avatar_url,
-    storeRecord.cover_image_url,
-  ];
-
-  for (const value of candidates) {
-    if (typeof value === 'string' && value.trim() !== '') {
-      return value.trim();
-    }
-  }
-
-  return null;
-};
-
-
 const getAffiliateLocalData = (): AffiliateLocalData | null => {
   try {
     const raw = localStorage.getItem('affiliate_data');
@@ -143,7 +120,7 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
 
   const { data: storeData, error: storeError } = await supabase
     .from('stores')
-    .select('id, slug, name, user_id, image_url, logo_url, thumbnail_url, avatar_url, cover_image_url, store_image_url')
+    .select('id, slug, name, user_id')
     .eq('slug', slug)
     .maybeSingle();
 
@@ -154,13 +131,12 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
       source: 'stores',
       storeId: storeData.id,
       merchantUserId: storeData.user_id || null,
-      imageUrl: getStoreImageUrl(storeData),
     };
   }
 
   const { data: merchantData, error: merchantError } = await supabase
     .from('merchants')
-    .select('id, slug, user_id, store_name, business_name, name, image_url, logo_url, thumbnail_url, avatar_url, cover_image_url, store_image_url')
+    .select('id, slug, user_id, store_name, business_name, name')
     .eq('slug', slug)
     .maybeSingle();
 
@@ -172,7 +148,6 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
       source: 'merchants',
       storeId: null,
       merchantUserId: merchantData.user_id || merchantData.id,
-      imageUrl: getStoreImageUrl(merchantData),
     };
   }
 
@@ -306,19 +281,11 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
     >
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-white/15 rounded-xl overflow-hidden flex items-center justify-center border border-white/20">
-            {scopeInfo.imageUrl ? (
-              <img
-                src={scopeInfo.imageUrl}
-                alt={scopeInfo.name}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <StoreIcon className="w-6 h-6" />
-            )}
+          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center">
+            <StoreIcon className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-sm text-white/80">إتمام الطلب من متجر</p>
+            <p className="text-sm text-white/80">أنت داخل متجر</p>
             <h2 className="text-2xl font-bold">{scopeInfo.name}</h2>
           </div>
         </div>
