@@ -64,6 +64,7 @@ type ScopeInfo = {
   source: 'stores' | 'merchants';
   storeId: string | null;
   merchantUserId: string | null;
+  imageUrl?: string | null;
 };
 
 const RETRY_COUNT = 8;
@@ -80,13 +81,35 @@ const getActiveStoreScopeSlug = () => {
   }
 };
 
+const getStoreImageUrl = (storeRecord: any): string | null => {
+  if (!storeRecord) return null;
+
+  const candidates = [
+    storeRecord.store_image_url,
+    storeRecord.image_url,
+    storeRecord.logo_url,
+    storeRecord.thumbnail_url,
+    storeRecord.avatar_url,
+    storeRecord.cover_image_url,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+
+  return null;
+};
+
+
 const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   const slug = getActiveStoreScopeSlug();
   if (!slug) return null;
 
   const { data: storeData, error: storeError } = await supabase
     .from('stores')
-    .select('id, slug, name, user_id')
+    .select('id, slug, name, user_id, image_url, logo_url, thumbnail_url, avatar_url, cover_image_url, store_image_url')
     .eq('slug', slug)
     .maybeSingle();
 
@@ -97,12 +120,13 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
       source: 'stores',
       storeId: storeData.id,
       merchantUserId: storeData.user_id || null,
+      imageUrl: getStoreImageUrl(storeData),
     };
   }
 
   const { data: merchantData, error: merchantError } = await supabase
     .from('merchants')
-    .select('id, slug, user_id, store_name, business_name, name')
+    .select('id, slug, user_id, store_name, business_name, name, image_url, logo_url, thumbnail_url, avatar_url, cover_image_url, store_image_url')
     .eq('slug', slug)
     .maybeSingle();
 
@@ -114,6 +138,7 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
       source: 'merchants',
       storeId: null,
       merchantUserId: merchantData.user_id || merchantData.id,
+      imageUrl: getStoreImageUrl(merchantData),
     };
   }
 
@@ -168,11 +193,19 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
     >
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center">
-            <StoreIcon className="w-6 h-6" />
+          <div className="w-12 h-12 bg-white/15 rounded-xl overflow-hidden flex items-center justify-center border border-white/20">
+            {scopeInfo.imageUrl ? (
+              <img
+                src={scopeInfo.imageUrl}
+                alt={scopeInfo.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <StoreIcon className="w-6 h-6" />
+            )}
           </div>
           <div>
-            <p className="text-sm text-white/80">تم الدفع داخل متجر</p>
+            <p className="text-sm text-white/80">تم الدفع بنجاح من متجر</p>
             <h2 className="text-2xl font-bold">{scopeInfo.name}</h2>
           </div>
         </div>
@@ -355,7 +388,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
     if (scopeInfo) {
       return [
         'تم تسجيل الطلب بنجاح داخل حسابك',
-        `يمكنك الدخول إلى صفحة "مشترياتي" داخل متجر ${scopeInfo.name} للوصول إلى ملفات المنتجات المدفوعة`,
+        `يمكنك الدخول إلى صفحة "مشترياتي" للوصول إلى ملفات المنتجات المدفوعة`,
         'إذا كان المنتج رقميًا فستظهر مرفقاته بعد التحقق من حالة الشراء',
         'تم تحديث عدد المبيعات من جهة نظام الدفع بعد تأكيد نجاح العملية',
       ];
@@ -570,7 +603,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
                 className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
               >
                 <ShoppingBag className="w-5 h-5" />
-                <span>{scopeInfo ? 'الذهاب إلى مشترياتي داخل المتجر' : 'الذهاب إلى مشترياتي'}</span>
+                <span>الذهاب إلى مشترياتي</span>
               </button>
 
               <button
