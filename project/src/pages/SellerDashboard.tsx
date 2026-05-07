@@ -227,7 +227,7 @@ const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
-const SELLER_DASHBOARD_CACHE_VERSION = 2;
+const SELLER_DASHBOARD_CACHE_VERSION = 3;
 const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
 
 const getSellerDashboardCacheKey = (profileId: string) => {
@@ -932,6 +932,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
       const thumbMap: Record<string, string> = {};
       const productSalesMap: Record<string, number> = {};
+      const productViewsMap: Record<string, number> = {};
 
       if (productIds.length > 0) {
         const { data: imgs, error: imgsErr } = await supabase
@@ -949,6 +950,22 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             if (!thumbMap[row.product_id] && row.image_url) {
               thumbMap[row.product_id] = row.image_url;
             }
+          }
+        }
+
+        const { data: viewedProductsData, error: viewedProductsErr } = await supabase
+          .from('viewed_products')
+          .select('product_id')
+          .in('product_id', productIds);
+
+        if (viewedProductsErr) {
+          console.error('viewed_products count fetch error:', viewedProductsErr);
+        } else {
+          for (const row of safeArray(viewedProductsData) as any[]) {
+            const productId = row?.product_id;
+            if (!productId) continue;
+
+            productViewsMap[productId] = (productViewsMap[productId] || 0) + 1;
           }
         }
 
@@ -982,6 +999,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       const productsWithThumbs = normalizedProducts.map((p) => ({
         ...p,
         thumbnail_url: p.thumbnail_url || thumbMap[p.id] || null,
+        views_count: productViewsMap[p.id] ?? Number(p.views_count || 0) ?? 0,
         sales_count: productSalesMap[p.id] ?? Number(p.sales_count || 0) ?? 0,
       }));
 
