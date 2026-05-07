@@ -18,6 +18,28 @@ interface StoreDetailPageProps {
   onNavigate: (page: string) => void;
 }
 
+
+const getStoreImageUrl = (storeRecord: any): string | null => {
+  if (!storeRecord) return null;
+
+  const candidates = [
+    storeRecord.store_image_url,
+    storeRecord.image_url,
+    storeRecord.logo_url,
+    storeRecord.thumbnail_url,
+    storeRecord.avatar_url,
+    storeRecord.cover_image_url,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+
+  return null;
+};
+
 export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNavigate }) => {
   const [store, setStore] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
@@ -187,8 +209,16 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({ storeId, onNav
         <div className="bg-white rounded-xl shadow-sm p-8 mb-8">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
-                <Store className="w-8 h-8 text-white" />
+              <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl overflow-hidden flex items-center justify-center">
+                {getStoreImageUrl(store) ? (
+                  <img
+                    src={getStoreImageUrl(store) as string}
+                    alt={store.name || 'صورة المتجر'}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <Store className="w-8 h-8 text-white" />
+                )}
               </div>
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 mb-1">{store.name}</h1>
