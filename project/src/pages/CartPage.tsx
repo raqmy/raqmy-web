@@ -64,7 +64,7 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
 
   const { data: storeData, error: storeError } = await supabase
     .from('stores')
-    .select('id, slug, name, user_id')
+    .select('*')
     .eq('slug', slug)
     .maybeSingle();
 
@@ -75,12 +75,19 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
       source: 'stores',
       storeId: storeData.id,
       merchantUserId: storeData.user_id || null,
+      imageUrl:
+        storeData.logo_url ||
+        storeData.image_url ||
+        storeData.store_image_url ||
+        storeData.avatar_url ||
+        storeData.thumbnail_url ||
+        null,
     };
   }
 
   const { data: merchantData, error: merchantError } = await supabase
     .from('merchants')
-    .select('id, slug, user_id, store_name, business_name, name')
+    .select('*')
     .eq('slug', slug)
     .maybeSingle();
 
@@ -92,6 +99,13 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
       source: 'merchants',
       storeId: null,
       merchantUserId: merchantData.user_id || merchantData.id,
+      imageUrl:
+        merchantData.logo_url ||
+        merchantData.image_url ||
+        merchantData.store_image_url ||
+        merchantData.avatar_url ||
+        merchantData.thumbnail_url ||
+        null,
     };
   }
 
@@ -165,27 +179,41 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
   onNavigate,
 }) => {
   return (
-    <button
-      onClick={() => onNavigate(`storefront-${scopeInfo.slug}`)}
-      className="w-full mb-6 text-right bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl p-5 hover:shadow-lg transition-all"
-    >
+    <div className="w-full mb-6 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl p-4 sm:p-5 shadow-sm">
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center">
-            <StoreIcon className="w-6 h-6" />
-          </div>
-          <div>
-            <p className="text-sm text-white/80">أنت داخل متجر</p>
-            <h2 className="text-2xl font-bold">{scopeInfo.name}</h2>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-sm font-medium bg-white/15 px-4 py-2 rounded-lg">
+        <button
+          type="button"
+          onClick={() => onNavigate(`storefront-${scopeInfo.slug}`)}
+          className="flex items-center gap-2 text-sm font-medium bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg transition-colors"
+        >
           <ArrowLeft className="w-4 h-4" />
           <span>العودة إلى المتجر</span>
-        </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate(`storefront-${scopeInfo.slug}`)}
+          className="flex items-center gap-3 text-right hover:opacity-90 transition-opacity"
+          aria-label={`العودة إلى متجر ${scopeInfo.name}`}
+        >
+          <div>
+            <h2 className="text-2xl font-bold leading-tight">{scopeInfo.name}</h2>
+          </div>
+
+          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0">
+            {scopeInfo.imageUrl ? (
+              <img
+                src={scopeInfo.imageUrl}
+                alt={scopeInfo.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <StoreIcon className="w-6 h-6" />
+            )}
+          </div>
+        </button>
       </div>
-    </button>
+    </div>
   );
 };
 
