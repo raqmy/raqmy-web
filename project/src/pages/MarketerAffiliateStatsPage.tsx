@@ -492,6 +492,64 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
     };
   };
 
+
+  const hydrateMarketerDisplayName = async (
+    baseData: PublicStatsData
+  ): Promise<PublicStatsData> => {
+    const marketerId = baseData.link?.marketer_id
+      ? String(baseData.link.marketer_id)
+      : baseData.marketer?.id
+      ? String(baseData.marketer.id)
+      : '';
+
+    if (!marketerId) {
+      return baseData;
+    }
+
+    try {
+      const { data: marketerRow, error: marketerError } = await supabase
+        .from('affiliate_marketers')
+        .select('id, user_id, name')
+        .eq('id', marketerId)
+        .maybeSingle();
+
+      if (marketerError || !marketerRow) {
+        if (marketerError) console.error('Error fetching marketer display name:', marketerError);
+        return baseData;
+      }
+
+      let marketerName = String((marketerRow as any).name || '').trim();
+      const marketerUserId = (marketerRow as any).user_id ? String((marketerRow as any).user_id) : '';
+
+      if (marketerUserId) {
+        const { data: userRow, error: userError } = await supabase
+          .from('users_profile')
+          .select('id, name')
+          .eq('id', marketerUserId)
+          .maybeSingle();
+
+        if (userError) {
+          console.error('Error fetching marketer user profile:', userError);
+        }
+
+        const userName = String((userRow as any)?.name || '').trim();
+        if (userName) marketerName = userName;
+      }
+
+      return {
+        ...baseData,
+        marketer: {
+          ...baseData.marketer,
+          id: marketerId,
+          name: marketerName || baseData.marketer?.name || 'مسوق',
+        },
+      };
+    } catch (error) {
+      console.error('hydrateMarketerDisplayName error:', error);
+      return baseData;
+    }
+  };
+
   const fetchStats = async () => {
     setLoading(true);
     setError('');
@@ -560,7 +618,8 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
 
       const hydratedRuleData = await hydrateRuleAndTiersFallback(normalizedData);
       const hydratedPerformanceData = await hydratePerformanceFromDatabase(hydratedRuleData);
-      setData(hydratedPerformanceData);
+      const hydratedMarketerData = await hydrateMarketerDisplayName(hydratedPerformanceData);
+      setData(hydratedMarketerData);
     } catch (err: any) {
       console.error('Error fetching marketer affiliate stats:', err);
       setError(err.message || 'حدث خطأ أثناء جلب الإحصائيات');
@@ -741,11 +800,6 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
                   icon={<DollarSign className="w-4 h-4" />}
                   label="العمولة"
                   value={formatCommission(data.rule.commission_type, data.rule.commission_value)}
-                />
-                <InfoRow
-                  icon={<Target className="w-4 h-4" />}
-                  label="الأولوية"
-                  value={String(data.rule.priority || 100)}
                 />
                 <InfoRow
                   icon={<CheckCircle2 className="w-4 h-4" />}
