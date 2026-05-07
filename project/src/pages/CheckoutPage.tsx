@@ -24,6 +24,7 @@ interface ScopeInfo {
   source: 'stores' | 'merchants';
   storeId: string | null;
   merchantUserId: string | null;
+  imageUrl: string | null;
 }
 
 interface ProductWithMeta extends Product {
@@ -96,6 +97,29 @@ interface OrderItemPricing {
   discountShare: number;
 }
 
+const STORE_IMAGE_URL_FIELDS = [
+  'store_image_url',
+  'logo_url',
+  'image_url',
+  'cover_image',
+  'cover_url',
+  'avatar_url',
+  'store_logo_url',
+] as const;
+
+const getStoreImageUrl = (record: any) => {
+  if (!record) return null;
+
+  for (const field of STORE_IMAGE_URL_FIELDS) {
+    const value = record?.[field];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+};
+
 const getActiveStoreScopeSlug = () => {
   try {
     return sessionStorage.getItem('active_store_slug');
@@ -120,7 +144,7 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
 
   const { data: storeData, error: storeError } = await supabase
     .from('stores')
-    .select('id, slug, name, user_id')
+    .select('*')
     .eq('slug', slug)
     .maybeSingle();
 
@@ -131,12 +155,13 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
       source: 'stores',
       storeId: storeData.id,
       merchantUserId: storeData.user_id || null,
+      imageUrl: getStoreImageUrl(storeData),
     };
   }
 
   const { data: merchantData, error: merchantError } = await supabase
     .from('merchants')
-    .select('id, slug, user_id, store_name, business_name, name')
+    .select('*')
     .eq('slug', slug)
     .maybeSingle();
 
@@ -148,6 +173,7 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
       source: 'merchants',
       storeId: null,
       merchantUserId: merchantData.user_id || merchantData.id,
+      imageUrl: getStoreImageUrl(merchantData),
     };
   }
 
@@ -281,11 +307,18 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
     >
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center">
-            <StoreIcon className="w-6 h-6" />
+          <div className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center overflow-hidden">
+            {scopeInfo.imageUrl ? (
+              <img
+                src={scopeInfo.imageUrl}
+                alt={scopeInfo.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <StoreIcon className="w-6 h-6" />
+            )}
           </div>
           <div>
-            <p className="text-sm text-white/80">أنت داخل متجر</p>
             <h2 className="text-2xl font-bold">{scopeInfo.name}</h2>
           </div>
         </div>
