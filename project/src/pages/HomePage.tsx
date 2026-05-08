@@ -295,7 +295,6 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           <div className="flex items-center justify-between mb-12">
             <div>
               <h2 className="text-3xl font-bold text-gray-900 mb-2">المنتجات الرقمية</h2>
-              <p className="text-gray-600">منتجات مختارة من السوق العام بشكل أذكى وأكثر تنوعًا</p>
             </div>
             <button
               onClick={() => onNavigate('marketplace')}
