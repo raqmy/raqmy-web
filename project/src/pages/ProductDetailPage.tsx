@@ -238,7 +238,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         return;
       }
 
-      setRealViewsCount(count ?? 0);
+      const countedViews = count ?? 0;
+      const storedViews = Number((product as any)?.views_count ?? 0);
+      const safeStoredViews = Number.isFinite(storedViews) && storedViews > 0 ? Math.floor(storedViews) : 0;
+
+      setRealViewsCount(Math.max(countedViews, safeStoredViews));
     } catch (error) {
       console.error('Error fetching real views count:', error);
     }
@@ -542,54 +546,141 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     }
   };
 
+  const getOrCreateVisitorToken = () => {
+    try {
+      const existingToken = localStorage.getItem('visitor_token');
+      if (existingToken) return existingToken;
+
+      const newToken = crypto.randomUUID();
+      localStorage.setItem('visitor_token', newToken);
+      return newToken;
+    } catch (error) {
+      console.error('Error creating visitor token:', error);
+      return null;
+    }
+  };
+
+  const getViewedProductsStorageKey = (targetProductId: string) => {
+    return `raqmy_viewed_product_${targetProductId}`;
+  };
+
+  const hasRecentlyViewedProduct = (targetProductId: string) => {
+    try {
+      const storageKey = getViewedProductsStorageKey(targetProductId);
+      const lastViewedAt = localStorage.getItem(storageKey);
+
+      if (!lastViewedAt) return false;
+
+      const lastViewedTime = new Date(lastViewedAt).getTime();
+      if (!Number.isFinite(lastViewedTime)) return false;
+
+      const oneHourInMs = 60 * 60 * 1000;
+      return Date.now() - lastViewedTime < oneHourInMs;
+    } catch (error) {
+      console.error('Error reading viewed product cache:', error);
+      return false;
+    }
+  };
+
+  const markProductAsViewedLocally = (targetProductId: string) => {
+    try {
+      localStorage.setItem(getViewedProductsStorageKey(targetProductId), new Date().toISOString());
+    } catch (error) {
+      console.error('Error saving viewed product cache:', error);
+    }
+  };
+
   const incrementViewCount = async () => {
-    if (!resolvedProductId || !user?.id) {
+    if (!resolvedProductId) {
       return;
     }
 
+    if (hasRecentlyViewedProduct(resolvedProductId)) {
+      await fetchRealViewsCount(resolvedProductId);
+      return;
+    }
+
+    const visitorToken = getOrCreateVisitorToken();
+    const nowIso = new Date().toISOString();
+
     try {
-      const nowIso = new Date().toISOString();
+      const { error: rpcError } = await supabase.rpc('record_product_view', {
+        p_product_id: resolvedProductId,
+        p_user_id: user?.id ?? null,
+        p_visitor_token: visitorToken,
+      });
 
-      const { data: existingView, error: existingViewError } = await supabase
-        .from('viewed_products')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('product_id', resolvedProductId)
-        .maybeSingle();
-
-      if (existingViewError) {
-        console.error('Error checking existing viewed product row:', existingViewError);
+      if (!rpcError) {
+        markProductAsViewedLocally(resolvedProductId);
+        await fetchRealViewsCount(resolvedProductId);
         return;
       }
 
-      if (existingView?.id) {
-        const { error: updateViewError } = await supabase
-          .from('viewed_products')
-          .update({
-            viewed_at: nowIso,
-          })
-          .eq('id', existingView.id);
+      console.error('record_product_view rpc failed, using fallback:', rpcError);
+    } catch (error) {
+      console.error('record_product_view rpc exception, using fallback:', error);
+    }
 
-        if (updateViewError) {
-          console.error('Error updating viewed product row:', updateViewError);
-          return;
-        }
-      } else {
-        const { error: insertViewError } = await supabase
+    try {
+      if (user?.id) {
+        const { data: existingView, error: existingViewError } = await supabase
           .from('viewed_products')
-          .insert({
-            user_id: user.id,
-            product_id: resolvedProductId,
-            viewed_at: nowIso,
-          });
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('product_id', resolvedProductId)
+          .maybeSingle();
 
-        if (insertViewError) {
-          console.error('Error inserting viewed product row:', insertViewError);
-          return;
+        if (existingViewError) {
+          console.error('Error checking existing viewed product row:', existingViewError);
+        } else if (existingView?.id) {
+          const { error: updateViewError } = await supabase
+            .from('viewed_products')
+            .update({
+              viewed_at: nowIso,
+            })
+            .eq('id', existingView.id);
+
+          if (updateViewError) {
+            console.error('Error updating viewed product row:', updateViewError);
+          }
+        } else {
+          const { error: insertViewError } = await supabase
+            .from('viewed_products')
+            .insert({
+              user_id: user.id,
+              product_id: resolvedProductId,
+              viewed_at: nowIso,
+            });
+
+          if (insertViewError) {
+            console.error('Error inserting viewed product row:', insertViewError);
+          }
         }
       }
 
-      await fetchRealViewsCount(resolvedProductId);
+      const currentViews = Number((product as any)?.views_count ?? realViewsCount ?? 0);
+      const safeCurrentViews = Number.isFinite(currentViews) && currentViews >= 0 ? Math.floor(currentViews) : 0;
+
+      const { data: updatedProduct, error: updateProductError } = await supabase
+        .from('products')
+        .update({ views_count: safeCurrentViews + 1 })
+        .eq('id', resolvedProductId)
+        .select('views_count')
+        .maybeSingle();
+
+      if (!updateProductError && updatedProduct) {
+        const updatedViews = Number((updatedProduct as any).views_count ?? safeCurrentViews + 1);
+        setRealViewsCount(Number.isFinite(updatedViews) ? Math.max(Math.floor(updatedViews), 0) : safeCurrentViews + 1);
+        markProductAsViewedLocally(resolvedProductId);
+        return;
+      }
+
+      if (updateProductError) {
+        console.error('Error updating product views_count fallback:', updateProductError);
+      }
+
+      setRealViewsCount((current) => Math.max(current ?? 0, safeCurrentViews + 1));
+      markProductAsViewedLocally(resolvedProductId);
     } catch (error) {
       console.error('Error incrementing view:', error);
     }
@@ -789,8 +880,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const canAccessAttachments = isOwner || hasPurchased;
   const productTitle = product.name || (product as any).title || 'منتج رقمي';
   const productDescription = product.description?.trim() || 'لا يوجد وصف لهذا المنتج حالياً.';
-  const displayedViewsCount =
-    realViewsCount !== null ? realViewsCount : Number((product as any).views_count ?? 0);
+  const storedViewsCount = Number((product as any).views_count ?? 0);
+  const displayedViewsCount = Math.max(
+    realViewsCount ?? 0,
+    Number.isFinite(storedViewsCount) && storedViewsCount > 0 ? Math.floor(storedViewsCount) : 0
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
