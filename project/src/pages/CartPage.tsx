@@ -24,6 +24,7 @@ interface ScopeInfo {
   source: 'stores' | 'merchants';
   storeId: string | null;
   merchantUserId: string | null;
+  imageUrl?: string | null;
 }
 
 interface ProductWithMeta extends Product {
@@ -39,6 +40,7 @@ interface ProductWithMeta extends Product {
   quantity_limit?: number | null;
   quantity_sold?: number | null;
   is_active?: boolean | null;
+  seller_account_status?: string | null;
 }
 
 interface CartItem {
@@ -166,6 +168,8 @@ const isProductSoldOut = (product: ProductWithMeta | null | undefined) => {
 
 const isCartItemQuantityInvalid = (item: CartItem) => {
   if (!item.product) return true;
+
+  if (item.product.seller_account_status === 'suspended') return true;
 
   const remaining = getRemainingQuantity(item.product);
 
@@ -321,6 +325,19 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
           ((merchantsRes.data || []) as any[]).map((merchant) => [merchant.user_id, merchant])
         );
 
+        const { data: sellerProfilesData, error: sellerProfilesError } =
+          userIds.length > 0
+            ? await supabase.from('users_profile').select('id, account_status').in('id', userIds)
+            : ({ data: [], error: null } as any);
+
+        if (sellerProfilesError) {
+          console.error('seller account status fetch error:', sellerProfilesError);
+        }
+
+        const sellerStatusMap = new Map<string, string>(
+          ((sellerProfilesData || []) as any[]).map((seller) => [seller.id, seller.account_status || 'active'])
+        );
+
         const enrichedItems: CartItem[] = cartData
           .map((item) => {
             const product = allProducts.find((p) => p.id === item.product_id) || null;
@@ -341,7 +358,10 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
             return {
               ...item,
               quantity: Math.max(Number(item.quantity || 1), 1),
-              product,
+              product: {
+                ...product,
+                seller_account_status: productOwnerId ? sellerStatusMap.get(productOwnerId) || 'active' : 'active',
+              },
               store_name: storeName,
               store_slug: storeSlug,
             } as CartItem;
@@ -441,6 +461,10 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
 
     if (!firstInvalid.product) {
       return 'يوجد منتج غير متاح في السلة. احذفه ثم حاول إتمام الطلب مرة أخرى.';
+    }
+
+    if (firstInvalid.product.seller_account_status === 'suspended') {
+      return `لا يمكن شراء المنتج "${productName}" حالياً لأن التاجر غير متاح مؤقتاً.`;
     }
 
     if (remaining !== null && remaining <= 0) {
@@ -591,7 +615,9 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
 
             {isInvalid && (
               <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {soldOut
+                {item.product?.seller_account_status === 'suspended'
+                  ? 'لا يمكن شراء هذا المنتج حالياً لأن التاجر غير متاح مؤقتاً.'
+                  : soldOut
                   ? 'هذا المنتج نفدت كميته. احذفه من السلة حتى تتمكن من إتمام الطلب.'
                   : remaining !== null
                   ? `الكمية في السلة أكبر من المتبقي. المتبقي حالياً ${remaining} فقط.`
