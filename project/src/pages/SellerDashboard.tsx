@@ -256,6 +256,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const { profile } = useAuth();
   const profileId = profile?.id ?? null;
   const profileName = profile?.name ?? '';
+  const accountStatus = ((profile as any)?.account_status || 'active').toString();
+  const isAccountSuspended = accountStatus === 'suspended';
 
   const [activeTab, setActiveTab] = useState<SellerDashboardTab>('overview');
   const [hasRestoredDashboardCache, setHasRestoredDashboardCache] = useState(false);
@@ -343,6 +345,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [withdrawalProofUrl, setWithdrawalProofUrl] = useState<string | null>(null);
   const [withdrawalProofLoading, setWithdrawalProofLoading] = useState(false);
   const [withdrawalProofError, setWithdrawalProofError] = useState('');
+  const [sellerRestrictionMessage, setSellerRestrictionMessage] = useState('');
+
+
+
+  const showSuspendedAccountWarning = () => {
+    const message = 'لا يمكن تنفيذ هذا الإجراء حالياً لأن حسابك معلق مؤقتاً. يرجى التواصل مع الدعم إذا كنت تعتقد أن هناك خطأ.';
+    setSellerRestrictionMessage(message);
+    window.setTimeout(() => {
+      setSellerRestrictionMessage('');
+    }, 5000);
+    return false;
+  };
+
+  const canPerformSellerAction = () => {
+    if (!isAccountSuspended) return true;
+    return showSuspendedAccountWarning();
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -660,6 +679,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   const uploadStoreImage = async (store: StoreImageRecord, file: File) => {
+    if (isAccountSuspended) throw new Error('لا يمكن تحديث صورة المتجر لأن حسابك معلق مؤقتاً');
     if (!profile?.id) throw new Error('يجب تسجيل الدخول أولاً');
 
     const fileExt = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
@@ -681,6 +701,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   const handleStoreImageSelected = async (store: StoreImageRecord, file: File | null) => {
     if (!file) return;
+    if (!canPerformSellerAction()) return;
 
     setStoreImageError('');
     setStoreImageSuccess('');
@@ -721,6 +742,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   const handleStoreImageDelete = async (store: StoreImageRecord) => {
+    if (!canPerformSellerAction()) return;
     setStoreImageError('');
     setStoreImageSuccess('');
 
@@ -1834,6 +1856,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const handleWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!canPerformSellerAction()) {
+      setWithdrawalError('لا يمكن إرسال طلب سحب لأن حسابك معلق مؤقتاً');
+      return;
+    }
+
     if (!profile) {
       setWithdrawalError('يجب تسجيل الدخول أولاً');
       return;
@@ -2423,10 +2450,20 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {sellerRestrictionMessage && (
+        <div className="fixed top-6 left-1/2 z-50 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-2xl border border-orange-200 bg-orange-50 px-5 py-4 text-sm font-medium text-orange-800 shadow-lg">
+          {sellerRestrictionMessage}
+        </div>
+      )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">لوحة تحكم التاجر</h1>
           <p className="text-gray-600">مرحباً {profile?.name}، إدارة متاجرك ومنتجاتك</p>
+          {isAccountSuspended && (
+            <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+              حسابك معلق مؤقتاً، لذلك لا يمكن تنفيذ إجراءات البيع أو السحب أو تعديل المنتجات والمتاجر حتى يتم رفع التعليق.
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-xl shadow-sm mb-8">
@@ -2727,7 +2764,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
             {stores.length === 0 ? (
                       <button
-                        onClick={() => setShowCreateStoreModal(true)}
+                        onClick={() => { if (canPerformSellerAction()) setShowCreateStoreModal(true); }}
                         className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
                       >
                         <Plus className="w-5 h-5" />
@@ -2735,7 +2772,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       </button>
                     ) : (
                       <button
-                        onClick={() => setShowCreateProductModal(true)}
+                        onClick={() => { if (canPerformSellerAction()) setShowCreateProductModal(true); }}
                         className="flex items-center gap-2 px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
                       >
                         <Plus className="w-5 h-5" />
@@ -2823,7 +2860,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">منتجاتي</h2>
               <button
-                onClick={() => setShowCreateProductModal(true)}
+                onClick={() => { if (canPerformSellerAction()) setShowCreateProductModal(true); }}
                 className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
               >
                 <Plus className="w-5 h-5" />
@@ -2837,7 +2874,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد منتجات</h3>
                 <p className="text-gray-600 mb-6">ابدأ بإضافة منتجك الأول</p>
                 <button
-                  onClick={() => setShowCreateProductModal(true)}
+                  onClick={() => { if (canPerformSellerAction()) setShowCreateProductModal(true); }}
                   className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
                 >
                   إضافة منتج
@@ -2938,7 +2975,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                           </div>
 
                           <button
-                            onClick={() => setEditingProductId(product.id)}
+                            onClick={() => { if (canPerformSellerAction()) setEditingProductId(product.id); }}
                             className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
                           >
                             تعديل المنتج
@@ -2958,7 +2995,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">متاجري</h2>
               <button
-                onClick={() => setShowCreateStoreModal(true)}
+                onClick={() => { if (canPerformSellerAction()) setShowCreateStoreModal(true); }}
                 className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
               >
                 <Plus className="w-5 h-5" />
@@ -2972,7 +3009,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد متاجر</h3>
                 <p className="text-gray-600 mb-6">أنشئ متجرك الأول لبدء البيع</p>
                 <button
-                  onClick={() => setShowCreateStoreModal(true)}
+                  onClick={() => { if (canPerformSellerAction()) setShowCreateStoreModal(true); }}
                   className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
                 >
                   إنشاء متجر
@@ -3084,6 +3121,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                 setStoreImageError('');
                                 setStoreImageSuccess('');
                                 setStoreImageMenuOpenId(null);
+                                if (!canPerformSellerAction()) return;
                                 setEditingStoreId(normalizedStore.id);
                               }}
                               className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
