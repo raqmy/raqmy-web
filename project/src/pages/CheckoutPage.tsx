@@ -834,6 +834,38 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     return refreshedItems;
   };
 
+
+
+  const validateSellersBeforePayment = async (items: CartItem[]) => {
+    const sellerIds = Array.from(
+      new Set(
+        items
+          .map((item) => getProductSellerId(item.product))
+          .filter((id): id is string => !!id)
+      )
+    );
+
+    if (sellerIds.length === 0) {
+      throw new Error('تعذر تحديد التاجر لأحد المنتجات.');
+    }
+
+    const { data, error } = await supabase
+      .from('users_profile')
+      .select('id, account_status')
+      .in('id', sellerIds);
+
+    if (error) {
+      console.error('seller account status validation error:', error);
+      throw new Error('تعذر التحقق من حالة التاجر حالياً. حاول مرة أخرى.');
+    }
+
+    const suspendedSeller = (data || []).find((seller: any) => seller?.account_status === 'suspended');
+
+    if (suspendedSeller) {
+      throw new Error('لا يمكن إتمام الشراء حالياً لأن أحد التجار غير متاح مؤقتاً.');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -862,6 +894,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
     try {
       const validatedCartItems = await validateQuantityBeforePayment();
+      await validateSellersBeforePayment(validatedCartItems);
 
       const missingProduct = validatedCartItems.find((i) => !i.product);
       if (missingProduct) {
