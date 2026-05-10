@@ -227,7 +227,7 @@ const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
-const SELLER_DASHBOARD_CACHE_VERSION = 3;
+const SELLER_DASHBOARD_CACHE_VERSION = 4;
 const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
 
 const getSellerDashboardCacheKey = (profileId: string) => {
@@ -438,7 +438,11 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       }
 
       setStores(Array.isArray(parsedCache.stores) ? parsedCache.stores : []);
-      setProducts(Array.isArray(parsedCache.products) ? parsedCache.products : []);
+      setProducts(
+        Array.isArray(parsedCache.products)
+          ? parsedCache.products.filter((product: any) => !isProductSoftDeleted(product))
+          : []
+      );
       setStats(
         parsedCache.stats && typeof parsedCache.stats === 'object'
           ? parsedCache.stats
@@ -575,6 +579,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   const safeArray = <T,>(v: T[] | null | undefined): T[] => (Array.isArray(v) ? v : []);
+
+  const isProductSoftDeleted = (product: any) => {
+    return String(product?.status || '').toLowerCase() === 'deleted';
+  };
 
   const getFileNameFromPath = (path: string | null | undefined) => {
     if (!path) return '';
@@ -924,7 +932,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       if (productsErr) console.error('products fetch error:', productsErr);
 
-      const normalizedProducts = safeArray(rawProductsData).map(normalizeProduct);
+      const normalizedProducts = safeArray(rawProductsData)
+        .filter((product: any) => !isProductSoftDeleted(product))
+        .map(normalizeProduct);
       const storeIds = safeArray(storesData).map((store: any) => store?.id).filter(Boolean);
 
       let sellerStatsData: any = null;
@@ -2247,6 +2257,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     const query = productsSearchQuery.trim().toLowerCase();
 
     const result = products.filter((product) => {
+      if (isProductSoftDeleted(product)) return false;
+
       const matchesSearch =
         query === '' ||
         String(product.name || '').toLowerCase().includes(query) ||
@@ -2868,7 +2880,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               </button>
             </div>
 
-            {products.length === 0 ? (
+            {filteredProducts.length === 0 ? (
               <div className="bg-white rounded-xl p-12 text-center">
                 <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">لا توجد منتجات</h3>
@@ -4147,8 +4159,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           isOpen={true}
           productId={editingProductId}
           onClose={() => setEditingProductId(null)}
-          onSuccess={fetchDashboardData}
-          onDelete={fetchDashboardData}
+          onSuccess={async () => {
+            await fetchDashboardData();
+          }}
+          onDelete={async () => {
+            const deletedProductId = editingProductId;
+            setEditingProductId(null);
+            setProducts((currentProducts) =>
+              currentProducts.filter((product) => product.id !== deletedProductId)
+            );
+            await fetchDashboardData({ showLoader: false });
+          }}
         />
       )}
     </div>
