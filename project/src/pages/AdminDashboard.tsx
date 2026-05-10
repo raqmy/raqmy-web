@@ -48,9 +48,6 @@ interface AdminUserListItem {
   email: string | null;
   role: string | null;
   created_at: string;
-  account_status?: string | null;
-  suspended_at?: string | null;
-  suspension_reason?: string | null;
   source: 'users_profile' | 'profiles' | 'merchant' | 'store' | 'activity';
   source_label?: string;
 }
@@ -457,7 +454,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         favoritesRes,
         viewedProductsRes,
       ] = await Promise.all([
-        supabase.from('users_profile').select('id, name, email, role, created_at, account_status, suspended_at, suspension_reason'),
+        supabase.from('users_profile').select('id, name, email, role, created_at'),
         supabase.from('profiles').select('*'),
         supabase.from('merchants').select('id, user_id, store_name, store_slug, created_at'),
         supabase.from('stores').select('*'),
@@ -591,9 +588,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
               : item.source === 'profiles'
               ? 'profiles'
               : existing.source,
-          account_status: existing.account_status === 'suspended' || item.account_status === 'suspended' ? 'suspended' : (existing.account_status || item.account_status || 'active'),
-          suspended_at: existing.suspended_at || item.suspended_at || null,
-          suspension_reason: existing.suspension_reason || item.suspension_reason || null,
           source_label: existing.source_label || item.source_label,
         });
       };
@@ -607,9 +601,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           email: user.email || null,
           role: normalizeRole(user.role),
           created_at: user.created_at || new Date().toISOString(),
-          account_status: user.account_status || 'active',
-          suspended_at: user.suspended_at || null,
-          suspension_reason: user.suspension_reason || null,
           source: 'users_profile',
           source_label: 'users_profile',
         });
@@ -624,9 +615,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           email: profileRow.email || null,
           role: normalizeRole(profileRow.role),
           created_at: profileRow.created_at || new Date().toISOString(),
-          account_status: profileRow.account_status || 'active',
-          suspended_at: profileRow.suspended_at || null,
-          suspension_reason: profileRow.suspension_reason || null,
           source: 'profiles',
           source_label: 'profiles',
         });
@@ -1600,61 +1588,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     }
   };
 
-
-  const handleToggleUserSuspension = async (user: AdminUserListItem) => {
-    const isSuspended = user.account_status === 'suspended';
-    const actionLabel = isSuspended ? 'إلغاء تعليق' : 'تعليق';
-
-    if (user.role === 'admin' || user.role === 'superadmin') {
-      alert('لا يمكن تعليق حساب المدير من هذه الشاشة');
-      return;
-    }
-
-    if (user.source !== 'users_profile' && user.source !== 'profiles') {
-      alert('لا يمكن تعديل حالة هذا الحساب لأنه غير موجود مباشرة في جدول المستخدمين');
-      return;
-    }
-
-    let reason = user.suspension_reason || '';
-    if (!isSuspended) {
-      const enteredReason = window.prompt('اكتب سبب التعليق الذي سيبقى داخلياً للإدارة:', reason || 'مراجعة إدارية');
-      if (enteredReason === null) return;
-      reason = enteredReason.trim() || 'مراجعة إدارية';
-    }
-
-    const confirmed = window.confirm(
-      isSuspended
-        ? 'هل تريد إلغاء تعليق هذا الحساب؟'
-        : 'هل تريد تعليق هذا الحساب؟ سيتم تقييد البيع والسحب والإجراءات الخاصة بالتاجر.'
-    );
-
-    if (!confirmed) return;
-
-    try {
-      const payload = isSuspended
-        ? {
-            account_status: 'active',
-            suspended_at: null,
-            suspension_reason: null,
-            suspended_by: null,
-          }
-        : {
-            account_status: 'suspended',
-            suspended_at: new Date().toISOString(),
-            suspension_reason: reason,
-            suspended_by: profile?.id || null,
-          };
-
-      const { error } = await supabase.from('users_profile').update(payload).eq('id', user.id);
-      if (error) throw error;
-
-      await fetchDashboardData();
-      alert(isSuspended ? 'تم إلغاء تعليق الحساب بنجاح' : 'تم تعليق الحساب بنجاح');
-    } catch (error: any) {
-      alert(`حدث خطأ أثناء ${actionLabel} الحساب: ${error?.message || 'خطأ غير معروف'}`);
-    }
-  };
-
   const handleDeleteUser = async (userId: string) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا المستخدم؟ سيتم حذف جميع بياناته.')) {
       return;
@@ -2435,7 +2368,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                   <tr>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">الاسم</th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">الدور</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">حالة الحساب</th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">تاريخ التسجيل</th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">الإجراءات</th>
                   </tr>
@@ -2478,39 +2410,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                             : 'عميل'}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                            user.account_status === 'suspended'
-                              ? 'bg-orange-100 text-orange-700'
-                              : 'bg-green-100 text-green-700'
-                          }`}
-                          title={user.suspension_reason || ''}
-                        >
-                          {user.account_status === 'suspended' ? 'معلق' : 'نشط'}
-                        </span>
-                      </td>
                       <td className="px-6 py-4 text-sm text-gray-500">
                         {user.created_at ? new Date(user.created_at).toLocaleDateString('ar-SA') : '—'}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => handleToggleUserSuspension(user)}
-                            className={`${
-                              user.role === 'admin' || user.role === 'superadmin' || (user.source !== 'users_profile' && user.source !== 'profiles')
-                                ? 'text-gray-300 cursor-not-allowed'
-                                : user.account_status === 'suspended'
-                                ? 'text-green-600 hover:text-green-800'
-                                : 'text-orange-600 hover:text-orange-800'
-                            }`}
-                            disabled={user.role === 'admin' || user.role === 'superadmin' || (user.source !== 'users_profile' && user.source !== 'profiles')}
-                            title={user.account_status === 'suspended' ? 'إلغاء تعليق الحساب' : 'تعليق الحساب'}
-                          >
-                            <AlertCircle className="w-5 h-5" />
-                          </button>
-
-                          <button
+                        <button
                           onClick={() => handleDeleteUser(user.id)}
                           className={`${
                             user.role === 'admin' || user.role === 'superadmin' || (user.source !== 'users_profile' && user.source !== 'profiles')
@@ -2528,7 +2432,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
-                        </div>
                       </td>
                     </tr>
                   ))}
