@@ -1619,19 +1619,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   };
 
   const handleDeleteProduct = async (productId: string) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا المنتج؟')) {
-      return;
-    }
+  if (!window.confirm('هل أنت متأكد من حذف هذا المنتج؟')) {
+    return;
+  }
 
-    try {
-      const { error } = await supabase.from('products').delete().eq('id', productId);
-      if (error) throw error;
-      await fetchDashboardData();
-      alert('تم حذف المنتج بنجاح');
-    } catch (error: any) {
-      alert('حدث خطأ: ' + error.message);
-    }
-  };
+  try {
+    const { error } = await supabase.rpc('admin_delete_product', {
+      p_product_id: productId,
+      p_reason: 'حذف المنتج من لوحة الإدارة',
+    });
+
+    if (error) throw error;
+
+    setProducts((prev) => prev.filter((product) => product.id !== productId));
+
+    await fetchDashboardData();
+
+    alert('تم حذف المنتج بنجاح');
+  } catch (error: any) {
+    console.error('Admin delete product error:', error);
+
+    alert(
+      'حدث خطأ أثناء حذف المنتج: ' +
+        (error?.message || 'غير معروف')
+    );
+  }
+};
 
   const handleToggleStoreStatus = async (storeId: string, currentStatus: boolean) => {
     try {
