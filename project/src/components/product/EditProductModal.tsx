@@ -349,19 +349,35 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     if (!window.confirm('هل أنت متأكد من حذف المنتج؟')) return;
 
     setDeleting(true);
+    setError('');
 
     try {
-      const { error: deleteError } = await supabase.from('products').delete().eq('id', productId);
+      const { data, error: deleteError } = await supabase.rpc('seller_delete_product', {
+        p_product_id: productId,
+      });
 
       if (deleteError) {
         throw deleteError;
+      }
+
+      const result = data as { success?: boolean; message?: string } | null;
+
+      if (result && result.success === false) {
+        throw new Error(result.message || 'فشل حذف المنتج');
       }
 
       onDelete();
       onClose();
     } catch (err: any) {
       console.error('Error deleting product:', err);
-      setError(safeStr(err?.message) || 'فشل حذف المنتج');
+
+      const message = safeStr(err?.message);
+
+      if (message.includes('function public.seller_delete_product')) {
+        setError('تعذر حذف المنتج لأن دالة seller_delete_product غير موجودة في Supabase. شغّل SQL الخاص بالدالة أولاً.');
+      } else {
+        setError(message || 'فشل حذف المنتج');
+      }
     } finally {
       setDeleting(false);
     }
