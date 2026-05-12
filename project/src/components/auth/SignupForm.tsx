@@ -9,6 +9,7 @@ import {
   EyeOff,
   CheckCircle,
   RefreshCw,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -37,6 +38,10 @@ type AccountStatusResponse =
 
 const EMAIL_REGEX =
   /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+$/;
+
+const TERMS_VERSION = 'v1';
+const PRIVACY_VERSION = 'v1';
+const CONSENT_STORAGE_PREFIX = 'raqmy_signup_consent';
 
 const COMMON_EMAIL_DOMAIN_TYPOS: Record<string, string> = {
   'gamil.com': 'gmail.com',
@@ -95,6 +100,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [role, setRole] = useState<AccountRole>('customer');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -104,6 +110,56 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   const [emailResendCooldown, setEmailResendCooldown] = useState(0);
 
   const normalizeEmail = (value: string): string => value.trim().toLowerCase();
+
+  const getConsentStorageKey = (normalizedEmail: string) => {
+    return `${CONSENT_STORAGE_PREFIX}_${normalizedEmail}`;
+  };
+
+  const rememberPendingConsent = (normalizedEmail: string) => {
+    if (typeof window === 'undefined') return;
+
+    const acceptedAt = new Date().toISOString();
+
+    window.localStorage.setItem(
+      getConsentStorageKey(normalizedEmail),
+      JSON.stringify({
+        terms_accepted_at: acceptedAt,
+        privacy_accepted_at: acceptedAt,
+        terms_version: TERMS_VERSION,
+        privacy_version: PRIVACY_VERSION,
+      })
+    );
+  };
+
+  const getPendingConsent = (normalizedEmail: string) => {
+    if (typeof window === 'undefined') return null;
+
+    try {
+      const rawValue = window.localStorage.getItem(getConsentStorageKey(normalizedEmail));
+      if (!rawValue) return null;
+
+      const parsed = JSON.parse(rawValue);
+
+      if (!parsed?.terms_accepted_at || !parsed?.privacy_accepted_at) {
+        return null;
+      }
+
+      return {
+        terms_accepted_at: parsed.terms_accepted_at as string,
+        privacy_accepted_at: parsed.privacy_accepted_at as string,
+        terms_version: (parsed.terms_version as string) || TERMS_VERSION,
+        privacy_version: (parsed.privacy_version as string) || PRIVACY_VERSION,
+      };
+    } catch (err) {
+      console.error('Failed to read pending consent:', err);
+      return null;
+    }
+  };
+
+  const clearPendingConsent = (normalizedEmail: string) => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(getConsentStorageKey(normalizedEmail));
+  };
 
   const clearAuthHashFromUrl = () => {
     if (typeof window === 'undefined') return;
@@ -310,6 +366,8 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       'مستخدم جديد';
 
     const fallbackRole = normalizeAccountRole(authUser.user_metadata?.role ?? role);
+    const normalizedAuthEmail = normalizeEmail(authUser.email || email);
+    const pendingConsent = getPendingConsent(normalizedAuthEmail);
 
     const { error: createProfileError } = await supabase
       .from('users_profile')
@@ -317,11 +375,19 @@ export const SignupForm: React.FC<SignupFormProps> = ({
         {
           id: authUser.id,
           name: fallbackName,
-          email: normalizeEmail(authUser.email || email),
+          email: normalizedAuthEmail,
           role: fallbackRole,
           phone: null,
           phone_verified: false,
           signup_completed: false,
+          ...(pendingConsent
+            ? {
+                terms_accepted_at: pendingConsent.terms_accepted_at,
+                privacy_accepted_at: pendingConsent.privacy_accepted_at,
+                terms_version: pendingConsent.terms_version,
+                privacy_version: pendingConsent.privacy_version,
+              }
+            : {}),
         } as any,
         { onConflict: 'id' }
       );
@@ -351,17 +417,28 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   const markSignupCompleted = async (authUser: any) => {
     const profile = await ensureProfileForUser(authUser);
     const normalizedProfileRole = normalizeAccountRole(profile?.role ?? authUser.user_metadata?.role ?? role);
+    const normalizedEmail = normalizeEmail(authUser.email || email);
+    const pendingConsent = getPendingConsent(normalizedEmail);
 
     const shouldUpdateProfile =
-      !profile?.signup_completed || profile?.role !== normalizedProfileRole;
+      !profile?.signup_completed || profile?.role !== normalizedProfileRole || !!pendingConsent;
 
     if (shouldUpdateProfile) {
+      const updatePayload: Record<string, any> = {
+        role: normalizedProfileRole,
+        signup_completed: true,
+      };
+
+      if (pendingConsent) {
+        updatePayload.terms_accepted_at = pendingConsent.terms_accepted_at;
+        updatePayload.privacy_accepted_at = pendingConsent.privacy_accepted_at;
+        updatePayload.terms_version = pendingConsent.terms_version;
+        updatePayload.privacy_version = pendingConsent.privacy_version;
+      }
+
       const { error: updateProfileError } = await supabase
         .from('users_profile')
-        .update({
-          role: normalizedProfileRole,
-          signup_completed: true,
-        })
+        .update(updatePayload)
         .eq('id', authUser.id);
 
       if (updateProfileError) {
@@ -371,11 +448,13 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
     await refreshProfile();
 
-    const normalizedEmail = normalizeEmail(authUser.email || email);
-
     setEmail(normalizedEmail);
     setName((prev) => prev || profile?.name || authUser.user_metadata?.name || '');
     setRole(normalizedProfileRole);
+
+    if (pendingConsent) {
+      clearPendingConsent(normalizedEmail);
+    }
 
     clearAuthHashFromUrl();
     setStep('completed');
@@ -586,6 +665,11 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       return;
     }
 
+    if (!termsAccepted) {
+      setError('يجب الموافقة على الشروط والأحكام وسياسة الخصوصية للمتابعة');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -594,6 +678,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
       setEmail(normalizedEmail);
       setRole(normalizedRole);
+      rememberPendingConsent(normalizedEmail);
 
       const statusResult = await checkAccountStatus(normalizedEmail);
 
@@ -616,6 +701,8 @@ export const SignupForm: React.FC<SignupFormProps> = ({
         return;
       }
 
+      const consentAcceptedAt = new Date().toISOString();
+
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: normalizedEmail,
         password,
@@ -625,6 +712,10 @@ export const SignupForm: React.FC<SignupFormProps> = ({
             name: name.trim(),
             role: normalizedRole,
             account_type: normalizedRole,
+            terms_accepted_at: consentAcceptedAt,
+            privacy_accepted_at: consentAcceptedAt,
+            terms_version: TERMS_VERSION,
+            privacy_version: PRIVACY_VERSION,
           },
         },
       });
@@ -1028,6 +1119,59 @@ export const SignupForm: React.FC<SignupFormProps> = ({
               >
                 {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
+            </div>
+          </div>
+
+          <div
+            className={`rounded-xl border p-4 transition-all ${
+              termsAccepted
+                ? 'border-blue-200 bg-blue-50'
+                : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+            }`}
+          >
+            <label className="flex items-start gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={termsAccepted}
+                onChange={(e) => {
+                  setTermsAccepted(e.target.checked);
+                  if (error.includes('الشروط') || error.includes('الخصوصية')) {
+                    setError('');
+                  }
+                }}
+                className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+
+              <span className="text-sm text-gray-700 leading-7">
+                أوافق على{' '}
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-4"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  الشروط والأحكام
+                </a>{' '}
+                و{' '}
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-4"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  سياسة الخصوصية
+                </a>{' '}
+                الخاصة بمنصة رقمي.
+              </span>
+            </label>
+
+            <div className="mt-3 flex items-start gap-2 text-xs text-gray-500 leading-6">
+              <ShieldCheck className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <p>
+                بإنشاء الحساب، سيتم تسجيل وقت موافقتك على الشروط وسياسة الخصوصية لحماية حقوقك وحقوق المنصة.
+              </p>
             </div>
           </div>
 
