@@ -9,7 +9,6 @@ import {
   EyeOff,
   CheckCircle,
   RefreshCw,
-  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -540,10 +539,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({
         'هذا الحساب موجود لكنه غير مكتمل. سيتم نقلك مباشرة إلى الخطوة الناقصة.'
       );
     }
-
-    if (initialData?.resumeReason === 'account-not-found') {
-      setInfoMessage('أكمل إنشاء حساب جديد باستخدام بياناتك.');
-    }
   }, [initialData]);
 
   useEffect(() => {
@@ -1023,14 +1018,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({
                 </span>
               </button>
             </div>
-
-            {role === 'seller' && (
-              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-xs text-blue-800">
-                  بعد إنشاء الحساب ستكمل التحقق من البريد ثم تتابع استخدام المنصة.
-                </p>
-              </div>
-            )}
           </div>
 
           <div>
@@ -1166,13 +1153,6 @@ export const SignupForm: React.FC<SignupFormProps> = ({
                 الخاصة بمنصة رقمي.
               </span>
             </label>
-
-            <div className="mt-3 flex items-start gap-2 text-xs text-gray-500 leading-6">
-              <ShieldCheck className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-              <p>
-                بإنشاء الحساب، سيتم تسجيل وقت موافقتك على الشروط وسياسة الخصوصية لحماية حقوقك وحقوق المنصة.
-              </p>
-            </div>
           </div>
 
           <button
