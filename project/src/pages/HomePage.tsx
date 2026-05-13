@@ -316,7 +316,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                   className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow cursor-pointer border border-gray-100"
                   onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
                 >
-                  <div className="aspect-video bg-gray-50 flex items-center justify-center relative overflow-hidden p-2">
+                  <div className="relative h-72 sm:h-80 bg-white flex items-center justify-center overflow-hidden border-b border-gray-100">
                     {soldOut && (
                       <div className="absolute top-3 right-3 z-10 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow">
                         نفدت الكمية
@@ -327,7 +327,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                       <img
                         src={product.thumbnail_url}
                         alt={displayName}
-                        className={`w-full h-full object-contain ${soldOut ? 'opacity-70 grayscale' : ''}`}
+                        className={`max-w-full max-h-full object-contain p-3 transition-transform duration-300 hover:scale-[1.03] ${soldOut ? 'opacity-70 grayscale' : ''}`}
                       />
                     ) : (
                       <Download className="w-16 h-16 text-blue-600" />
