@@ -2537,12 +2537,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                 const thumbnailUrl = ((product as any).thumbnail_url ?? (product as any).image_url ?? null) as string | null;
                 return (
                   <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                    <div className="aspect-video bg-gray-50 flex items-center justify-center overflow-hidden p-2">
+                    <div className="h-64 bg-white flex items-center justify-center overflow-hidden border-b border-gray-100">
                       {thumbnailUrl ? (
                         <img
                           src={thumbnailUrl}
                           alt={displayName}
-                          className="w-full h-full object-contain"
+                          className="max-w-full max-h-full object-contain p-3"
                           loading="lazy"
                         />
                       ) : (
