@@ -2943,7 +2943,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     {filteredProducts.map((product) => (
                       <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
                         <div
-                          className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center cursor-pointer"
+                          className="aspect-video bg-gray-50 flex items-center justify-center cursor-pointer overflow-hidden p-2"
                           onClick={() => openProduct(product)}
                           role="button"
                           tabIndex={0}
@@ -2952,7 +2952,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                             <img
                               src={product.thumbnail_url}
                               alt={product.name}
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-contain"
                             />
                           ) : (
                             <Package className="w-12 h-12 text-blue-600" />
@@ -3087,7 +3087,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                 <img
                                   src={storeImageUrl}
                                   alt={storeName}
-                                  className="w-full h-full object-cover"
+                                  className="w-full h-full object-contain"
                                 />
                               ) : (
                                 <div className="w-full h-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
