@@ -35,7 +35,6 @@ type PublicRule = {
   expires_at?: string | null;
   seller_id?: string | null;
   marketer_id?: string | null;
-  markerter_id?: string | null;
   product_id?: string | null;
   store_id?: string | null;
 } | null;
@@ -51,7 +50,6 @@ type PublicStatsData = {
     report_token?: string | null;
     seller_id?: string | null;
     marketer_id?: string | null;
-    markerter_id?: string | null;
     apply_to?: 'product' | 'store' | 'all' | string | null;
     product_id?: string | null;
     store_id?: string | null;
@@ -75,7 +73,6 @@ type AffiliateLinkRow = {
   report_token?: string | null;
   seller_id?: string | null;
   marketer_id?: string | null;
-  markerter_id?: string | null;
   apply_to?: 'product' | 'store' | 'all' | string | null;
   product_id?: string | null;
   store_id?: string | null;
@@ -90,7 +87,6 @@ type AffiliateRuleRow = {
   id: string;
   seller_id?: string | null;
   marketer_id?: string | null;
-  markerter_id?: string | null;
   scope_type?: 'product' | 'store' | 'all' | string | null;
   product_id?: string | null;
   store_id?: string | null;
@@ -176,15 +172,6 @@ const getReportTokenFromPath = () => {
   return parts.length >= 2 && parts[0] === 'affiliate-report' ? parts[1] : '';
 };
 
-const getSafeMarketerId = (value: PublicStatsData): string => {
-  return String(
-    value.link?.marketer_id ||
-      value.link?.markerter_id ||
-      value.marketer?.id ||
-      ''
-  );
-};
-
 const normalizeRule = (rule: any): PublicRule => {
   if (!rule) return null;
 
@@ -200,8 +187,7 @@ const normalizeRule = (rule: any): PublicRule => {
     is_active: rule.is_active ?? null,
     expires_at: rule.expires_at ?? null,
     seller_id: rule.seller_id ?? null,
-    marketer_id: rule.marketer_id ?? rule.markerter_id ?? null,
-    markerter_id: rule.markerter_id ?? rule.marketer_id ?? null,
+    marketer_id: rule.marketer_id ?? null,
     product_id: rule.product_id ?? null,
     store_id: rule.store_id ?? null,
   };
@@ -337,7 +323,7 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
     const { data: linkRow, error: linkError } = await supabase
       .from('affiliate_links')
       .select(
-        'id, code, report_token, seller_id, markerter_id, apply_to, product_id, store_id, description, is_active, clicks, sales, earnings'
+        'id, code, report_token, seller_id, marketer_id, apply_to, product_id, store_id, description, is_active, clicks, sales, earnings'
       )
       .eq('id', linkId)
       .maybeSingle();
@@ -352,7 +338,6 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
     }
 
     const fullLink = linkRow as AffiliateLinkRow;
-    const fullLinkMarketerId = fullLink.marketer_id || fullLink.markerter_id || null;
 
     const mergedLink = {
       ...baseData.link,
@@ -360,8 +345,7 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
       code: fullLink.code ?? baseData.link.code ?? null,
       report_token: fullLink.report_token ?? baseData.link.report_token ?? null,
       seller_id: fullLink.seller_id ?? baseData.link.seller_id ?? null,
-      marketer_id: fullLinkMarketerId ?? baseData.link.marketer_id ?? baseData.link.markerter_id ?? null,
-      markerter_id: fullLinkMarketerId ?? baseData.link.markerter_id ?? baseData.link.marketer_id ?? null,
+      marketer_id: fullLink.marketer_id ?? baseData.link.marketer_id ?? null,
       apply_to: fullLink.apply_to ?? baseData.link.apply_to ?? null,
       product_id: fullLink.product_id ?? baseData.link.product_id ?? null,
       store_id: fullLink.store_id ?? baseData.link.store_id ?? null,
@@ -393,10 +377,10 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
     const { data: rulesData, error: rulesError } = await supabase
       .from('affiliate_rules')
       .select(
-        'id, seller_id, markerter_id, scope_type, product_id, store_id, commission_type, commission_value, priority, is_active, expires_at'
+        'id, seller_id, marketer_id, scope_type, product_id, store_id, commission_type, commission_value, priority, is_active, expires_at'
       )
       .eq('seller_id', mergedLink.seller_id)
-      .eq('markerter_id', mergedLink.marketer_id)
+      .eq('marketer_id', mergedLink.marketer_id)
       .order('priority', { ascending: true })
       .order('created_at', { ascending: false });
 
@@ -453,7 +437,11 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
     baseData: PublicStatsData
   ): Promise<PublicStatsData> => {
     const linkId = baseData.link?.id ? String(baseData.link.id) : '';
-    const marketerId = getSafeMarketerId(baseData);
+    const marketerId = baseData.link?.marketer_id
+      ? String(baseData.link.marketer_id)
+      : baseData.marketer?.id
+      ? String(baseData.marketer.id)
+      : '';
 
     if (!linkId || !marketerId) {
       return baseData;
@@ -466,12 +454,12 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
           .select('id, status')
           .eq('status', 'paid')
           .eq('affiliate_link_id', linkId)
-          .eq('affiliate_markerter_id', marketerId),
+          .eq('affiliate_marketer_id', marketerId),
         supabase
           .from('affiliate_commissions')
           .select('id, commission_amount, status')
           .eq('link_id', linkId)
-          .eq('markerter_id', marketerId),
+          .eq('marketer_id', marketerId),
       ]);
 
     if (ordersError) {
@@ -497,8 +485,6 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
       ...baseData,
       link: {
         ...baseData.link,
-        marketer_id: marketerId,
-        markerter_id: marketerId,
         clicks: Number(baseData.link?.clicks || 0),
         sales: paidSalesCount,
         earnings: totalCommissionEarnings,
@@ -506,10 +492,15 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
     };
   };
 
+
   const hydrateMarketerDisplayName = async (
     baseData: PublicStatsData
   ): Promise<PublicStatsData> => {
-    const marketerId = getSafeMarketerId(baseData);
+    const marketerId = baseData.link?.marketer_id
+      ? String(baseData.link.marketer_id)
+      : baseData.marketer?.id
+      ? String(baseData.marketer.id)
+      : '';
 
     if (!marketerId) {
       return baseData;
@@ -587,11 +578,10 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
       }
 
       const rawData = (rpcData.data || {}) as PublicStatsData;
-      const rawLinkMarketerId = rawData.link?.marketer_id || rawData.link?.markerter_id || rawData.marketer?.id || null;
 
       const normalizedData: PublicStatsData = {
         marketer: {
-          id: rawData.marketer?.id ?? rawLinkMarketerId ?? null,
+          id: rawData.marketer?.id ?? null,
           name: rawData.marketer?.name ?? null,
         },
         link: {
@@ -599,8 +589,7 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
           code: rawData.link?.code ?? null,
           report_token: rawData.link?.report_token ?? null,
           seller_id: rawData.link?.seller_id ?? null,
-          marketer_id: rawLinkMarketerId,
-          markerter_id: rawLinkMarketerId,
+          marketer_id: rawData.link?.marketer_id ?? null,
           apply_to: rawData.link?.apply_to ?? null,
           product_id: rawData.link?.product_id ?? null,
           store_id: rawData.link?.store_id ?? null,
@@ -629,6 +618,7 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
 
       const hydratedRuleData = await hydrateRuleAndTiersFallback(normalizedData);
       const hydratedPerformanceData = await hydratePerformanceFromDatabase(hydratedRuleData);
+      setData(hydratedPerformanceData);
       const hydratedMarketerData = await hydrateMarketerDisplayName(hydratedPerformanceData);
       setData(hydratedMarketerData);
     } catch (err: any) {
@@ -811,6 +801,11 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
                   icon={<DollarSign className="w-4 h-4" />}
                   label="العمولة"
                   value={formatCommission(data.rule.commission_type, data.rule.commission_value)}
+                />
+                <InfoRow
+                  icon={<Target className="w-4 h-4" />}
+                  label="الأولوية"
+                  value={String(data.rule.priority || 100)}
                 />
                 <InfoRow
                   icon={<CheckCircle2 className="w-4 h-4" />}
