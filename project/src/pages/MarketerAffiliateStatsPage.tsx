@@ -434,19 +434,24 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
   };
 
   const hydratePerformanceFromDatabase = async (
-    baseData: PublicStatsData
-  ): Promise<PublicStatsData> => {
-    const linkId = baseData.link?.id ? String(baseData.link.id) : '';
-    const marketerId = baseData.link?.marketer_id
-      ? String(baseData.link.marketer_id)
-      : baseData.marketer?.id
-      ? String(baseData.marketer.id)
-      : '';
+  baseData: PublicStatsData
+): Promise<PublicStatsData> => {
+  const linkId = baseData.link?.id ? String(baseData.link.id) : '';
+  const marketerId = baseData.link?.marketer_id
+    ? String(baseData.link.marketer_id)
+    : baseData.marketer?.id
+    ? String(baseData.marketer.id)
+    : '';
 
-    if (!linkId || !marketerId) {
-      return baseData;
-    }
+  if (!linkId || !marketerId) {
+    return baseData;
+  }
 
+  const currentClicks = Number(baseData.link?.clicks || 0);
+  const currentSales = Number(baseData.link?.sales || 0);
+  const currentEarnings = Number(baseData.link?.earnings || 0);
+
+  try {
     const [{ data: paidOrders, error: ordersError }, { data: commissionRows, error: commissionsError }] =
       await Promise.all([
         supabase
@@ -470,27 +475,42 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
       console.error('Error fetching affiliate commissions for public stats:', commissionsError);
     }
 
-    const paidSalesCount = new Set(
-      ((paidOrders || []) as OrderRowForStats[])
-        .map((row) => row.id)
-        .filter(Boolean)
-    ).size;
+    const paidSalesCount = ordersError
+      ? currentSales
+      : new Set(
+          ((paidOrders || []) as OrderRowForStats[])
+            .map((row) => row.id)
+            .filter(Boolean)
+        ).size;
 
-    const ignoredCommissionStatuses = new Set(['rejected', 'cancelled', 'canceled', 'failed', 'void']);
-    const totalCommissionEarnings = ((commissionRows || []) as AffiliateCommissionRowForStats[])
-      .filter((row) => !ignoredCommissionStatuses.has(String(row.status || '').toLowerCase()))
-      .reduce((sum, row) => sum + Number(row.commission_amount || 0), 0);
+    const ignoredCommissionStatuses = new Set([
+      'rejected',
+      'cancelled',
+      'canceled',
+      'failed',
+      'void',
+    ]);
+
+    const totalCommissionEarnings = commissionsError
+      ? currentEarnings
+      : ((commissionRows || []) as AffiliateCommissionRowForStats[])
+          .filter((row) => !ignoredCommissionStatuses.has(String(row.status || '').toLowerCase()))
+          .reduce((sum, row) => sum + Number(row.commission_amount || 0), 0);
 
     return {
       ...baseData,
       link: {
         ...baseData.link,
-        clicks: Number(baseData.link?.clicks || 0),
-        sales: paidSalesCount,
-        earnings: totalCommissionEarnings,
+        clicks: currentClicks,
+        sales: Math.max(currentSales, paidSalesCount),
+        earnings: Math.max(currentEarnings, totalCommissionEarnings),
       },
     };
-  };
+  } catch (error) {
+    console.error('hydratePerformanceFromDatabase error:', error);
+    return baseData;
+  }
+};
 
 
   const hydrateMarketerDisplayName = async (
