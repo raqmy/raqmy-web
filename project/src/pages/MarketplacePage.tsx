@@ -330,7 +330,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                   className="bg-white rounded-xl overflow-hidden shadow cursor-pointer hover:shadow-lg transition-shadow border border-gray-100"
                   onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
                 >
-                  <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden relative">
+                  <div className="aspect-video bg-gray-50 flex items-center justify-center overflow-hidden relative p-2">
                     {soldOut && (
                       <div className="absolute top-3 right-3 z-10 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow">
                         نفدت الكمية
@@ -341,7 +341,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                       <img
                         src={product.thumbnail_url}
                         alt={product.display_name}
-                        className={`w-full h-full object-cover ${soldOut ? 'opacity-70 grayscale' : ''}`}
+                        className={`w-full h-full object-contain ${soldOut ? 'opacity-70 grayscale' : ''}`}
                       />
                     ) : (
                       <Download className="w-12 h-12 text-gray-400" />
