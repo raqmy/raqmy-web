@@ -900,7 +900,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           <div className="space-y-4">
             <div className="bg-white rounded-xl overflow-hidden shadow-sm">
-              <div className="aspect-video bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center relative">
+              <div className="aspect-video bg-gray-50 flex items-center justify-center relative overflow-hidden p-3">
                 {isSoldOut && (
                   <div className="absolute top-4 right-4 z-10 rounded-full bg-red-600 px-4 py-2 text-sm font-bold text-white shadow-lg">
                     نفدت الكمية
@@ -911,13 +911,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   <img
                     src={images[selectedImageIndex]?.image_url}
                     alt={productTitle}
-                    className={`w-full h-full object-cover ${isSoldOut ? 'opacity-70 grayscale' : ''}`}
+                    className={`w-full h-full object-contain ${isSoldOut ? 'opacity-70 grayscale' : ''}`}
                   />
                 ) : product.thumbnail_url ? (
                   <img
                     src={product.thumbnail_url}
                     alt={productTitle}
-                    className={`w-full h-full object-cover ${isSoldOut ? 'opacity-70 grayscale' : ''}`}
+                    className={`w-full h-full object-contain ${isSoldOut ? 'opacity-70 grayscale' : ''}`}
                   />
                 ) : (
                   <Download className="w-24 h-24 text-blue-600" />
@@ -931,7 +931,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   <button
                     key={image.id}
                     onClick={() => setSelectedImageIndex(index)}
-                    className={`aspect-square bg-white rounded-lg overflow-hidden border-2 transition-all hover:border-blue-500 ${
+                    className={`aspect-square bg-gray-50 rounded-lg overflow-hidden border-2 transition-all hover:border-blue-500 ${
                       selectedImageIndex === index
                         ? 'border-blue-600 ring-2 ring-blue-200'
                         : 'border-gray-200'
@@ -940,7 +940,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     <img
                       src={image.image_url}
                       alt={`${productTitle} - ${index + 1}`}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-contain p-1"
                     />
                   </button>
                 ))}
