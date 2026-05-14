@@ -43,6 +43,9 @@ const PRIVACY_VERSION = 'v1';
 const CONSENT_STORAGE_PREFIX = 'raqmy_signup_consent';
 const MERCHANT_REFERRAL_STORAGE_KEY = 'raqmy_merchant_referral';
 
+const MERCHANT_REFERRAL_MAX_ATTEMPTS = 8;
+const MERCHANT_REFERRAL_RETRY_DELAY_MS = 1000;
+
 const COMMON_EMAIL_DOMAIN_TYPOS: Record<string, string> = {
   'gamil.com': 'gmail.com',
   'gmial.com': 'gmail.com',
@@ -86,6 +89,8 @@ const normalizeAccountRole = (value?: string | null): AccountRole => {
 
   return 'customer';
 };
+
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export const SignupForm: React.FC<SignupFormProps> = ({
   onSwitchToLogin,
@@ -239,35 +244,67 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     const storedReferral = getStoredMerchantReferral();
     if (!storedReferral?.code) return;
 
-    try {
-      const { data, error: referralError } = await supabase.rpc(
-        'create_merchant_referral_if_eligible',
-        {
-          p_seller_user_id: authUser.id,
-          p_ref_code: storedReferral.code,
-          p_registered_at: new Date().toISOString(),
-        } as any
-      );
+    for (let attempt = 1; attempt <= MERCHANT_REFERRAL_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const { data, error: referralError } = await supabase.rpc(
+          'create_merchant_referral_if_eligible',
+          {
+            p_seller_user_id: authUser.id,
+            p_ref_code: storedReferral.code,
+            p_registered_at: new Date().toISOString(),
+          } as any
+        );
 
-      if (referralError) {
-        console.error('create_merchant_referral_if_eligible error:', referralError);
+        if (referralError) {
+          console.error(
+            `create_merchant_referral_if_eligible error - attempt ${attempt}:`,
+            referralError
+          );
+
+          if (attempt < MERCHANT_REFERRAL_MAX_ATTEMPTS) {
+            await wait(MERCHANT_REFERRAL_RETRY_DELAY_MS);
+            continue;
+          }
+
+          return;
+        }
+
+        const referralResult = data as any;
+
+        console.log(
+          `create_merchant_referral_if_eligible result - attempt ${attempt}:`,
+          referralResult
+        );
+
+        const shouldClearReferral =
+          referralResult?.success === true ||
+          referralResult?.created === true ||
+          referralResult?.reason === 'merchant_referral_created' ||
+          referralResult?.reason === 'merchant_already_has_referral' ||
+          referralResult?.reason === 'merchant_referral_already_exists' ||
+          referralResult?.reason === 'merchant_already_linked';
+
+        if (shouldClearReferral) {
+          clearStoredMerchantReferral();
+          return;
+        }
+
+        if (attempt < MERCHANT_REFERRAL_MAX_ATTEMPTS) {
+          await wait(MERCHANT_REFERRAL_RETRY_DELAY_MS);
+        }
+      } catch (err) {
+        console.error(
+          `create_merchant_referral_if_eligible unexpected error - attempt ${attempt}:`,
+          err
+        );
+
+        if (attempt < MERCHANT_REFERRAL_MAX_ATTEMPTS) {
+          await wait(MERCHANT_REFERRAL_RETRY_DELAY_MS);
+          continue;
+        }
+
         return;
       }
-
-      const referralResult = data as any;
-      const shouldClearReferral =
-        referralResult?.success === true ||
-        referralResult?.created === true ||
-        referralResult?.reason === 'merchant_referral_created' ||
-        referralResult?.reason === 'merchant_already_has_referral' ||
-        referralResult?.reason === 'merchant_referral_already_exists' ||
-        referralResult?.reason === 'merchant_already_linked';
-
-      if (shouldClearReferral) {
-        clearStoredMerchantReferral();
-      }
-    } catch (err) {
-      console.error('create_merchant_referral_if_eligible unexpected error:', err);
     }
   };
 
