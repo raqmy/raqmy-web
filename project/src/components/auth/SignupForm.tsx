@@ -41,6 +41,7 @@ const EMAIL_REGEX =
 const TERMS_VERSION = 'v1';
 const PRIVACY_VERSION = 'v1';
 const CONSENT_STORAGE_PREFIX = 'raqmy_signup_consent';
+const MERCHANT_REFERRAL_STORAGE_KEY = 'raqmy_merchant_referral';
 
 const COMMON_EMAIL_DOMAIN_TYPOS: Record<string, string> = {
   'gamil.com': 'gmail.com',
@@ -158,6 +159,84 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   const clearPendingConsent = (normalizedEmail: string) => {
     if (typeof window === 'undefined') return;
     window.localStorage.removeItem(getConsentStorageKey(normalizedEmail));
+  };
+
+
+  const getStoredMerchantReferral = () => {
+    if (typeof window === 'undefined') return null;
+
+    try {
+      const rawValue = window.localStorage.getItem(MERCHANT_REFERRAL_STORAGE_KEY);
+      if (!rawValue) return null;
+
+      const parsed = JSON.parse(rawValue);
+      const code = String(parsed?.code || '').trim().toUpperCase();
+      const capturedAt = String(parsed?.captured_at || '');
+      const expiresAt = String(parsed?.expires_at || '');
+
+      if (!code || !capturedAt || !expiresAt) {
+        window.localStorage.removeItem(MERCHANT_REFERRAL_STORAGE_KEY);
+        return null;
+      }
+
+      const expiresTime = new Date(expiresAt).getTime();
+
+      if (!Number.isFinite(expiresTime) || expiresTime <= Date.now()) {
+        window.localStorage.removeItem(MERCHANT_REFERRAL_STORAGE_KEY);
+        return null;
+      }
+
+      return {
+        code,
+        captured_at: capturedAt,
+        expires_at: expiresAt,
+      };
+    } catch (err) {
+      console.error('Failed to read merchant referral code:', err);
+      window.localStorage.removeItem(MERCHANT_REFERRAL_STORAGE_KEY);
+      return null;
+    }
+  };
+
+  const clearStoredMerchantReferral = () => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(MERCHANT_REFERRAL_STORAGE_KEY);
+  };
+
+  const attachMerchantReferralIfSeller = async (authUser: any, accountRole: AccountRole) => {
+    if (accountRole !== 'seller') return;
+
+    const storedReferral = getStoredMerchantReferral();
+    if (!storedReferral?.code) return;
+
+    try {
+      const { data, error: referralError } = await supabase.rpc(
+        'create_merchant_referral_if_eligible',
+        {
+          p_seller_user_id: authUser.id,
+          p_ref_code: storedReferral.code,
+          p_registered_at: new Date().toISOString(),
+        } as any
+      );
+
+      if (referralError) {
+        console.error('create_merchant_referral_if_eligible error:', referralError);
+        return;
+      }
+
+      const referralResult = data as any;
+      const shouldClearReferral =
+        referralResult?.success === true ||
+        referralResult?.reason === 'merchant_referral_created' ||
+        referralResult?.reason === 'merchant_already_has_referral' ||
+        referralResult?.reason === 'merchant_referral_already_exists';
+
+      if (shouldClearReferral) {
+        clearStoredMerchantReferral();
+      }
+    } catch (err) {
+      console.error('create_merchant_referral_if_eligible unexpected error:', err);
+    }
   };
 
   const clearAuthHashFromUrl = () => {
@@ -446,6 +525,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     }
 
     await refreshProfile();
+    await attachMerchantReferralIfSeller(authUser, normalizedProfileRole);
 
     setEmail(normalizedEmail);
     setName((prev) => prev || profile?.name || authUser.user_metadata?.name || '');
