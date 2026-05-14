@@ -73,6 +73,12 @@ type EmailValidationResult =
       suggestedEmail?: string;
     };
 
+type StoredMerchantReferral = {
+  code: string;
+  captured_at?: string;
+  expires_at?: string;
+};
+
 const normalizeAccountRole = (value?: string | null): AccountRole => {
   if (value === 'seller' || value === 'merchant') {
     return 'seller';
@@ -161,8 +167,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     window.localStorage.removeItem(getConsentStorageKey(normalizedEmail));
   };
 
-
-  const getStoredMerchantReferral = () => {
+  const getStoredMerchantReferral = (): StoredMerchantReferral | null => {
     if (typeof window === 'undefined') return null;
 
     try {
@@ -170,26 +175,51 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       if (!rawValue) return null;
 
       const parsed = JSON.parse(rawValue);
-      const code = String(parsed?.code || '').trim().toUpperCase();
-      const capturedAt = String(parsed?.captured_at || '');
-      const expiresAt = String(parsed?.expires_at || '');
 
-      if (!code || !capturedAt || !expiresAt) {
+      const rawCode =
+        parsed?.code ??
+        parsed?.ref_code ??
+        parsed?.ref ??
+        parsed?.affiliate_code ??
+        parsed?.affiliate_ref_code ??
+        '';
+
+      const code = String(rawCode || '').trim().toUpperCase();
+
+      const capturedAt = String(
+        parsed?.captured_at ??
+          parsed?.capturedAt ??
+          parsed?.created_at ??
+          parsed?.createdAt ??
+          ''
+      );
+
+      const expiresAt = String(
+        parsed?.expires_at ??
+          parsed?.expiresAt ??
+          parsed?.merchant_referral_expires_at ??
+          parsed?.merchantReferralExpiresAt ??
+          ''
+      );
+
+      if (!code) {
         window.localStorage.removeItem(MERCHANT_REFERRAL_STORAGE_KEY);
         return null;
       }
 
-      const expiresTime = new Date(expiresAt).getTime();
+      if (expiresAt) {
+        const expiresTime = new Date(expiresAt).getTime();
 
-      if (!Number.isFinite(expiresTime) || expiresTime <= Date.now()) {
-        window.localStorage.removeItem(MERCHANT_REFERRAL_STORAGE_KEY);
-        return null;
+        if (!Number.isFinite(expiresTime) || expiresTime <= Date.now()) {
+          window.localStorage.removeItem(MERCHANT_REFERRAL_STORAGE_KEY);
+          return null;
+        }
       }
 
       return {
         code,
-        captured_at: capturedAt,
-        expires_at: expiresAt,
+        captured_at: capturedAt || undefined,
+        expires_at: expiresAt || undefined,
       };
     } catch (err) {
       console.error('Failed to read merchant referral code:', err);
@@ -227,9 +257,11 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       const referralResult = data as any;
       const shouldClearReferral =
         referralResult?.success === true ||
+        referralResult?.created === true ||
         referralResult?.reason === 'merchant_referral_created' ||
         referralResult?.reason === 'merchant_already_has_referral' ||
-        referralResult?.reason === 'merchant_referral_already_exists';
+        referralResult?.reason === 'merchant_referral_already_exists' ||
+        referralResult?.reason === 'merchant_already_linked';
 
       if (shouldClearReferral) {
         clearStoredMerchantReferral();
@@ -524,8 +556,8 @@ export const SignupForm: React.FC<SignupFormProps> = ({
       }
     }
 
-    await refreshProfile();
     await attachMerchantReferralIfSeller(authUser, normalizedProfileRole);
+    await refreshProfile();
 
     setEmail(normalizedEmail);
     setName((prev) => prev || profile?.name || authUser.user_metadata?.name || '');
