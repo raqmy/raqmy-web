@@ -757,7 +757,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
         const { data: profileData, error: profileError } = await supabase
           .from('users_profile')
-          .select('signup_completed')
+          .select('signup_completed, role')
           .eq('id', sessionUser.id)
           .maybeSingle();
 
@@ -766,7 +766,13 @@ export const SignupForm: React.FC<SignupFormProps> = ({
           return;
         }
 
+        const recoveredRole = normalizeAccountRole(
+          profileData?.role ?? sessionUser.user_metadata?.role ?? sessionUser.user_metadata?.account_type
+        );
+
         if (profileData?.signup_completed) {
+          await attachMerchantReferralIfSeller(sessionUser, recoveredRole);
+          await refreshProfile();
           return;
         }
 
