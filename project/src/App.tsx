@@ -49,6 +49,46 @@ import { MerchantBankDetailsPage } from './pages/MerchantBankDetailsPage';
 import { supabase } from './lib/supabase';
 import { handleAffiliateTracking } from './lib/affiliate';
 
+
+const MERCHANT_REFERRAL_STORAGE_KEY = 'raqmy_merchant_referral';
+const MERCHANT_REFERRAL_COOKIE_DAYS = 3;
+
+const normalizeMerchantReferralCode = (value: string | null): string => {
+  return String(value || '').trim().toUpperCase();
+};
+
+const rememberMerchantReferralFromUrl = () => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const referralCode = normalizeMerchantReferralCode(
+      params.get('ref') ||
+        params.get('affiliate_ref') ||
+        params.get('affiliate') ||
+        params.get('code')
+    );
+
+    if (!referralCode) return;
+
+    const capturedAt = new Date();
+    const expiresAt = new Date(
+      capturedAt.getTime() + MERCHANT_REFERRAL_COOKIE_DAYS * 24 * 60 * 60 * 1000
+    );
+
+    window.localStorage.setItem(
+      MERCHANT_REFERRAL_STORAGE_KEY,
+      JSON.stringify({
+        code: referralCode,
+        captured_at: capturedAt.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      })
+    );
+  } catch (err) {
+    console.error('Failed to store merchant referral code:', err);
+  }
+};
+
 const SELLER_DASHBOARD_TABS = new Set([
   'overview',
   'products',
@@ -603,6 +643,7 @@ function AppContent() {
   const shouldHidePlatformChrome = isStoreMode || currentPage === 'affiliate-report';
 
   useEffect(() => {
+    rememberMerchantReferralFromUrl();
     handleAffiliateTracking();
   }, []);
 
