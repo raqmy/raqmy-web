@@ -79,6 +79,7 @@ type AffiliateRuleRow = {
   commission_value?: number | null;
   is_active?: boolean | null;
   priority?: number | null;
+  expires_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   marketer?: { id: string; name?: string | null } | null;
@@ -164,6 +165,9 @@ type UnifiedCampaignForm = {
   rule_commission_value: string;
   rule_priority: string;
   rule_is_active: boolean;
+
+  expiry_mode: 'none' | 'date';
+  expiry_date: string;
 };
 
 type ScopeFilter = 'all' | 'product' | 'store' | 'platform';
@@ -259,6 +263,77 @@ const buildLegacyDayRangeFromDateTier = (tier: TierDraft) => ({
   start_date: tier.start_date || null,
   end_date: tier.end_date || null,
 });
+
+
+const sanitizeAffiliateCodePart = (value?: string | null) =>
+  (value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 8);
+
+const getScopeCodePrefix = (scope: 'product' | 'store' | 'all') => {
+  if (scope === 'product') return 'ADM-PRD';
+  if (scope === 'store') return 'ADM-STR';
+  return 'ADM-MER';
+};
+
+const buildGeneratedAffiliateCode = (
+  marketerName: string,
+  scope: 'product' | 'store' | 'all',
+  seed?: string
+) => {
+  const cleanName = sanitizeAffiliateCodePart(marketerName);
+  const namePart = cleanName || 'RAQMY';
+  const suffix = (seed || Math.random().toString(36).slice(2, 6))
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 4) || '0001';
+
+  return `${getScopeCodePrefix(scope)}-${namePart}-${suffix}`;
+};
+
+const buildAdminAffiliateOfferUrl = (campaign: UnifiedCampaignRow) => {
+  if (typeof window === 'undefined' || !campaign.link) return '';
+
+  const origin = window.location.origin;
+  const refCode = encodeURIComponent(campaign.link.code);
+
+  if (campaign.link.apply_to === 'store') {
+    const storeSlug = campaign.link.store?.slug || campaign.rule?.store?.slug;
+    if (storeSlug) return `${origin}/s/${encodeURIComponent(storeSlug)}?ref=${refCode}`;
+    if (campaign.link.store_id) {
+      return `${origin}/marketplace?store_id=${encodeURIComponent(campaign.link.store_id)}&ref=${refCode}`;
+    }
+  }
+
+  if (campaign.link.apply_to === 'product') {
+    const productSlugOrId =
+      campaign.link.product?.slug ||
+      campaign.rule?.product?.slug ||
+      campaign.link.product_id ||
+      campaign.rule?.product_id ||
+      '';
+
+    if (productSlugOrId) return `${origin}/p/${encodeURIComponent(productSlugOrId)}?ref=${refCode}`;
+  }
+
+  return `${origin}?ref=${refCode}`;
+};
+
+const getAdminAffiliateOfferLinkHint = (campaign: UnifiedCampaignRow) => {
+  const scope = getCampaignScopeValue(campaign);
+  if (scope === 'store') return 'هذا الرابط يفتح المتجر مباشرة مع حفظ كود أفلييت المنصة.';
+  if (scope === 'product') return 'هذا الرابط يفتح المنتج مباشرة مع حفظ كود أفلييت المنصة.';
+  return 'هذا الرابط يفتح المنصة ويحفظ كود الإحالة حتى يتم احتساب التاجر إذا سجّل واشترك.';
+};
+
+const isCountableCommissionStatus = (status?: string | null) => {
+  const normalized = String(status || '').toLowerCase();
+  if (!normalized) return true;
+  return !['rejected', 'cancelled', 'canceled', 'failed', 'void'].includes(normalized);
+};
 
 const uniqueIds = (values: Array<string | null | undefined>) =>
   [...new Set(values.filter((value): value is string => Boolean(value)))];
@@ -755,8 +830,6 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
 
   const campaignMetricsMap = useMemo(() => {
     const map = new Map<string, UnifiedCampaignMetrics>();
-    const approvedStatuses = new Set(['approved', 'paid']);
-
     links.forEach((link) => {
       const storedMetrics = getStoredLinkMetrics(link);
 
@@ -772,7 +845,7 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
         (commission) =>
           String(commission.link_id || '') === String(link.id) &&
           String(commission.marketer_id || '') === String(link.marketer_id || '') &&
-          approvedStatuses.has(String(commission.status || '').toLowerCase())
+          isCountableCommissionStatus(commission.status)
       );
 
       const commissionsEarnings = relatedCommissions.reduce(
@@ -792,8 +865,6 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
 
   const marketerMetricsMap = useMemo(() => {
     const map = new Map<string, UnifiedCampaignMetrics>();
-    const approvedStatuses = new Set(['approved', 'paid']);
-
     marketers.forEach((marketer) => {
       const storedMetrics = getStoredMarketerMetrics(marketer);
       const marketerLinks = links.filter(
@@ -817,7 +888,7 @@ export const AdminAffiliateManagementPage: React.FC<AdminAffiliateManagementPage
       const relatedCommissions = affiliateCommissions.filter(
         (commission) =>
           String(commission.marketer_id || '') === String(marketer.id) &&
-          approvedStatuses.has(String(commission.status || '').toLowerCase())
+          isCountableCommissionStatus(commission.status)
       );
 
       const commissionsEarnings = relatedCommissions.reduce(
@@ -1333,11 +1404,16 @@ const UnifiedCampaignsList: React.FC<{
 
                     <div className="space-y-2">
                       {campaign.link && (
-                        <CopyLinkButton
-                          url={`${window.location.origin}?ref=${campaign.link.code}`}
-                          label="نسخ رابط العرض"
-                          variant="minimal"
-                        />
+                        <>
+                          <CopyLinkButton
+                            url={buildAdminAffiliateOfferUrl(campaign)}
+                            label="نسخ رابط العرض"
+                            variant="minimal"
+                          />
+                          <p className="text-[11px] leading-5 text-gray-500 text-center px-2">
+                            {getAdminAffiliateOfferLinkHint(campaign)}
+                          </p>
+                        </>
                       )}
 
                       {campaign.link?.report_token && (
@@ -1453,6 +1529,10 @@ const UnifiedCampaignsList: React.FC<{
                       }
                     />
                     <InfoRow label="الأولوية" value={String(campaign.rule?.priority || 100)} />
+                    <InfoRow
+                      label="ينتهي في"
+                      value={campaign.rule?.expires_at ? formatDateForDisplay(campaign.rule.expires_at) : 'بدون تاريخ انتهاء'}
+                    />
                     <InfoRow
                       label="الحالة"
                       value={(campaign.rule?.is_active ?? true) ? 'نشطة' : 'غير نشطة'}
@@ -1625,11 +1705,39 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
         ? String(campaign.rule.priority)
         : '100',
     rule_is_active: campaign?.rule?.is_active ?? true,
+
+    expiry_mode: campaign?.rule?.expires_at ? 'date' : 'none',
+    expiry_date: campaign?.rule?.expires_at ? campaign.rule.expires_at.slice(0, 10) : '',
   });
 
   useEffect(() => {
     fetchOptions();
   }, [user?.id]);
+
+  const getSelectedMarketerName = () => {
+    if (formData.marketer_mode === 'existing') {
+      return marketers.find((item) => item.id === formData.existing_marketer_id)?.name || 'RAQMY';
+    }
+
+    return formData.marketer_name || 'RAQMY';
+  };
+
+  const generateAndSetAffiliateCode = () => {
+    setFormData((prev) => ({
+      ...prev,
+      link_code: buildGeneratedAffiliateCode(getSelectedMarketerName(), prev.link_apply_to),
+    }));
+  };
+
+  useEffect(() => {
+    if (!campaign?.link?.id && !formData.link_code.trim()) {
+      setFormData((prev) => ({
+        ...prev,
+        link_code: buildGeneratedAffiliateCode(getSelectedMarketerName(), prev.link_apply_to),
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign?.link?.id, formData.marketer_mode, formData.existing_marketer_id, formData.marketer_name, formData.link_apply_to]);
 
   const fetchOptions = async () => {
     try {
@@ -1808,7 +1916,12 @@ const validateTiers = () => {
       apply_to: formData.link_apply_to,
       product_id: formData.link_apply_to === 'product' ? formData.link_product_id : null,
       store_id: formData.link_apply_to === 'store' ? formData.link_store_id : null,
-      description: formData.link_description.trim() || null,
+      description:
+        formData.link_description.trim() ||
+        (formData.link_apply_to === 'all'
+          ? 'رابط أفلييت أدمن لإحالة التجار إلى منصة رقمي'
+          : null),
+      link_goal: 'merchant_referral',
       is_active: formData.link_is_active,
     };
 
@@ -1870,6 +1983,10 @@ const validateTiers = () => {
       commission_type: formData.rule_commission_type,
       commission_value: Number(formData.rule_commission_value),
       priority: Number(formData.rule_priority || 100),
+      expires_at:
+        formData.expiry_mode === 'date' && formData.expiry_date
+          ? `${formData.expiry_date}T23:59:59+03:00`
+          : null,
       is_active: formData.rule_is_active,
     };
 
@@ -1961,7 +2078,7 @@ const validateTiers = () => {
   return (
     <ModalShell
       title={campaign ? 'تعديل عرض أفلييت المنصة' : 'إنشاء عرض أفلييت جديد'}
-      subtitle="من نافذة واحدة: اختر مسوقًا أو أنشئ مسوقًا جديدًا، ثم اربط له الرابط وقاعدة العمولة الخاصة بتسويق المنصة."
+      subtitle="من نافذة واحدة: أنشئ مسوقًا أو اختر مسوقًا موجودًا، ثم أنشئ له رابط إحالة تجار وقاعدة عمولة ومدة العرض."
       onClose={onClose}
       size="xl"
     >
@@ -2097,11 +2214,11 @@ const validateTiers = () => {
 
         <SectionCard
           title="الرابط التسويقي"
-          subtitle="أنشئ كود ورابط تسويق خاص بالمنصة أو بمنتج أو متجر"
+          subtitle="أنشئ رابط إحالة لتجار المنصة مع إمكانية ربطه بمنتج أو متجر عند الحاجة"
           icon={<LinkIcon className="w-5 h-5" />}
         >
           <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800 leading-7 mb-5">
-            هذا الرابط هو رابط أفلييت خاص بالأدمن لتسويق المنصة أو عناصرها، وليس رابط تاجر مستقل.
+            هذا الرابط مخصص لأفلييت الأدمن. الافتراضي أنه يجلب تجارًا للمنصة ويحفظ كود الإحالة حتى نربطه باشتراك التاجر ومبيعاته لاحقًا.
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -2109,16 +2226,28 @@ const validateTiers = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 كود الرابط <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                value={formData.link_code}
-                onChange={(e) =>
-                  setFormData({ ...formData, link_code: e.target.value.toUpperCase() })
-                }
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
-                placeholder="RAQMYAFF"
-                required
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={formData.link_code}
+                  onChange={(e) =>
+                    setFormData({ ...formData, link_code: e.target.value.toUpperCase() })
+                  }
+                  className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono"
+                  placeholder="ADM-MER-RAQMY-0001"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={generateAndSetAffiliateCode}
+                  className="px-4 py-3 rounded-xl border border-violet-200 text-violet-700 font-medium hover:bg-violet-50 whitespace-nowrap"
+                >
+                  توليد
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                يتم توليد الكود تلقائيًا، ويمكنك تغييره يدويًا عند الحاجة.
+              </p>
             </div>
 
             <div>
@@ -2133,12 +2262,19 @@ const validateTiers = () => {
                     link_apply_to: e.target.value as 'product' | 'store' | 'all',
                     link_product_id: e.target.value === 'product' ? formData.link_product_id : '',
                     link_store_id: e.target.value === 'store' ? formData.link_store_id : '',
+                    link_code:
+                      !formData.link_code || formData.link_code.startsWith('ADM-')
+                        ? buildGeneratedAffiliateCode(
+                            getSelectedMarketerName(),
+                            e.target.value as 'product' | 'store' | 'all'
+                          )
+                        : formData.link_code,
                   })
                 }
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
               >
-                <option value="all">المنصة بالكامل</option>
+                <option value="all">إحالة تجار للمنصة</option>
                 <option value="product">منتج محدد</option>
                 <option value="store">متجر محدد</option>
               </select>
@@ -2354,6 +2490,49 @@ const validateTiers = () => {
             </div>
           </label>
 
+          <div className="mt-4 rounded-3xl border border-gray-200 p-5 bg-gray-50/60">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">مدة عرض أفلييت الأدمن</h3>
+            <p className="text-sm text-gray-500 mb-4 leading-7">
+              عند تحديد تاريخ انتهاء، يتم حفظه في قاعدة العمولة حتى تتوقف استفادة المسوق من الإحالات الجديدة بعد هذا التاريخ.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">طريقة الانتهاء</label>
+                <select
+                  value={formData.expiry_mode}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      expiry_mode: e.target.value as 'none' | 'date',
+                      expiry_date: e.target.value === 'date' ? formData.expiry_date : '',
+                    })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="none">بدون تاريخ انتهاء</option>
+                  <option value="date">ينتهي بتاريخ محدد</option>
+                </select>
+              </div>
+
+              {formData.expiry_mode === 'date' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    تاريخ انتهاء العرض <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    min={getTodayDateInputValue()}
+                    value={formData.expiry_date}
+                    onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required={formData.expiry_mode === 'date'}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="mt-6 rounded-3xl border border-gray-200 p-5">
             <div className="flex items-center justify-between gap-4 mb-5">
               <div>
@@ -2505,6 +2684,9 @@ const validateTiers = () => {
                   <div className="font-semibold text-gray-900 mb-1">الرابط</div>
                   <div className="font-mono">{formData.link_code || '—'}</div>
                   <div className="text-gray-500">{getApplyToLabel(formData.link_apply_to)}</div>
+                  <div className="text-gray-500">
+                    {formData.link_apply_to === 'all' ? 'هدفه الأساسي: إحالة التجار' : 'هدفه: تسويق عنصر محدد'}
+                  </div>
                 </div>
 
                 <div className="rounded-2xl bg-white border border-gray-200 p-4">
@@ -2517,6 +2699,11 @@ const validateTiers = () => {
                   </div>
                   <div className="text-gray-500">
                     {getScopeTypeLabel(formData.rule_scope_type)} • {tiers.length} شرائح
+                  </div>
+                  <div className="text-gray-500">
+                    {formData.expiry_mode === 'date' && formData.expiry_date
+                      ? `ينتهي ${formatDateForDisplay(formData.expiry_date)}`
+                      : 'بدون تاريخ انتهاء'}
                   </div>
                 </div>
               </div>
