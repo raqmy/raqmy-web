@@ -163,7 +163,6 @@ type UnifiedCampaignForm = {
   rule_store_id: string;
   rule_commission_type: 'percentage' | 'fixed';
   rule_commission_value: string;
-  rule_priority: string;
   rule_is_active: boolean;
 
   expiry_mode: 'none' | 'date';
@@ -257,11 +256,13 @@ const formatDateForDisplay = (value?: string | null) => {
   }
 };
 
-const buildLegacyDayRangeFromDateTier = (tier: TierDraft) => ({
-  day_from: 0,
-  day_to: 999999,
+const buildTierDatePayload = (tier: TierDraft) => ({
+  day_from: null,
+  day_to: null,
   start_date: tier.start_date || null,
   end_date: tier.end_date || null,
+  starts_at: tier.start_date ? `${tier.start_date}T00:00:00+03:00` : null,
+  expires_at: tier.end_date ? `${tier.end_date}T23:59:59+03:00` : null,
 });
 
 
@@ -1528,7 +1529,6 @@ const UnifiedCampaignsList: React.FC<{
                           : '—'
                       }
                     />
-                    <InfoRow label="الأولوية" value={String(campaign.rule?.priority || 100)} />
                     <InfoRow
                       label="ينتهي في"
                       value={campaign.rule?.expires_at ? formatDateForDisplay(campaign.rule.expires_at) : 'بدون تاريخ انتهاء'}
@@ -1700,10 +1700,7 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
       campaign?.rule?.commission_value !== null && campaign?.rule?.commission_value !== undefined
         ? String(campaign.rule.commission_value)
         : '',
-    rule_priority:
-      campaign?.rule?.priority !== null && campaign?.rule?.priority !== undefined
-        ? String(campaign.rule.priority)
-        : '100',
+    
     rule_is_active: campaign?.rule?.is_active ?? true,
 
     expiry_mode: campaign?.rule?.expires_at ? 'date' : 'none',
@@ -1729,8 +1726,8 @@ const AdminCampaignFormModal: React.FC<AdminCampaignFormModalProps> = ({
     }));
   };
 
-  useEffect(() => {
-    if (!campaign?.link?.id && !formData.link_code.trim()) {
+      useEffect(() => {
+    if (!campaign?.link?.id) {
       setFormData((prev) => ({
         ...prev,
         link_code: buildGeneratedAffiliateCode(getSelectedMarketerName(), prev.link_apply_to),
@@ -1982,7 +1979,7 @@ const validateTiers = () => {
       store_id: formData.rule_scope_type === 'store' ? formData.rule_store_id : null,
       commission_type: formData.rule_commission_type,
       commission_value: Number(formData.rule_commission_value),
-      priority: Number(formData.rule_priority || 100),
+            priority: 100,
       expires_at:
         formData.expiry_mode === 'date' && formData.expiry_date
           ? `${formData.expiry_date}T23:59:59+03:00`
@@ -2030,7 +2027,7 @@ const validateTiers = () => {
     for (const tier of tiers) {
       const tierPayload = {
         rule_id: ruleId,
-        ...buildLegacyDayRangeFromDateTier(tier),
+               ...buildTierDatePayload(tier),
         commission_type: tier.commission_type,
         commission_value: Number(tier.commission_value),
         is_active: tier.is_active,
@@ -2148,7 +2145,16 @@ const validateTiers = () => {
                   <input
                     type="text"
                     value={formData.marketer_name}
-                    onChange={(e) => setFormData({ ...formData, marketer_name: e.target.value })}
+                    onChange={(e) => {
+  const nextName = e.target.value;
+  setFormData((prev) => ({
+    ...prev,
+    marketer_name: nextName,
+    link_code: !campaign?.link?.id
+      ? buildGeneratedAffiliateCode(nextName || 'RAQMY', prev.link_apply_to)
+      : prev.link_code,
+  }));
+}}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     required={formData.marketer_mode === 'new'}
                   />
@@ -2383,19 +2389,6 @@ const validateTiers = () => {
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">الأولوية</label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={formData.rule_priority}
-                onChange={(e) => setFormData({ ...formData, rule_priority: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="100"
-              />
-            </div>
-          </div>
 
           {formData.rule_scope_type === 'product' && (
             <div className="mb-5">
@@ -2460,8 +2453,8 @@ const validateTiers = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                قيمة العمولة الأساسية
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                قيمة العمولة الأساسية <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -2472,7 +2465,8 @@ const validateTiers = () => {
                   setFormData({ ...formData, rule_commission_value: e.target.value })
                 }
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder={formData.rule_commission_type === 'percentage' ? '10' : '25'}
+                                placeholder={formData.rule_commission_type === 'percentage' ? '10' : '25'}
+                required
               />
             </div>
           </div>
