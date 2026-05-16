@@ -349,20 +349,8 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
           </p>
         </div>
 
-        {isSubscriptionActive && currentPlan && (
-          <div className="max-w-3xl mx-auto mb-10 rounded-2xl border border-blue-100 bg-blue-50 p-5 text-center">
-            <p className="text-blue-900 font-semibold">
-              باقتك الحالية: {currentPlan.name}
-            </p>
-            <p className="text-blue-700 text-sm mt-1">
-              يمكنك الترقية إلى باقة أعلى فقط. أما الرجوع إلى باقة أقل فيكون بعد انتهاء الباقة الحالية.
-            </p>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
           {sortedPlans.map((plan) => {
-            const current = isCurrentPlan(plan);
             const isPopular = !!plan.is_popular;
             const isSubmitting = submittingPlanId === plan.id;
             const features = buildPlanFeatures(plan);
@@ -400,12 +388,6 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
                   </div>
 
                   <p className="text-sm text-gray-500 mb-6">{getPlanIntervalText(plan)}</p>
-
-                  {lowerOrSameBlocked && (
-                    <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                      لديك باقة أعلى أو مساوية نشطة حالياً، لذلك لا يمكن اختيار هذه الباقة الآن.
-                    </div>
-                  )}
 
                   <ul className="space-y-4 mb-8">
                     {features.map((feature, idx) => (
