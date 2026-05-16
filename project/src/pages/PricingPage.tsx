@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Check } from 'lucide-react';
 import { supabase, Plan } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -55,9 +55,58 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
   const currentPlanId = (profile as any)?.plan_id ?? null;
   const currentSubscriptionStatus = (profile as any)?.subscription_status ?? null;
+  const currentSubscriptionExpiresAt = (profile as any)?.subscription_expires_at ?? null;
+
+  const isSubscriptionActive = useMemo(() => {
+    if (currentSubscriptionStatus !== 'active') return false;
+
+    if (!currentSubscriptionExpiresAt) {
+      return true;
+    }
+
+    const expiresAt = new Date(currentSubscriptionExpiresAt).getTime();
+    if (Number.isNaN(expiresAt)) {
+      return true;
+    }
+
+    return expiresAt > Date.now();
+  }, [currentSubscriptionStatus, currentSubscriptionExpiresAt]);
+
+  const currentPlan = useMemo(() => {
+    if (!currentPlanId) return null;
+    return plans.find((plan) => plan.id === currentPlanId) || null;
+  }, [plans, currentPlanId]);
+
+  const getPlanPrice = (plan?: PlanWithExtras | null) => {
+    return Number(plan?.price || 0);
+  };
+
+  const getPlanSortOrder = (plan?: PlanWithExtras | null) => {
+    if (!plan) return 0;
+    return Number(plan.sort_order ?? getPlanPrice(plan));
+  };
 
   const isCurrentPlan = (plan: PlanWithExtras) => {
-    return currentPlanId === plan.id && currentSubscriptionStatus === 'active';
+    return currentPlanId === plan.id && isSubscriptionActive;
+  };
+
+  const isLowerOrSameActivePaidPlan = (plan: PlanWithExtras) => {
+    if (!isSubscriptionActive || !currentPlan || currentPlan.id === plan.id) {
+      return false;
+    }
+
+    const selectedPrice = getPlanPrice(plan);
+    const activePrice = getPlanPrice(currentPlan);
+
+    if (activePrice <= 0) {
+      return false;
+    }
+
+    if (selectedPrice <= 0) {
+      return true;
+    }
+
+    return selectedPrice <= activePrice;
   };
 
   const formatPlanPrice = (price: number | string | null | undefined) => {
@@ -67,9 +116,11 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
   const getPlanIntervalText = (plan: PlanWithExtras) => {
     const numericPrice = Number(plan.price || 0);
+
     if (numericPrice <= 0) {
-      return 'تُفعّل لمدة شهر ويمكن الترقية لاحقًا';
+      return 'خطة مجانية دائمة، ويمكنك الترقية في أي وقت';
     }
+
     return 'اشتراك شهري قابل للتجديد';
   };
 
@@ -81,8 +132,23 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
     const addFeature = (value?: string | null) => {
       if (!value) return;
+
       const normalized = normalizeFeatureText(value);
       if (!normalized) return;
+
+      const blockedTexts = [
+        'تُفعّل لمدة شهر',
+        'تفعل لمدة شهر',
+        'تفعيل لمدة شهر',
+        'لمدة شهر',
+        'لمدة شهرين',
+        'تفعيل لمدة شهرين',
+        'تفعل لمدة شهرين',
+      ];
+
+      const shouldSkip = blockedTexts.some((blockedText) => normalized.includes(blockedText));
+      if (shouldSkip) return;
+
       if (!featureSet.has(normalized)) {
         featureSet.add(normalized);
       }
@@ -141,7 +207,14 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     const numericPrice = Number(plan.price || 0);
 
     if (numericPrice <= 0) {
-      alert('هذه هي الباقة الأساسية الافتراضية حاليًا، والرجوع إليها تلقائيًا غير مفعّل بعد.');
+      alert('أنت على الباقة الأساسية المجانية أو لا يمكن الرجوع لها يدويًا أثناء وجود اشتراك نشط.');
+      return;
+    }
+
+    if (isLowerOrSameActivePaidPlan(plan)) {
+      alert(
+        `لديك حالياً باقة نشطة: ${currentPlan?.name || 'مدفوعة'}. لا يمكنك الاشتراك في باقة أقل أو مساوية قبل انتهاء باقتك الحالية.`
+      );
       return;
     }
 
@@ -163,6 +236,8 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
             source: 'pricing_page',
             plan_name: plan.name,
             plan_slug: plan.slug || null,
+            current_plan_id: currentPlan?.id || null,
+            current_plan_name: currentPlan?.name || null,
           },
         })
         .select('id')
@@ -209,6 +284,39 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     }
   };
 
+  const getPlanButtonLabel = (plan: PlanWithExtras, isSubmitting: boolean) => {
+    const numericPrice = getPlanPrice(plan);
+
+    if (isCurrentPlan(plan)) {
+      return 'الباقة الحالية';
+    }
+
+    if (isSubmitting) {
+      return 'جاري تحويلك للدفع...';
+    }
+
+    if (isLowerOrSameActivePaidPlan(plan)) {
+      return 'غير متاحة أثناء باقتك الحالية';
+    }
+
+    if (numericPrice <= 0) {
+      return 'الباقة المجانية';
+    }
+
+    const currentPrice = getPlanPrice(currentPlan);
+    const selectedPrice = getPlanPrice(plan);
+
+    if (isSubscriptionActive && currentPlan && selectedPrice > currentPrice) {
+      return 'الترقية لهذه الباقة';
+    }
+
+    return 'اختيار هذه الباقة';
+  };
+
+  const getPlanButtonDisabled = (plan: PlanWithExtras, isSubmitting: boolean) => {
+    return isCurrentPlan(plan) || isSubmitting || isLowerOrSameActivePaidPlan(plan);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -220,28 +328,54 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     );
   }
 
+  const sortedPlans = [...plans].sort((a, b) => {
+    const sortA = getPlanSortOrder(a);
+    const sortB = getPlanSortOrder(b);
+
+    if (sortA !== sortB) {
+      return sortA - sortB;
+    }
+
+    return getPlanPrice(a) - getPlanPrice(b);
+  });
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-16">
           <h1 className="text-5xl font-bold text-gray-900 mb-4">اختر الباقة المناسبة لك</h1>
-          <p className="text-xl text-gray-600">ابدأ مجاناً وقم بالترقية في أي وقت</p>
+          <p className="text-xl text-gray-600">
+            ابدأ مجاناً، وإذا احتجت عمولات أقل يمكنك الترقية في أي وقت
+          </p>
         </div>
 
+        {isSubscriptionActive && currentPlan && (
+          <div className="max-w-3xl mx-auto mb-10 rounded-2xl border border-blue-100 bg-blue-50 p-5 text-center">
+            <p className="text-blue-900 font-semibold">
+              باقتك الحالية: {currentPlan.name}
+            </p>
+            <p className="text-blue-700 text-sm mt-1">
+              يمكنك الترقية إلى باقة أعلى فقط. أما الرجوع إلى باقة أقل فيكون بعد انتهاء الباقة الحالية.
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-          {plans.map((plan) => {
+          {sortedPlans.map((plan) => {
             const current = isCurrentPlan(plan);
             const isPopular = !!plan.is_popular;
             const isSubmitting = submittingPlanId === plan.id;
             const features = buildPlanFeatures(plan);
             const numericPrice = Number(plan.price || 0);
+            const buttonDisabled = getPlanButtonDisabled(plan, isSubmitting);
+            const lowerOrSameBlocked = isLowerOrSameActivePaidPlan(plan);
 
             return (
               <div
                 key={plan.id}
                 className={`bg-white rounded-2xl shadow-lg overflow-hidden transition-all hover:shadow-xl ${
                   isPopular ? 'ring-2 ring-blue-600 scale-105' : ''
-                }`}
+                } ${lowerOrSameBlocked ? 'opacity-80' : ''}`}
               >
                 {isPopular && (
                   <div className="bg-blue-600 text-white text-center py-2 text-sm font-semibold">
@@ -267,6 +401,12 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
                   <p className="text-sm text-gray-500 mb-6">{getPlanIntervalText(plan)}</p>
 
+                  {lowerOrSameBlocked && (
+                    <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      لديك باقة أعلى أو مساوية نشطة حالياً، لذلك لا يمكن اختيار هذه الباقة الآن.
+                    </div>
+                  )}
+
                   <ul className="space-y-4 mb-8">
                     {features.map((feature, idx) => (
                       <li key={`${plan.id}-feature-${idx}`} className="flex items-start gap-3">
@@ -278,22 +418,16 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
                   <button
                     onClick={() => handleSelectPlan(plan)}
-                    disabled={current || isSubmitting}
+                    disabled={buttonDisabled}
                     className={`w-full py-3 rounded-xl font-semibold transition-all ${
-                      current
+                      buttonDisabled
                         ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
                         : isPopular
                         ? 'bg-blue-600 text-white hover:bg-blue-700'
                         : 'bg-gray-900 text-white hover:bg-gray-800'
                     } ${isSubmitting ? 'opacity-70 cursor-wait' : ''}`}
                   >
-                    {current
-                      ? 'الباقة الحالية'
-                      : isSubmitting
-                      ? 'جاري تحويلك للدفع...'
-                      : numericPrice > 0
-                      ? 'الترقية لهذه الباقة'
-                      : 'اختيار هذه الباقة'}
+                    {getPlanButtonLabel(plan, isSubmitting)}
                   </button>
                 </div>
               </div>
