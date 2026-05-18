@@ -9,6 +9,11 @@ import {
   Share2,
   Search,
   Download,
+  Copy,
+  ShieldCheck,
+  Zap,
+  CreditCard,
+  CheckCircle2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -68,6 +73,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [copySuccess, setCopySuccess] = useState(false);
 
   const [sortBy, setSortBy] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
@@ -78,6 +84,26 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
   }, [storeSlug, sortBy]);
 
   const storeImageUrl = useMemo(() => getStoreImageUrl(store), [store]);
+
+  const storeDescription = useMemo(() => {
+    const description = String(store?.description || store?.bio || '').trim();
+
+    if (description) {
+      return description;
+    }
+
+    return 'متجر رقمي لبيع المنتجات والملفات الرقمية بسهولة وأمان عبر منصة رقمي.';
+  }, [store]);
+
+  const storeCategory = useMemo(() => {
+    const category = String(store?.category || '').trim();
+    return category || 'متجر رقمي';
+  }, [store]);
+
+  const storeUrl = useMemo(() => {
+    if (typeof window === 'undefined') return `/s/${encodeURIComponent(storeSlug)}`;
+    return `${window.location.origin}/s/${encodeURIComponent(storeSlug)}`;
+  }, [storeSlug]);
 
   const filteredProducts = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -285,21 +311,32 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
     }
   };
 
-  const handleShareStore = async () => {
-    const shareUrl = `${window.location.origin}/s/${encodeURIComponent(storeSlug)}`;
+  const handleCopyStoreLink = async () => {
+    try {
+      await navigator.clipboard.writeText(storeUrl);
+      setCopySuccess(true);
 
+      window.setTimeout(() => {
+        setCopySuccess(false);
+      }, 1800);
+    } catch (error) {
+      console.error('Error copying store link:', error);
+      alert('تعذر نسخ الرابط، حاول مرة أخرى');
+    }
+  };
+
+  const handleShareStore = async () => {
     try {
       if (navigator.share) {
         await navigator.share({
           title: store?.name || 'متجر رقمي',
-          text: store?.description || `تصفح متجر ${store?.name || 'رقمي'}`,
-          url: shareUrl,
+          text: storeDescription || `تصفح متجر ${store?.name || 'رقمي'}`,
+          url: storeUrl,
         });
         return;
       }
 
-      await navigator.clipboard.writeText(shareUrl);
-      alert('تم نسخ رابط المتجر');
+      await handleCopyStoreLink();
     } catch (error) {
       console.error('Error sharing store:', error);
     }
@@ -366,9 +403,9 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 <div className="min-w-0">
                   <h1 className="text-lg md:text-xl font-bold text-gray-900 truncate">{store.name}</h1>
                   <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <span>{store.category || 'متجر رقمي'}</span>
+                    <span>{storeCategory}</span>
                     <span className="w-1 h-1 rounded-full bg-gray-300" />
-                    <span>{filteredProducts.length} منتج</span>
+                    <span>{products.length} منتج</span>
                   </div>
                 </div>
               </div>
@@ -440,7 +477,130 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
         </nav>
 
         <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-          <section className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-6 min-h-[980px] lg:min-h-[860px]">
+          <section className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-blue-700 via-indigo-700 to-purple-700 text-white shadow-xl mb-8">
+            <div className="absolute inset-0 opacity-20">
+              <div className="absolute -top-24 -right-24 w-72 h-72 bg-white rounded-full blur-3xl" />
+              <div className="absolute -bottom-24 -left-24 w-72 h-72 bg-cyan-300 rounded-full blur-3xl" />
+            </div>
+
+            <div className="relative p-6 md:p-8 lg:p-10">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
+                <div className="flex flex-col md:flex-row md:items-center gap-5 min-w-0">
+                  <div className="w-24 h-24 md:w-28 md:h-28 rounded-3xl overflow-hidden bg-white/15 border border-white/25 flex items-center justify-center shadow-lg shrink-0">
+                    {storeImageUrl ? (
+                      <img
+                        src={storeImageUrl}
+                        alt={store?.name || 'صورة المتجر'}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <StoreIcon className="w-12 h-12 text-white" />
+                    )}
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-white/15 border border-white/20 px-3 py-1 text-xs font-medium mb-3">
+                      <StoreIcon className="w-4 h-4" />
+                      <span>{storeCategory}</span>
+                    </div>
+
+                    <h2 className="text-3xl md:text-4xl lg:text-5xl font-extrabold leading-tight mb-3">
+                      {store.name}
+                    </h2>
+
+                    <p className="max-w-2xl text-sm md:text-base leading-8 text-white/85">
+                      {storeDescription}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="w-full lg:w-auto">
+                  <div className="grid grid-cols-2 lg:grid-cols-1 gap-3">
+                    <button
+                      onClick={handleCopyStoreLink}
+                      className="flex items-center justify-center gap-2 rounded-2xl bg-white text-blue-700 px-5 py-3 text-sm font-bold hover:bg-blue-50 transition-colors shadow-sm"
+                    >
+                      {copySuccess ? (
+                        <>
+                          <CheckCircle2 className="w-5 h-5" />
+                          تم النسخ
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-5 h-5" />
+                          نسخ الرابط
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={handleShareStore}
+                      className="flex items-center justify-center gap-2 rounded-2xl bg-white/15 border border-white/25 px-5 py-3 text-sm font-bold text-white hover:bg-white/20 transition-colors"
+                    >
+                      <Share2 className="w-5 h-5" />
+                      مشاركة المتجر
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-8">
+                <div className="rounded-2xl bg-white/12 border border-white/20 p-4">
+                  <div className="text-white/65 text-xs mb-2">عدد المنتجات</div>
+                  <div className="text-2xl font-extrabold">{products.length}</div>
+                </div>
+
+                <div className="rounded-2xl bg-white/12 border border-white/20 p-4">
+                  <div className="text-white/65 text-xs mb-2">نوع المتجر</div>
+                  <div className="text-base font-bold truncate">{storeCategory}</div>
+                </div>
+
+                <div className="rounded-2xl bg-white/12 border border-white/20 p-4">
+                  <div className="text-white/65 text-xs mb-2">المنتجات الرقمية</div>
+                  <div className="text-base font-bold">تحميل فوري</div>
+                </div>
+
+                <div className="rounded-2xl bg-white/12 border border-white/20 p-4">
+                  <div className="text-white/65 text-xs mb-2">الدفع</div>
+                  <div className="text-base font-bold">آمن عبر رقمي</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-green-50 flex items-center justify-center">
+                <ShieldCheck className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-900">شراء آمن</h3>
+                <p className="text-sm text-gray-500 mt-1">معالجة الطلبات عبر منصة رقمي</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center">
+                <Zap className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-900">تسليم رقمي</h3>
+                <p className="text-sm text-gray-500 mt-1">استلام المنتج بعد إتمام الشراء</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-purple-50 flex items-center justify-center">
+                <CreditCard className="w-6 h-6 text-purple-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-900">منتجات رقمية</h3>
+                <p className="text-sm text-gray-500 mt-1">ملفات وقوالب ومنتجات جاهزة</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-6 min-h-[760px] lg:min-h-[680px]">
             <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between mb-6">
               <div>
                 <h3 className="text-2xl font-bold text-gray-900">المنتجات المتاحة</h3>
@@ -485,7 +645,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد منتجات مطابقة</h3>
                 <p className="text-gray-500">
                   {products.length === 0
-                    ? 'لا يوجد منتجات في هذا المتجر حالياً'
+                    ? 'لم يتم إضافة منتجات في هذا المتجر حتى الآن'
                     : 'جرّب تغيير البحث أو الترتيب لعرض نتائج أخرى'}
                 </p>
               </div>
