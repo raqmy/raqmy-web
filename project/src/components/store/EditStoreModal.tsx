@@ -60,6 +60,12 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    contact_section_enabled: false,
+    contact_section_title: 'للتواصل',
+    contact_section_content: '',
+    custom_section_enabled: false,
+    custom_section_title: '',
+    custom_section_content: '',
   });
 
   useEffect(() => {
@@ -294,6 +300,12 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
     setFormData({
       name: data.name || '',
       description: data.description || '',
+      contact_section_enabled: Boolean(data.contact_section_enabled),
+      contact_section_title: data.contact_section_title || 'للتواصل',
+      contact_section_content: data.contact_section_content || '',
+      custom_section_enabled: Boolean(data.custom_section_enabled),
+      custom_section_title: data.custom_section_title || '',
+      custom_section_content: data.custom_section_content || '',
     });
   };
 
@@ -308,6 +320,12 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
         .update({
           name: formData.name,
           description: formData.description || null,
+          contact_section_enabled: formData.contact_section_enabled,
+          contact_section_title: formData.contact_section_title.trim() || 'للتواصل',
+          contact_section_content: formData.contact_section_content.trim() || null,
+          custom_section_enabled: formData.custom_section_enabled,
+          custom_section_title: formData.custom_section_title.trim() || null,
+          custom_section_content: formData.custom_section_content.trim() || null,
         })
         .eq('id', storeId);
 
@@ -475,7 +493,143 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
                   })
                 }
                 className="w-full border rounded-xl px-4 py-3"
+                placeholder="يظهر تحت صورة واسم المتجر في أسفل واجهة المتجر"
               />
+            </div>
+
+            <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50 space-y-5">
+              <div className="text-right">
+                <h3 className="text-lg font-bold text-gray-900">أقسام أسفل المتجر</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  تحكم في الخانات التي تظهر في أسفل واجهة المتجر للزوار.
+                </p>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
+                <label className="flex items-start justify-between gap-4 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.contact_section_enabled}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        contact_section_enabled: e.target.checked,
+                      })
+                    }
+                    className="mt-1 w-5 h-5 text-blue-600 rounded"
+                  />
+
+                  <div className="text-right">
+                    <div className="font-semibold text-gray-900">إظهار خانة التواصل</div>
+                    <p className="text-sm text-gray-500 mt-1">
+                      تظهر فقط إذا كانت مفعلة، ويمكنك كتابة طريقة التواصل أو أي ملاحظة للزوار.
+                    </p>
+                  </div>
+                </label>
+
+                {formData.contact_section_enabled && (
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <label className="block mb-2 text-sm font-medium text-right">
+                        عنوان خانة التواصل
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.contact_section_title}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            contact_section_title: e.target.value,
+                          })
+                        }
+                        className="w-full border rounded-xl px-4 py-3 text-right"
+                        placeholder="مثال: للتواصل"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block mb-2 text-sm font-medium text-right">
+                        محتوى خانة التواصل
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={formData.contact_section_content}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            contact_section_content: e.target.value,
+                          })
+                        }
+                        className="w-full border rounded-xl px-4 py-3 text-right"
+                        placeholder="مثال: للتواصل عبر واتساب: 05xxxxxxxx"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
+                <label className="flex items-start justify-between gap-4 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.custom_section_enabled}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        custom_section_enabled: e.target.checked,
+                      })
+                    }
+                    className="mt-1 w-5 h-5 text-blue-600 rounded"
+                  />
+
+                  <div className="text-right">
+                    <div className="font-semibold text-gray-900">إظهار خانة مخصصة إضافية</div>
+                    <p className="text-sm text-gray-500 mt-1">
+                      استخدمها لأي معلومات مهمة مثل طريقة التسليم، الشروط، أو ملاحظات الشراء.
+                    </p>
+                  </div>
+                </label>
+
+                {formData.custom_section_enabled && (
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <label className="block mb-2 text-sm font-medium text-right">
+                        عنوان الخانة المخصصة
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.custom_section_title}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            custom_section_title: e.target.value,
+                          })
+                        }
+                        className="w-full border rounded-xl px-4 py-3 text-right"
+                        placeholder="مثال: معلومات مهمة"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block mb-2 text-sm font-medium text-right">
+                        محتوى الخانة المخصصة
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={formData.custom_section_content}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            custom_section_content: e.target.value,
+                          })
+                        }
+                        className="w-full border rounded-xl px-4 py-3 text-right"
+                        placeholder="اكتب أي نص تريد ظهوره للزوار"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="border-t pt-5 flex items-center gap-3">
