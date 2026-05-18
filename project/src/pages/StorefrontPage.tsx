@@ -72,6 +72,158 @@ const shouldShowOptionalStoreSection = (
   return Boolean(enabled) && (getCleanStoreText(title) !== '' || getCleanStoreText(content) !== '');
 };
 
+
+type StorefrontThemeKey = 'default' | 'clean' | 'dark' | 'creator' | 'creative' | 'premium';
+
+type StorefrontThemeConfig = {
+  key: StorefrontThemeKey;
+  pageBg: string;
+  nav: string;
+  mainBg: string;
+  panel: string;
+  input: string;
+  filterButton: string;
+  emptyBox: string;
+  productCard: string;
+  productImage: string;
+  textPrimary: string;
+  textMuted: string;
+  accentText: string;
+  buttonPrimary: string;
+  footerBg: string;
+  footerText: string;
+  footerMuted: string;
+  footerImage: string;
+};
+
+const STOREFRONT_THEMES: Record<StorefrontThemeKey, StorefrontThemeConfig> = {
+  default: {
+    key: 'default',
+    pageBg: 'bg-[#08152f]',
+    nav: 'bg-white border-b border-gray-200',
+    mainBg: 'bg-[#f6f7fb]',
+    panel: 'bg-white border-gray-200 shadow-sm',
+    input: 'border-gray-200 bg-gray-50 text-gray-900 focus:ring-blue-500',
+    filterButton: 'border-gray-200 bg-gray-50 text-gray-500',
+    emptyBox: 'bg-gray-50 border-gray-200 text-gray-900',
+    productCard: 'bg-white border-gray-100 shadow hover:shadow-lg',
+    productImage: 'bg-white border-gray-100',
+    textPrimary: 'text-gray-900',
+    textMuted: 'text-gray-500',
+    accentText: 'text-blue-600',
+    buttonPrimary: 'bg-blue-600 hover:bg-blue-700 text-white',
+    footerBg: 'bg-[#08152f]',
+    footerText: 'text-white',
+    footerMuted: 'text-white/75',
+    footerImage: 'bg-white/10 border-white/10',
+  },
+  clean: {
+    key: 'clean',
+    pageBg: 'bg-slate-100',
+    nav: 'bg-white/95 border-b border-slate-200 backdrop-blur',
+    mainBg: 'bg-slate-50',
+    panel: 'bg-white border-slate-200 shadow-sm',
+    input: 'border-slate-200 bg-white text-slate-900 focus:ring-slate-500',
+    filterButton: 'border-slate-200 bg-white text-slate-500',
+    emptyBox: 'bg-slate-50 border-slate-200 text-slate-900',
+    productCard: 'bg-white border-slate-200 shadow-sm hover:shadow-md',
+    productImage: 'bg-slate-50 border-slate-100',
+    textPrimary: 'text-slate-950',
+    textMuted: 'text-slate-500',
+    accentText: 'text-slate-900',
+    buttonPrimary: 'bg-slate-900 hover:bg-slate-800 text-white',
+    footerBg: 'bg-slate-950',
+    footerText: 'text-white',
+    footerMuted: 'text-slate-300',
+    footerImage: 'bg-white/10 border-white/10',
+  },
+  dark: {
+    key: 'dark',
+    pageBg: 'bg-slate-950',
+    nav: 'bg-white border-b border-slate-200',
+    mainBg: 'bg-slate-950',
+    panel: 'bg-slate-900 border-white/10 shadow-2xl',
+    input: 'border-white/10 bg-slate-950 text-white placeholder:text-slate-500 focus:ring-cyan-400',
+    filterButton: 'border-white/10 bg-slate-950 text-slate-300',
+    emptyBox: 'bg-slate-950/70 border-white/10 text-white',
+    productCard: 'bg-slate-950 border-white/10 shadow-xl hover:shadow-2xl',
+    productImage: 'bg-slate-900 border-white/10',
+    textPrimary: 'text-white',
+    textMuted: 'text-slate-400',
+    accentText: 'text-cyan-300',
+    buttonPrimary: 'bg-cyan-500 hover:bg-cyan-400 text-slate-950',
+    footerBg: 'bg-black',
+    footerText: 'text-white',
+    footerMuted: 'text-slate-300',
+    footerImage: 'bg-white/10 border-white/10',
+  },
+  creator: {
+    key: 'creator',
+    pageBg: 'bg-amber-950',
+    nav: 'bg-white border-b border-amber-100',
+    mainBg: 'bg-amber-50',
+    panel: 'bg-white border-amber-100 shadow-sm',
+    input: 'border-amber-200 bg-amber-50/60 text-stone-950 focus:ring-amber-500',
+    filterButton: 'border-amber-200 bg-amber-50/60 text-amber-700',
+    emptyBox: 'bg-amber-50 border-amber-200 text-stone-950',
+    productCard: 'bg-white border-amber-100 shadow-sm hover:shadow-lg',
+    productImage: 'bg-amber-50 border-amber-100',
+    textPrimary: 'text-stone-950',
+    textMuted: 'text-stone-500',
+    accentText: 'text-amber-700',
+    buttonPrimary: 'bg-amber-600 hover:bg-amber-700 text-white',
+    footerBg: 'bg-stone-950',
+    footerText: 'text-white',
+    footerMuted: 'text-amber-100/75',
+    footerImage: 'bg-amber-400/10 border-amber-200/10',
+  },
+  creative: {
+    key: 'creative',
+    pageBg: 'bg-fuchsia-950',
+    nav: 'bg-white border-b border-fuchsia-100',
+    mainBg: 'bg-gradient-to-br from-fuchsia-50 via-white to-indigo-50',
+    panel: 'bg-white/90 border-fuchsia-100 shadow-sm',
+    input: 'border-fuchsia-200 bg-white/80 text-slate-950 focus:ring-fuchsia-500',
+    filterButton: 'border-fuchsia-200 bg-white/80 text-fuchsia-700',
+    emptyBox: 'bg-white/70 border-fuchsia-200 text-slate-950',
+    productCard: 'bg-white border-fuchsia-100 shadow-sm hover:shadow-xl',
+    productImage: 'bg-gradient-to-br from-fuchsia-50 to-indigo-50 border-fuchsia-100',
+    textPrimary: 'text-slate-950',
+    textMuted: 'text-slate-500',
+    accentText: 'text-fuchsia-600',
+    buttonPrimary: 'bg-fuchsia-600 hover:bg-fuchsia-700 text-white',
+    footerBg: 'bg-gradient-to-l from-fuchsia-950 via-slate-950 to-indigo-950',
+    footerText: 'text-white',
+    footerMuted: 'text-fuchsia-100/80',
+    footerImage: 'bg-white/10 border-white/10',
+  },
+  premium: {
+    key: 'premium',
+    pageBg: 'bg-zinc-950',
+    nav: 'bg-white border-b border-zinc-200',
+    mainBg: 'bg-zinc-100',
+    panel: 'bg-white border-zinc-200 shadow-md',
+    input: 'border-zinc-200 bg-zinc-50 text-zinc-950 focus:ring-zinc-700',
+    filterButton: 'border-zinc-200 bg-zinc-50 text-zinc-600',
+    emptyBox: 'bg-zinc-50 border-zinc-200 text-zinc-950',
+    productCard: 'bg-white border-zinc-200 shadow-md hover:shadow-xl',
+    productImage: 'bg-zinc-50 border-zinc-200',
+    textPrimary: 'text-zinc-950',
+    textMuted: 'text-zinc-500',
+    accentText: 'text-zinc-900',
+    buttonPrimary: 'bg-zinc-950 hover:bg-zinc-800 text-white',
+    footerBg: 'bg-[#11100d]',
+    footerText: 'text-white',
+    footerMuted: 'text-zinc-300',
+    footerImage: 'bg-yellow-500/10 border-yellow-200/10',
+  },
+};
+
+const normalizeStorefrontTheme = (value: unknown): StorefrontThemeKey => {
+  const theme = String(value || 'default') as StorefrontThemeKey;
+  return theme in STOREFRONT_THEMES ? theme : 'default';
+};
+
 export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNavigate }) => {
   const { user, profile, signOut } = useAuth();
 
@@ -374,10 +526,12 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
     customSectionContent
   );
 
+  const currentTheme = STOREFRONT_THEMES[normalizeStorefrontTheme(store.storefront_theme)];
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#08152f]">
-      <div className="bg-[#f6f7fb]">
-        <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
+    <div className={`min-h-screen flex flex-col ${currentTheme.pageBg}`}>
+      <div className={currentTheme.mainBg}>
+        <nav className={`${currentTheme.nav} sticky top-0 z-50`}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center min-h-[72px] gap-4">
               <div className="flex items-center gap-3 min-w-0">
@@ -470,11 +624,11 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
         </nav>
 
         <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-          <section className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-6 min-h-[980px] lg:min-h-[860px]">
+          <section className={`rounded-3xl border p-5 md:p-6 min-h-[980px] lg:min-h-[860px] ${currentTheme.panel}`}>
             <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between mb-6">
               <div>
-                <h3 className="text-2xl font-bold text-gray-900">المنتجات المتاحة</h3>
-                <p className="text-sm text-gray-500 mt-1">
+                <h3 className={`text-2xl font-bold ${currentTheme.textPrimary}`}>المنتجات المتاحة</h3>
+                <p className={`text-sm mt-1 ${currentTheme.textMuted}`}>
                   تصفح منتجات المتجر وابحث فيها بسهولة
                 </p>
               </div>
@@ -488,18 +642,18 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="ابحث عن منتج داخل المتجر..."
-                  className="w-full h-14 rounded-2xl border border-gray-200 bg-gray-50 pr-12 pl-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className={`w-full h-14 rounded-2xl border pr-12 pl-4 text-sm focus:outline-none focus:ring-2 focus:border-transparent ${currentTheme.input}`}
                 />
               </div>
 
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl border border-gray-200 bg-gray-50 flex items-center justify-center shrink-0">
+                <div className={`w-12 h-12 rounded-2xl border flex items-center justify-center shrink-0 ${currentTheme.filterButton}`}>
                   <Filter className="w-5 h-5 text-gray-500" />
                 </div>
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value)}
-                  className="w-full h-14 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className={`w-full h-14 rounded-2xl border px-4 text-sm focus:outline-none focus:ring-2 focus:border-transparent ${currentTheme.input}`}
                 >
                   <option value="newest">الأحدث</option>
                   <option value="popular">الأكثر مبيعاً</option>
@@ -510,10 +664,10 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
             </div>
 
             {filteredProducts.length === 0 ? (
-              <div className="text-center py-16 rounded-3xl bg-gray-50 border border-dashed border-gray-200">
+              <div className={`text-center py-16 rounded-3xl border border-dashed ${currentTheme.emptyBox}`}>
                 <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-xl font-bold text-gray-900 mb-2">لا توجد منتجات مطابقة</h3>
-                <p className="text-gray-500">
+                <h3 className={`text-xl font-bold mb-2 ${currentTheme.textPrimary}`}>لا توجد منتجات مطابقة</h3>
+                <p className={currentTheme.textMuted}>
                   {products.length === 0
                     ? 'لا يوجد منتجات في هذا المتجر حالياً'
                     : 'جرّب تغيير البحث أو الترتيب لعرض نتائج أخرى'}
@@ -527,10 +681,10 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                   return (
                     <div
                       key={product.id}
-                      className="bg-white rounded-xl overflow-hidden shadow cursor-pointer hover:shadow-lg transition-shadow border border-gray-100"
+                      className={`rounded-xl overflow-hidden cursor-pointer transition-shadow border ${currentTheme.productCard}`}
                       onClick={() => onNavigate(`product-slug-${product.slug || product.id}`)}
                     >
-                      <div className="relative h-72 sm:h-80 bg-white flex items-center justify-center overflow-hidden border-b border-gray-100">
+                      <div className={`relative h-72 sm:h-80 flex items-center justify-center overflow-hidden border-b ${currentTheme.productImage}`}>
                         {soldOut && (
                           <div className="absolute top-3 right-3 z-10 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow">
                             نفدت الكمية
@@ -549,12 +703,12 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                       </div>
 
                       <div className="p-4">
-                        <h3 className="font-bold text-lg text-gray-900 line-clamp-1 mb-2">
+                        <h3 className={`font-bold text-lg line-clamp-1 mb-2 ${currentTheme.textPrimary}`}>
                           {product.display_name}
                         </h3>
 
                         <div className="flex items-center justify-between gap-3 mb-4">
-                          <div className="text-blue-600 font-bold text-xl">
+                          <div className={`font-bold text-xl ${currentTheme.accentText}`}>
                             {Number(product.price ?? 0)} {product.currency || 'ريال'}
                           </div>
                         </div>
@@ -568,7 +722,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
         </main>
       </div>
 
-      <footer className="mt-0 bg-[#08152f] text-white flex-1">
+      <footer className={`mt-0 flex-1 ${currentTheme.footerBg} ${currentTheme.footerText}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-12 min-h-[220px]">
           <div
             dir="rtl"
@@ -576,7 +730,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
           >
             <div className="w-full">
               <div className="flex flex-row items-center justify-start gap-4 mb-5">
-                <div className="w-16 h-16 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+                <div className={`w-16 h-16 rounded-2xl overflow-hidden border flex items-center justify-center shrink-0 ${currentTheme.footerImage}`}>
                   {storeImageUrl ? (
                     <img
                       src={storeImageUrl}
@@ -589,14 +743,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 </div>
 
                 <div className="min-w-0">
-                  <h2 className="text-2xl font-extrabold text-white truncate">
+                  <h2 className={`text-2xl font-extrabold truncate ${currentTheme.footerText}`}>
                     {store.name}
                   </h2>
                 </div>
               </div>
 
               {storeDescription && (
-                <p className="text-sm leading-8 text-white/75 whitespace-pre-line max-w-sm">
+                <p className={`text-sm leading-8 whitespace-pre-line max-w-sm ${currentTheme.footerMuted}`}>
                   {storeDescription}
                 </p>
               )}
@@ -604,12 +758,12 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
             {showContactSection && (
               <div className="w-full">
-                <h3 className="text-2xl font-extrabold text-white mb-5">
+                <h3 className={`text-2xl font-extrabold mb-5 ${currentTheme.footerText}`}>
                   {contactSectionTitle}
                 </h3>
 
                 {contactSectionContent && (
-                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line max-w-sm">
+                  <p className={`text-sm leading-8 whitespace-pre-line max-w-sm ${currentTheme.footerMuted}`}>
                     {contactSectionContent}
                   </p>
                 )}
@@ -619,13 +773,13 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
             {showCustomSection && (
               <div className="w-full">
                 {customSectionTitle && (
-                  <h3 className="text-2xl font-extrabold text-white mb-5">
+                  <h3 className={`text-2xl font-extrabold mb-5 ${currentTheme.footerText}`}>
                     {customSectionTitle}
                   </h3>
                 )}
 
                 {customSectionContent && (
-                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line max-w-sm">
+                  <p className={`text-sm leading-8 whitespace-pre-line max-w-sm ${currentTheme.footerMuted}`}>
                     {customSectionContent}
                   </p>
                 )}
