@@ -569,44 +569,47 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
       </div>
 
       <footer className="mt-12 bg-[#08152f] text-white flex-1">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 min-h-[260px]">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 items-start text-right">
-            <div>
-              <div className="flex items-center justify-end gap-4 mb-5">
-  <div className="min-w-0 text-right">
-    <h2 className="text-2xl font-extrabold text-white truncate">
-      {store.name}
-    </h2>
-  </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 min-h-[260px]">
+          <div
+            dir="rtl"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 lg:gap-14 items-start text-right"
+          >
+            <div className="w-full">
+              <div className="flex flex-row items-center justify-start gap-4 mb-5">
+                <div className="w-16 h-16 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+                  {storeImageUrl ? (
+                    <img
+                      src={storeImageUrl}
+                      alt={store?.name || 'صورة المتجر'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <StoreIcon className="w-8 h-8 text-white/60" />
+                  )}
+                </div>
 
-  <div className="w-16 h-16 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
-    {storeImageUrl ? (
-      <img
-        src={storeImageUrl}
-        alt={store?.name || 'صورة المتجر'}
-        className="w-full h-full object-cover"
-      />
-    ) : (
-      <StoreIcon className="w-8 h-8 text-white/60" />
-    )}
-  </div>
-</div>
+                <div className="min-w-0">
+                  <h2 className="text-2xl font-extrabold text-white truncate">
+                    {store.name}
+                  </h2>
+                </div>
+              </div>
 
               {storeDescription && (
-                <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                <p className="text-sm leading-8 text-white/75 whitespace-pre-line max-w-sm">
                   {storeDescription}
                 </p>
               )}
             </div>
 
             {showContactSection && (
-              <div>
+              <div className="w-full">
                 <h3 className="text-2xl font-extrabold text-white mb-5">
                   {contactSectionTitle}
                 </h3>
 
                 {contactSectionContent && (
-                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line max-w-sm">
                     {contactSectionContent}
                   </p>
                 )}
@@ -614,7 +617,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
             )}
 
             {showCustomSection && (
-              <div>
+              <div className="w-full">
                 {customSectionTitle && (
                   <h3 className="text-2xl font-extrabold text-white mb-5">
                     {customSectionTitle}
@@ -622,7 +625,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 )}
 
                 {customSectionContent && (
-                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line max-w-sm">
                     {customSectionContent}
                   </p>
                 )}
