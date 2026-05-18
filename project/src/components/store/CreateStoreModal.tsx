@@ -24,6 +24,15 @@ const STORE_IMAGE_PATH_FIELDS = ['store_image_path', 'logo_path', 'image_path', 
 
 type StoreRecord = Record<string, any>;
 
+const STOREFRONT_THEME_OPTIONS = [
+  { value: 'default', label: 'الافتراضي', description: 'الشكل الحالي البسيط والمتوازن' },
+  { value: 'clean', label: 'النظيف', description: 'واجهة بيضاء هادئة مناسبة للملفات والقوالب' },
+  { value: 'dark', label: 'الداكن الرقمي', description: 'مناسب للألعاب والأدوات التقنية والمنتجات الرقمية' },
+  { value: 'creator', label: 'التعليمي', description: 'مناسب للدورات والملخصات والمحتوى التعليمي' },
+  { value: 'creative', label: 'الإبداعي', description: 'ألوان ناعمة مناسبة للتصاميم وقوالب Canva' },
+  { value: 'premium', label: 'الفخم', description: 'مظهر راقٍ للمنتجات الاحترافية والأعلى قيمة' },
+] as const;
+
 export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
   isOpen,
   onClose,
@@ -39,6 +48,7 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    storefront_theme: 'default',
     category: 'other',
     default_currency: 'SAR',
     show_in_marketplace: true,
@@ -133,6 +143,7 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
     setFormData({
       name: '',
       description: '',
+      storefront_theme: 'default',
       category: 'other',
       default_currency: 'SAR',
       show_in_marketplace: true,
@@ -286,6 +297,7 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
         name: formData.name.trim(),
         slug: `${profile.id.slice(0, 8)}-${slug}`,
         description: formData.description.trim() || null,
+        storefront_theme: formData.storefront_theme || 'default',
         category: formData.category || 'other',
         default_currency: formData.default_currency || 'SAR',
         show_in_marketplace: !!formData.show_in_marketplace,
@@ -454,6 +466,53 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="اكتب وصفاً مختصراً عن متجرك ونوع المنتجات التي تقدمها"
             />
+          </div>
+
+          <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50 space-y-4">
+            <div className="text-right">
+              <h3 className="text-lg font-bold text-gray-900">ثيم واجهة المتجر</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                اختر الشكل الذي يظهر للزوار في صفحة المتجر. يمكن تغييره لاحقاً من إعدادات المتجر.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {STOREFRONT_THEME_OPTIONS.map((theme) => (
+                <label
+                  key={theme.value}
+                  className={`cursor-pointer rounded-2xl border p-4 transition-all ${
+                    formData.storefront_theme === theme.value
+                      ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100'
+                      : 'border-gray-200 bg-white hover:border-blue-200'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="storefront_theme"
+                    value={theme.value}
+                    checked={formData.storefront_theme === theme.value}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        storefront_theme: e.target.value,
+                      })
+                    }
+                    className="sr-only"
+                  />
+                  <div className="flex items-start justify-between gap-3 text-right">
+                    <span className="mt-1 w-4 h-4 rounded-full border border-gray-300 flex items-center justify-center shrink-0">
+                      {formData.storefront_theme === theme.value && (
+                        <span className="w-2 h-2 rounded-full bg-blue-600" />
+                      )}
+                    </span>
+                    <div>
+                      <div className="font-bold text-gray-900">{theme.label}</div>
+                      <div className="text-xs text-gray-500 mt-1 leading-5">{theme.description}</div>
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
 
           <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50 space-y-5">
