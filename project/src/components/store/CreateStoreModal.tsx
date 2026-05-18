@@ -24,22 +24,6 @@ const STORE_IMAGE_PATH_FIELDS = ['store_image_path', 'logo_path', 'image_path', 
 
 type StoreRecord = Record<string, any>;
 
-type StorefrontTheme = 'default' | 'clean' | 'dark' | 'creator' | 'creative' | 'premium';
-
-const STOREFRONT_THEME_OPTIONS: Array<{
-  value: StorefrontTheme;
-  label: string;
-  description: string;
-}> = [
-  { value: 'default', label: 'الافتراضي', description: 'الشكل الحالي البسيط والمناسب لكل المتاجر.' },
-  { value: 'clean', label: 'النظيف', description: 'واجهة بيضاء هادئة مناسبة للملفات والقوالب.' },
-  { value: 'dark', label: 'الداكن الرقمي', description: 'واجهة داكنة مناسبة للألعاب والأدوات والمنتجات التقنية.' },
-  { value: 'creator', label: 'التعليمي', description: 'مناسب للدورات، الملخصات، والمنتجات التعليمية.' },
-  { value: 'creative', label: 'الإبداعي', description: 'ألوان وتدرجات مناسبة للتصاميم وقوالب Canva.' },
-  { value: 'premium', label: 'الفخم', description: 'تصميم أرقى للمنتجات عالية القيمة والباقات.' },
-];
-
-
 export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
   isOpen,
   onClose,
@@ -68,7 +52,6 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
     custom_section_enabled: false,
     custom_section_title: '',
     custom_section_content: '',
-    storefront_theme: 'default' as StorefrontTheme,
   });
 
   useEffect(() => {
@@ -163,7 +146,6 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
       custom_section_enabled: false,
       custom_section_title: '',
       custom_section_content: '',
-      storefront_theme: 'default' as StorefrontTheme,
     });
     setStoreImageFile(null);
     setStoreImagePreview('');
@@ -314,7 +296,6 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
         custom_section_enabled: formData.custom_section_enabled,
         custom_section_title: formData.custom_section_title.trim() || null,
         custom_section_content: formData.custom_section_content.trim() || null,
-        storefront_theme: formData.storefront_theme,
         social_links: {
           twitter: formData.twitter.trim() || undefined,
           instagram: formData.instagram.trim() || undefined,
@@ -473,54 +454,6 @@ export const CreateStoreModal: React.FC<CreateStoreModalProps> = ({
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="اكتب وصفاً مختصراً عن متجرك ونوع المنتجات التي تقدمها"
             />
-          </div>
-
-
-          <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50 space-y-4">
-            <div className="text-right">
-              <h3 className="text-lg font-bold text-gray-900">ثيم واجهة المتجر</h3>
-              <p className="text-sm text-gray-500 mt-1">
-                اختر شكل المتجر من البداية، ويمكنك تغييره لاحقًا من تعديل المتجر.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {STOREFRONT_THEME_OPTIONS.map((theme) => (
-                <label
-                  key={theme.value}
-                  className={`cursor-pointer rounded-2xl border p-4 text-right transition-all ${
-                    formData.storefront_theme === theme.value
-                      ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100'
-                      : 'border-gray-200 bg-white hover:border-blue-200'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="storefront_theme"
-                    value={theme.value}
-                    checked={formData.storefront_theme === theme.value}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        storefront_theme: e.target.value as StorefrontTheme,
-                      })
-                    }
-                    className="sr-only"
-                  />
-                  <div className="flex items-start justify-between gap-3">
-                    <span className={`mt-1 h-4 w-4 rounded-full border flex-shrink-0 ${
-                      formData.storefront_theme === theme.value
-                        ? 'border-blue-600 bg-blue-600'
-                        : 'border-gray-300 bg-white'
-                    }`} />
-                    <div>
-                      <div className="font-bold text-gray-900">{theme.label}</div>
-                      <div className="text-sm text-gray-500 mt-1 leading-6">{theme.description}</div>
-                    </div>
-                  </div>
-                </label>
-              ))}
-            </div>
           </div>
 
           <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50 space-y-5">
