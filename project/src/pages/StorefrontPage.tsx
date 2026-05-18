@@ -572,13 +572,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 min-h-[260px]">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 items-start text-right">
             <div>
-              <div className="grid grid-cols-[1fr_auto] items-center gap-4 mb-5">
-                <div className="min-w-0">
-                  <h2 className="text-2xl font-extrabold text-white truncate">
-                    {store.name}
-                  </h2>
-                </div>
-
+              <div className="flex flex-row-reverse items-center justify-end gap-4 mb-5">
                 <div className="w-16 h-16 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
                   {storeImageUrl ? (
                     <img
@@ -589,6 +583,12 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                   ) : (
                     <StoreIcon className="w-8 h-8 text-white/60" />
                   )}
+                </div>
+
+                <div className="min-w-0 text-right">
+                  <h2 className="text-2xl font-extrabold text-white truncate">
+                    {store.name}
+                  </h2>
                 </div>
               </div>
 
