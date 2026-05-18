@@ -39,6 +39,15 @@ const STORE_IMAGE_PATH_FIELDS = [
 
 type StoreRow = Store & Record<string, any>;
 
+const STOREFRONT_THEME_OPTIONS = [
+  { value: 'default', label: 'الافتراضي', description: 'الشكل الحالي البسيط والمتوازن' },
+  { value: 'clean', label: 'النظيف', description: 'واجهة بيضاء هادئة مناسبة للملفات والقوالب' },
+  { value: 'dark', label: 'الداكن الرقمي', description: 'مناسب للألعاب والأدوات التقنية والمنتجات الرقمية' },
+  { value: 'creator', label: 'التعليمي', description: 'مناسب للدورات والملخصات والمحتوى التعليمي' },
+  { value: 'creative', label: 'الإبداعي', description: 'ألوان ناعمة مناسبة للتصاميم وقوالب Canva' },
+  { value: 'premium', label: 'الفخم', description: 'مظهر راقٍ للمنتجات الاحترافية والأعلى قيمة' },
+] as const;
+
 export const EditStoreModal: React.FC<EditStoreModalProps> = ({
   isOpen,
   storeId,
@@ -60,6 +69,7 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    storefront_theme: 'default',
     contact_section_enabled: false,
     contact_section_title: 'للتواصل',
     contact_section_content: '',
@@ -300,6 +310,7 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
     setFormData({
       name: data.name || '',
       description: data.description || '',
+      storefront_theme: data.storefront_theme || 'default',
       contact_section_enabled: Boolean(data.contact_section_enabled),
       contact_section_title: data.contact_section_title || 'للتواصل',
       contact_section_content: data.contact_section_content || '',
@@ -320,6 +331,7 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
         .update({
           name: formData.name,
           description: formData.description || null,
+          storefront_theme: formData.storefront_theme || 'default',
           contact_section_enabled: formData.contact_section_enabled,
           contact_section_title: formData.contact_section_title.trim() || 'للتواصل',
           contact_section_content: formData.contact_section_content.trim() || null,
@@ -495,6 +507,53 @@ export const EditStoreModal: React.FC<EditStoreModalProps> = ({
                 className="w-full border rounded-xl px-4 py-3"
                 placeholder="يظهر تحت صورة واسم المتجر في أسفل واجهة المتجر"
               />
+            </div>
+
+            <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50 space-y-4">
+              <div className="text-right">
+                <h3 className="text-lg font-bold text-gray-900">ثيم واجهة المتجر</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  اختر الشكل الذي يظهر للزوار في صفحة المتجر.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {STOREFRONT_THEME_OPTIONS.map((theme) => (
+                  <label
+                    key={theme.value}
+                    className={`cursor-pointer rounded-2xl border p-4 transition-all ${
+                      formData.storefront_theme === theme.value
+                        ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100'
+                        : 'border-gray-200 bg-white hover:border-blue-200'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="storefront_theme"
+                      value={theme.value}
+                      checked={formData.storefront_theme === theme.value}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          storefront_theme: e.target.value,
+                        })
+                      }
+                      className="sr-only"
+                    />
+                    <div className="flex items-start justify-between gap-3 text-right">
+                      <span className="mt-1 w-4 h-4 rounded-full border border-gray-300 flex items-center justify-center shrink-0">
+                        {formData.storefront_theme === theme.value && (
+                          <span className="w-2 h-2 rounded-full bg-blue-600" />
+                        )}
+                      </span>
+                      <div>
+                        <div className="font-bold text-gray-900">{theme.label}</div>
+                        <div className="text-xs text-gray-500 mt-1 leading-5">{theme.description}</div>
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
             </div>
 
             <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50 space-y-5">
