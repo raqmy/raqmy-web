@@ -60,6 +60,18 @@ const isProductSoldOut = (product: any) => {
   return remaining !== null && remaining <= 0;
 };
 
+const getCleanStoreText = (value: unknown) => {
+  return typeof value === 'string' ? value.trim() : '';
+};
+
+const shouldShowOptionalStoreSection = (
+  enabled: unknown,
+  title: unknown,
+  content: unknown
+) => {
+  return Boolean(enabled) && (getCleanStoreText(title) !== '' || getCleanStoreText(content) !== '');
+};
+
 export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNavigate }) => {
   const { user, profile, signOut } = useAuth();
 
@@ -344,6 +356,23 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
     );
   }
 
+  const storeDescription = getCleanStoreText(store.description);
+  const contactSectionTitle = getCleanStoreText(store.contact_section_title) || 'للتواصل';
+  const contactSectionContent = getCleanStoreText(store.contact_section_content);
+  const customSectionTitle = getCleanStoreText(store.custom_section_title);
+  const customSectionContent = getCleanStoreText(store.custom_section_content);
+
+  const showContactSection = shouldShowOptionalStoreSection(
+    store.contact_section_enabled,
+    contactSectionTitle,
+    contactSectionContent
+  );
+  const showCustomSection = shouldShowOptionalStoreSection(
+    store.custom_section_enabled,
+    customSectionTitle,
+    customSectionContent
+  );
+
   return (
     <div className="min-h-screen flex flex-col bg-[#08152f]">
       <div className="bg-[#f6f7fb]">
@@ -539,13 +568,66 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
       </div>
 
       <footer className="mt-12 bg-[#08152f] text-white flex-1">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 min-h-[260px] flex items-start">
-          <div className="text-right w-full">
-            <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
-              {store.description && String(store.description).trim() !== ''
-                ? store.description
-                : 'لا يوجد وصف مضاف لهذا المتجر حالياً.'}
-            </p>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 min-h-[260px]">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-stretch">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-right">
+              <div className="flex items-center gap-4 justify-end mb-4">
+                <div className="min-w-0">
+                  <h2 className="text-2xl font-extrabold text-white truncate">
+                    {store.name}
+                  </h2>
+                  <p className="text-xs text-white/45 mt-1">
+                    متجر من متاجر رقمي
+                  </p>
+                </div>
+
+                <div className="w-16 h-16 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+                  {storeImageUrl ? (
+                    <img
+                      src={storeImageUrl}
+                      alt={store?.name || 'صورة المتجر'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <StoreIcon className="w-8 h-8 text-white/60" />
+                  )}
+                </div>
+              </div>
+
+              {storeDescription && (
+                <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                  {storeDescription}
+                </p>
+              )}
+            </div>
+
+            {showContactSection && (
+              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-right">
+                <h3 className="text-2xl font-extrabold text-white mb-4">
+                  {contactSectionTitle}
+                </h3>
+                {contactSectionContent && (
+                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                    {contactSectionContent}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {showCustomSection && (
+              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-right">
+                {customSectionTitle && (
+                  <h3 className="text-2xl font-extrabold text-white mb-4">
+                    {customSectionTitle}
+                  </h3>
+                )}
+                {customSectionContent && (
+                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                    {customSectionContent}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </footer>
