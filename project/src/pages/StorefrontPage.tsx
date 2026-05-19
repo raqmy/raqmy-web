@@ -567,20 +567,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
         </main>
       </div>
 
-      <footer className="mt-12 bg-[#08152f] text-white flex-1">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 min-h-[260px]">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-stretch">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-right">
-              <div className="flex items-center gap-4 justify-end mb-4">
-                <div className="min-w-0">
-                  <h2 className="text-2xl font-extrabold text-white truncate">
-                    {store.name}
-                  </h2>
-                  <p className="text-xs text-white/45 mt-1">
-                    متجر من متاجر رقمي
-                  </p>
-                </div>
-
+      <footer className="mt-8 bg-[#08152f] text-white flex-1">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-12 min-h-[220px]">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-12 items-start text-center md:text-right">
+            <div className="flex flex-col items-center md:items-end text-center md:text-right">
+              <div
+                className="flex items-center justify-center md:justify-start gap-4 mb-4"
+                dir="rtl"
+              >
                 <div className="w-16 h-16 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
                   {storeImageUrl ? (
                     <img
@@ -592,41 +586,51 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                     <StoreIcon className="w-8 h-8 text-white/60" />
                   )}
                 </div>
+
+                <div className="min-w-0">
+                  <h2 className="text-2xl font-extrabold text-white truncate">
+                    {store.name}
+                  </h2>
+                </div>
               </div>
 
               {storeDescription && (
-                <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                <p className="max-w-sm text-sm leading-8 text-white/75 whitespace-pre-line md:mr-20">
                   {storeDescription}
                 </p>
               )}
             </div>
 
-            {showContactSection && (
-              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-right">
+            {showContactSection ? (
+              <div className="flex flex-col items-center md:items-center text-center">
                 <h3 className="text-2xl font-extrabold text-white mb-4">
                   {contactSectionTitle}
                 </h3>
                 {contactSectionContent && (
-                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                  <p className="max-w-sm text-sm leading-8 text-white/75 whitespace-pre-line">
                     {contactSectionContent}
                   </p>
                 )}
               </div>
+            ) : (
+              <div className="hidden md:block" />
             )}
 
-            {showCustomSection && (
-              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-right">
+            {showCustomSection ? (
+              <div className="flex flex-col items-center md:items-start text-center md:text-right">
                 {customSectionTitle && (
                   <h3 className="text-2xl font-extrabold text-white mb-4">
                     {customSectionTitle}
                   </h3>
                 )}
                 {customSectionContent && (
-                  <p className="text-sm leading-8 text-white/75 whitespace-pre-line">
+                  <p className="max-w-sm text-sm leading-8 text-white/75 whitespace-pre-line">
                     {customSectionContent}
                   </p>
                 )}
               </div>
+            ) : (
+              <div className="hidden md:block" />
             )}
           </div>
         </div>
