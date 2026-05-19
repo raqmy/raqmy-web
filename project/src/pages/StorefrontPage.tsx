@@ -569,12 +569,12 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
       <footer className="mt-8 bg-[#08152f] text-white flex-1">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-12 min-h-[220px]">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-12 items-start text-center md:text-right">
-            <div className="flex flex-col items-center md:items-end text-center md:text-right md:translate-x-16">
+          <div className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_1fr] gap-10 md:gap-12 items-start text-center md:text-right">
+            <div className="flex flex-col items-center md:items-end text-center md:text-right md:justify-self-end md:w-full">
               <div
-                className="flex items-center justify-center md:justify-start gap-4 mb-4"
-                dir="rtl"
-              >
+  className="flex items-center justify-center md:justify-end gap-4 mb-4 w-full"
+  dir="rtl"
+>
                 <div className="w-16 h-16 rounded-2xl overflow-hidden bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
                   {storeImageUrl ? (
                     <img
@@ -595,7 +595,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
               </div>
 
               {storeDescription && (
-                <p className="max-w-sm text-sm leading-8 text-white/75 whitespace-pre-line md:mr-20">
+                <p className="max-w-sm text-sm leading-8 text-white/75 whitespace-pre-line md:ml-auto">
                   {storeDescription}
                 </p>
               )}
