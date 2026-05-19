@@ -570,7 +570,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
       <footer className="mt-8 bg-[#08152f] text-white flex-1">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-12 min-h-[220px]">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-12 items-start text-center md:text-right">
-            <div className="flex flex-col items-center md:items-end text-center md:text-right md:translate-x-8">
+            <div className="flex flex-col items-center md:items-end text-center md:text-right md:translate-x-16">
               <div
                 className="flex items-center justify-center md:justify-start gap-4 mb-4"
                 dir="rtl"
