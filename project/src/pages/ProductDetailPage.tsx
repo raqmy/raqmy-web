@@ -13,6 +13,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
+import { formatProductPrice, useCurrency } from '../lib/currency';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ProductDetailPageProps {
@@ -82,6 +83,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [hasPurchased, setHasPurchased] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [realViewsCount, setRealViewsCount] = useState<number | null>(null);
+  const { currencies, selectedCurrency } = useCurrency();
 
   const storeContextSlug = useMemo(() => getStoreContextSlug(), [productId, productSlug]);
   const isStoreContext = !!storeContextSlug;
@@ -1012,7 +1014,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
             <div className="mb-6">
               <div className="text-4xl font-bold text-blue-600 mb-2">
-                {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
+                {formatProductPrice(product.price, product.currency, selectedCurrency, currencies)}
               </div>
               {product.is_subscription && (
                 <span className="text-gray-500">
