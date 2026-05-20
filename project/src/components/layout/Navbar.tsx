@@ -1,6 +1,7 @@
 import React from 'react';
 import { User, LogOut, LayoutDashboard, ShoppingCart } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCurrency } from '../../lib/currency';
 
 interface NavbarProps {
   onNavigate: (page: string) => void;
@@ -31,6 +32,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
   const scopedStoreSlug = getScopedStoreSlug(currentPage);
   const avatarUrl = ((profile as any)?.avatar_url as string) || '';
   const isSeller = !!user && profile?.role === 'seller';
+  const { currencies, selectedCurrency, changeCurrency } = useCurrency(
+    profile?.id,
+    (profile as any)?.preferred_currency
+  );
 
   const clearStoreContext = () => {
     try {
@@ -179,6 +184,21 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
           </div>
 
           <div className="flex items-center gap-4">
+            <select
+              value={selectedCurrency}
+              onChange={(event) => changeCurrency(event.target.value)}
+              className="hidden sm:block rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              title="تغيير عملة العرض"
+              aria-label="تغيير عملة العرض"
+              dir="ltr"
+            >
+              {currencies.map((currency) => (
+                <option key={currency.code} value={currency.code}>
+                  {currency.code}
+                </option>
+              ))}
+            </select>
+
             {user && profile ? (
               <>
                 <button
