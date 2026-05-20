@@ -11,6 +11,7 @@ import {
   Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { formatProductPrice, getProductPriceInSar, useCurrency } from '../lib/currency';
 import { useAuth } from '../contexts/AuthContext';
 
 interface StorefrontPageProps {
@@ -83,6 +84,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
   const [sortBy, setSortBy] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
+  const { currencies, selectedCurrency } = useCurrency();
 
   useEffect(() => {
     fetchStoreAndProducts();
@@ -110,9 +112,15 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
         return aSoldOut ? 1 : -1;
       }
 
+      if (sortBy === 'price_low' || sortBy === 'price_high') {
+        const aPrice = getProductPriceInSar(a.price, a.currency, currencies);
+        const bPrice = getProductPriceInSar(b.price, b.currency, currencies);
+        return sortBy === 'price_low' ? aPrice - bPrice : bPrice - aPrice;
+      }
+
       return 0;
     });
-  }, [products, searchQuery]);
+  }, [products, searchQuery, sortBy, currencies]);
 
   useEffect(() => {
     if (!store) return;
@@ -554,7 +562,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
                         <div className="flex items-center justify-between gap-3 mb-4">
                           <div className="text-blue-600 font-bold text-xl">
-                            {Number(product.price ?? 0)} {product.currency || 'ريال'}
+                            {formatProductPrice(product.price, product.currency, selectedCurrency, currencies)}
                           </div>
                         </div>
                       </div>
