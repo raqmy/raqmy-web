@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ProductImagesManager, ProductImage } from './ProductImagesManager';
 import { ProductAttachmentsManager, ProductAttachment } from './ProductAttachmentsManager';
 import { detectProductMerchantColumn } from '../../lib/productSchema';
+import { useCurrency } from '../../lib/currency';
 
 interface CreateProductModalProps {
   isOpen: boolean;
@@ -86,6 +87,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
   onSuccess,
 }) => {
   const { profile } = useAuth();
+  const { currencies } = useCurrency(profile?.id, (profile as any)?.preferred_currency);
   const [loading, setLoading] = useState(false);
   const [stores, setStores] = useState<Store[]>([]);
   const [error, setError] = useState('');
@@ -538,9 +540,11 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                   onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="SAR">ريال سعودي (SAR)</option>
-                  <option value="USD">دولار أمريكي (USD)</option>
-                  <option value="EUR">يورو (EUR)</option>
+                  {currencies.map((currency) => (
+                    <option key={currency.code} value={currency.code}>
+                      {currency.code} - {currency.name_ar}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
