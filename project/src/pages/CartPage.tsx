@@ -13,6 +13,14 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Product } from '../lib/supabase';
+import {
+  formatCurrencyAmount,
+  formatProductPrice,
+  formatSarAmount,
+  getCurrencyByCode,
+  getProductPriceInSar,
+  useCurrency,
+} from '../lib/currency';
 
 interface CartPageProps {
   onNavigate: (page: string) => void;
@@ -223,6 +231,7 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
 
 export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
+  const { currencies, selectedCurrency } = useCurrency(profile?.id, (profile as any)?.preferred_currency);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [scopeInfo, setScopeInfo] = useState<ScopeInfo | null>(null);
@@ -438,8 +447,14 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
 
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
-      return total + Number(item.product?.price || 0) * item.quantity;
+      return total + getProductPriceInSar(item.product?.price, item.product?.currency, currencies) * item.quantity;
     }, 0);
+  };
+
+  const formatDisplayFromSar = (amountSar: number) => {
+    const targetCurrency = getCurrencyByCode(currencies, selectedCurrency);
+    const displayValue = Number(amountSar || 0) / (targetCurrency.rate_to_sar || 1);
+    return formatCurrencyAmount(displayValue, selectedCurrency, currencies);
   };
 
   const totalItemsCount = useMemo(() => {
@@ -598,7 +613,7 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                   {getProductName(item.product)}
                 </h3>
                 <p className="text-gray-600">
-                  {item.product?.price} {item.product?.currency || 'SAR'}
+                  {formatProductPrice(item.product?.price, item.product?.currency, selectedCurrency, currencies)}
                 </p>
 
                 {renderQuantityStatus(item)}
@@ -651,8 +666,9 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
               <div className="text-left">
                 <p className="text-sm text-gray-600 mb-1">المجموع الفرعي</p>
                 <p className="text-xl font-bold text-blue-600">
-                  {(Number(item.product?.price || 0) * item.quantity).toFixed(2)}{' '}
-                  {item.product?.currency || 'SAR'}
+                  {formatDisplayFromSar(
+                    getProductPriceInSar(item.product?.price, item.product?.currency, currencies) * item.quantity
+                  )}
                 </p>
               </div>
             </div>
@@ -745,13 +761,13 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                   </div>
                   <div className="flex items-center justify-between text-gray-600">
                     <span>المجموع الفرعي</span>
-                    <span>{calculateTotal().toFixed(2)} ريال</span>
+                    <span>{formatDisplayFromSar(calculateTotal())}</span>
                   </div>
                   <div className="border-t border-gray-200 pt-3">
                     <div className="flex items-center justify-between">
                       <span className="text-lg font-bold text-gray-900">المجموع الكلي</span>
                       <span className="text-2xl font-bold text-blue-600">
-                        {calculateTotal().toFixed(2)} ريال
+                        {formatSarAmount(calculateTotal(), currencies)}
                       </span>
                     </div>
                   </div>
