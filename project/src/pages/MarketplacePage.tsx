@@ -4,6 +4,7 @@ import {
   Download,
 } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
+import { formatProductPrice, getProductPriceInSar, useCurrency } from '../lib/currency';
 
 interface ProductWithDetails extends Product {
   store?: Store | null;
@@ -92,6 +93,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
+  const { currencies, selectedCurrency } = useCurrency();
 
   const { sellerId, sellerFilterActive } = getMarketplaceFiltersFromUrl();
 
@@ -225,8 +227,8 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
     });
 
     return [...result].sort((a, b) => {
-      const aPrice = Number(a.price ?? 0);
-      const bPrice = Number(b.price ?? 0);
+      const aPrice = getProductPriceInSar(a.price, a.currency, currencies);
+      const bPrice = getProductPriceInSar(b.price, b.currency, currencies);
 
       const aSales = Number((a as any).sales_count ?? 0);
       const bSales = Number((b as any).sales_count ?? 0);
@@ -253,7 +255,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
           return bCreatedAt - aCreatedAt;
       }
     });
-  }, [products, searchQuery, sortBy]);
+  }, [products, searchQuery, sortBy, currencies]);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8" dir="rtl">
@@ -361,7 +363,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
 
                     <div className="flex items-center justify-between gap-3 mb-4">
                       <div className="text-blue-600 font-bold text-xl">
-                        {Number(product.price ?? 0)} ريال
+                        {formatProductPrice(product.price, product.currency, selectedCurrency, currencies)}
                       </div>
                     </div>
                   </div>
