@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { CopyLinkButton } from '../shared/CopyLinkButton';
 import { ProductImagesManager, ProductImage } from './ProductImagesManager';
 import { ProductAttachmentsManager, ProductAttachment } from './ProductAttachmentsManager';
+import { useCurrency } from '../../lib/currency';
 
 interface EditProductModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   onDelete,
 }) => {
   const { profile } = useAuth();
+  const { currencies } = useCurrency(profile?.id, (profile as any)?.preferred_currency);
 
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -490,9 +492,11 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                   }
                   className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="SAR">ريال سعودي</option>
-                  <option value="USD">دولار</option>
-                  <option value="EUR">يورو</option>
+                  {currencies.map((currency) => (
+                    <option key={currency.code} value={currency.code}>
+                      {currency.code} - {currency.name_ar}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
