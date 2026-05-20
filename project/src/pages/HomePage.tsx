@@ -7,6 +7,7 @@ import {
   Download,
 } from 'lucide-react';
 import { supabase, Product } from '../lib/supabase';
+import { formatProductPrice, useCurrency } from '../lib/currency';
 
 interface HomePageProps {
   onNavigate: (page: string) => void;
@@ -65,6 +66,7 @@ const isProductSoldOut = (product: FeaturedProduct | null | undefined) => {
 export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
   const [featuredProducts, setFeaturedProducts] = useState<FeaturedProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const { currencies, selectedCurrency } = useCurrency();
 
   useEffect(() => {
     fetchFeaturedProducts();
@@ -340,7 +342,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
                     <div className="flex items-center justify-between gap-3 mb-4">
                       <div className="text-2xl font-bold text-blue-600">
-                        {product.price} {product.currency === 'SAR' ? 'ريال' : product.currency}
+                        {formatProductPrice(product.price, product.currency, selectedCurrency, currencies)}
                       </div>
                     </div>
                   </div>
