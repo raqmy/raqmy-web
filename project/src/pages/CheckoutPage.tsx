@@ -13,6 +13,13 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Product } from '../lib/supabase';
+import {
+  formatCurrencyAmount,
+  formatProductPrice,
+  getCurrencyByCode,
+  getProductPriceInSar,
+  useCurrency,
+} from '../lib/currency';
 
 interface CheckoutPageProps {
   onNavigate: (page: string) => void;
@@ -334,6 +341,7 @@ const StoreScopedBanner: React.FC<{ scopeInfo: ScopeInfo; onNavigate: (page: str
 
 export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
+  const { currencies, selectedCurrency } = useCurrency(profile?.id, (profile as any)?.preferred_currency);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -514,13 +522,20 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
-      return total + Number(item.product?.price || 0) * item.quantity;
+      return total + getProductPriceInSar(item.product?.price, item.product?.currency, currencies) * item.quantity;
     }, 0);
   };
 
-  const totalAmount = useMemo(() => calculateTotal(), [cartItems]);
+  const totalAmount = useMemo(() => calculateTotal(), [cartItems, currencies]);
   const discountAmount = appliedCoupon?.discountAmount || 0;
   const finalAmount = Math.max(0, Number((totalAmount - discountAmount).toFixed(2)));
+
+  const formatDisplayFromSar = (amountSar: number) => {
+    const targetCurrency = getCurrencyByCode(currencies, selectedCurrency);
+    const displayValue = Number(amountSar || 0) / (targetCurrency.rate_to_sar || 1);
+    return formatCurrencyAmount(displayValue, selectedCurrency, currencies);
+  };
+
 
   const quantityInvalidItems = useMemo(() => {
     return cartItems.filter(isCartItemQuantityInvalid);
@@ -691,7 +706,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
       const eligibleSubtotal = Number(
         eligibleItems
-          .reduce((sum, item) => sum + Number(item.product?.price || 0) * item.quantity, 0)
+          .reduce(
+            (sum, item) =>
+              sum + getProductPriceInSar(item.product?.price, item.product?.currency, currencies) * item.quantity,
+            0
+          )
           .toFixed(2)
       );
 
@@ -746,7 +765,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
   const getOrderItemPricings = (items: CartItem[], applied: AppliedCouponState | null): OrderItemPricing[] => {
     const originalSubtotals = items.map((item) =>
-      Number((Number(item.product?.price || 0) * item.quantity).toFixed(2))
+      Number((getProductPriceInSar(item.product?.price, item.product?.currency, currencies) * item.quantity).toFixed(2))
     );
 
     if (!applied || applied.discountAmount <= 0) {
@@ -1120,7 +1139,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       }
 
       const orderItems = validatedCartItems.map((item, index) => {
-        const originalPrice = Number(item.product!.price);
+        const originalPrice = Number(getProductPriceInSar(item.product!.price, item.product!.currency, currencies).toFixed(2));
         const sellerId = getProductSellerId(item.product)!;
         const itemAffiliate = mergedItemAffiliations[index];
         const pricing = itemPricings[index];
@@ -1336,12 +1355,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                       </h4>
 
                       <p className="text-sm text-gray-600 mt-1">
-                        {item.quantity} × {item.product?.price} {item.product?.currency || 'SAR'}
+                        {item.quantity} × {formatProductPrice(item.product?.price, item.product?.currency, selectedCurrency, currencies)}
                       </p>
 
                       <p className="text-sm font-bold text-blue-600 mt-1">
-                        {(Number(item.product?.price || 0) * item.quantity).toFixed(2)}{' '}
-                        {item.product?.currency || 'SAR'}
+                        {formatDisplayFromSar(
+                          getProductPriceInSar(item.product?.price, item.product?.currency, currencies) * item.quantity
+                        )}
                       </p>
 
                       {renderQuantityStatus(item)}
