@@ -35,7 +35,8 @@ interface ScopeInfo {
   imageUrl?: string | null;
 }
 
-interface ProductWithMeta extends Product {
+interface ProductWithMeta
+  extends Omit<Product, 'name' | 'price' | 'currency' | 'user_id' | 'store_id' | 'slug' | 'thumbnail_url' | 'is_active'> {
   slug?: string | null;
   title?: string | null;
   name?: string | null;
