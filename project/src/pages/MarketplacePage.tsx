@@ -87,6 +87,259 @@ const isProductSoldOut = (product: ProductWithDetails | null | undefined) => {
   return remaining !== null && remaining <= 0;
 };
 
+const MarketplaceSeoContent: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavigate }) => {
+  return (
+    <div className="mt-10 space-y-6">
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="bg-gradient-to-l from-blue-700 via-blue-600 to-purple-700 px-5 py-8 md:px-8 text-white">
+          <div className="max-w-4xl">
+            <p className="inline-flex items-center rounded-full bg-white/15 px-4 py-2 text-sm font-semibold mb-4">
+              منصة عربية لبيع المنتجات الرقمية
+            </p>
+            <h2 className="text-2xl md:text-4xl font-extrabold leading-relaxed mb-4">
+              رقمي تساعدك على بيع منتجاتك الرقمية من رابط واحد
+            </h2>
+            <p className="text-blue-50 text-base md:text-lg leading-8">
+              إذا كنت تبحث عن موقع عربي سهل أو منصة مجانية لبيع المنتجات الرقمية، فـ رقمي تمنحك طريقة عملية
+              لإنشاء متجر رقمي، رفع منتجاتك، عرضها في السوق العام، ومشاركة رابط البيع مع جمهورك بدون تعقيد.
+            </p>
+
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={() => onNavigate('auth')}
+                className="rounded-xl bg-white text-blue-700 px-5 py-3 font-bold hover:bg-blue-50 transition-colors"
+              >
+                ابدأ البيع مجانًا
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }
+                }}
+                className="rounded-xl border border-white/40 text-white px-5 py-3 font-bold hover:bg-white/10 transition-colors"
+              >
+                تصفح المنتجات الرقمية
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 md:p-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
+              <h3 className="font-bold text-gray-900 mb-2">ابدأ مجانًا</h3>
+              <p className="text-sm text-gray-600 leading-7">
+                يمكنك إنشاء حساب وبدء رفع منتجاتك الرقمية بدون رسوم تأسيس، وهذا مناسب للتجار المبتدئين
+                والطلاب وصناع المحتوى الذين يريدون اختبار البيع أولًا.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
+              <h3 className="font-bold text-gray-900 mb-2">منتجات ومتاجر غير محدودة</h3>
+              <p className="text-sm text-gray-600 leading-7">
+                ارفع منتجات رقمية متعددة وأنشئ متاجر رقمية مناسبة لتخصصاتك المختلفة، سواء كانت ملفات PDF،
+                ملخصات، قوالب Canva، تصاميم، أو ملفات جاهزة.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
+              <h3 className="font-bold text-gray-900 mb-2">رابط بيع مباشر</h3>
+              <p className="text-sm text-gray-600 leading-7">
+                شارك رابط المنتج أو رابط متجرك مع جمهورك في واتساب، تيك توك، إنستغرام، X، تيليجرام أو أي منصة
+                تواصل اجتماعي وابدأ استقبال الطلبات.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 md:p-8">
+        <h2 className="text-2xl font-extrabold text-gray-900 mb-4">
+          ماذا يمكنك بيع في رقمي؟
+        </h2>
+        <p className="text-gray-600 leading-8 mb-6">
+          السوق العام في رقمي مخصص للمنتجات الرقمية التي يمكن تسليمها إلكترونيًا. تستطيع بيع منتجات بسيطة
+          أو متقدمة حسب خبرتك وجمهورك. المنصة مناسبة لمن يريد بيع منتج رقمي جاهز بدون الحاجة إلى متجر معقد أو
+          حلول تقنية كثيرة.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="rounded-xl border border-gray-100 p-4 bg-blue-50">
+            <h3 className="font-bold text-blue-800 mb-2">بيع ملفات PDF</h3>
+            <p className="text-sm text-blue-900/80 leading-6">
+              كتب إلكترونية، أدلة، ملفات تدريبية، خطط، جداول، كتيبات، وملفات جاهزة للتحميل.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 p-4 bg-purple-50">
+            <h3 className="font-bold text-purple-800 mb-2">بيع قوالب Canva</h3>
+            <p className="text-sm text-purple-900/80 leading-6">
+              قوالب منشورات، عروض، سيرة ذاتية، جداول محتوى، هويات بصرية، وتصاميم قابلة للتعديل.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 p-4 bg-emerald-50">
+            <h3 className="font-bold text-emerald-800 mb-2">بيع الملخصات</h3>
+            <p className="text-sm text-emerald-900/80 leading-6">
+              ملخصات دراسية، مذكرات، خرائط ذهنية، نماذج مراجعة، ومحتوى تعليمي رقمي.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 p-4 bg-amber-50">
+            <h3 className="font-bold text-amber-800 mb-2">بيع التصاميم والملفات الجاهزة</h3>
+            <p className="text-sm text-amber-900/80 leading-6">
+              تصاميم سوشيال ميديا، ملفات قابلة للطباعة، نماذج أعمال، ملفات تنظيم، ومنتجات رقمية مساعدة.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 md:p-8">
+        <h2 className="text-2xl font-extrabold text-gray-900 mb-4">
+          لمن تناسب منصة رقمي؟
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <p className="text-gray-600 leading-8 mb-4">
+              رقمي مناسبة لأي شخص لديه معرفة، ملف، تصميم، قالب، أو منتج رقمي ويريد تحويله إلى دخل. سواء كنت
+              مبتدئًا أو عندك جمهور بسيط، يمكنك استخدام رقمي كبداية عملية للبيع بدون تعقيد.
+            </p>
+
+            <ul className="space-y-3 text-gray-700">
+              <li className="flex gap-2">
+                <span className="text-blue-600 font-bold">•</span>
+                <span>الطلاب الذين يريدون بيع ملخصات أو ملفات PDF تعليمية.</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-blue-600 font-bold">•</span>
+                <span>المصممون الذين يبيعون قوالب Canva أو تصاميم جاهزة.</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-blue-600 font-bold">•</span>
+                <span>صناع المحتوى الذين يريدون بيع منتجات رقمية لجمهورهم.</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-blue-600 font-bold">•</span>
+                <span>أصحاب الخبرات الذين يريدون تحويل معرفتهم إلى منتج رقمي قابل للبيع.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div className="rounded-2xl bg-gray-50 border border-gray-100 p-5">
+            <h3 className="font-bold text-gray-900 mb-3">
+              لماذا يبحث التجار عن منصة مثل رقمي؟
+            </h3>
+            <p className="text-gray-600 leading-8">
+              كثير من التجار وصناع المنتجات الرقمية يبحثون عن موقع سهل، عربي، مجاني أو منخفض التكلفة لبيع
+              المنتجات الرقمية. رقمي يختصر عليهم البداية من خلال متجر رقمي، سوق عام، رابط بيع مباشر، وتجربة
+              مناسبة للمنتجات الرقمية مثل PDF، قوالب Canva، الملخصات، التصاميم والملفات الجاهزة.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 md:p-8">
+        <h2 className="text-2xl font-extrabold text-gray-900 mb-4">
+          كيف تبدأ بيع منتجك الرقمي؟
+        </h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold mb-3">
+              1
+            </div>
+            <h3 className="font-bold text-gray-900 mb-2">أنشئ حسابك</h3>
+            <p className="text-sm text-gray-600 leading-6">
+              سجّل في رقمي وابدأ تجهيز حسابك كبائع للمنتجات الرقمية.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 p-4">
+            <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold mb-3">
+              2
+            </div>
+            <h3 className="font-bold text-gray-900 mb-2">أنشئ متجرك</h3>
+            <p className="text-sm text-gray-600 leading-6">
+              جهّز اسم متجرك ووصفه ليعرف العملاء ماذا تبيع.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 p-4">
+            <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold mb-3">
+              3
+            </div>
+            <h3 className="font-bold text-gray-900 mb-2">ارفع منتجك</h3>
+            <p className="text-sm text-gray-600 leading-6">
+              أضف المنتج الرقمي، السعر، الوصف، والصورة المناسبة.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 p-4">
+            <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold mb-3">
+              4
+            </div>
+            <h3 className="font-bold text-gray-900 mb-2">شارك رابط البيع</h3>
+            <p className="text-sm text-gray-600 leading-6">
+              انشر رابط المنتج أو المتجر وابدأ استقبال الطلبات.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 md:p-8">
+        <h2 className="text-2xl font-extrabold text-gray-900 mb-4">
+          أسئلة شائعة عن بيع المنتجات الرقمية
+        </h2>
+
+        <div className="space-y-4">
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="font-bold text-gray-900 mb-2">
+              هل أستطيع البدء مجانًا في رقمي؟
+            </h3>
+            <p className="text-gray-600 leading-7">
+              نعم، يمكنك البدء مجانًا ورفع منتجاتك الرقمية وإنشاء متجرك. هذا يجعل رقمي خيارًا مناسبًا لمن يريد
+              تجربة بيع المنتجات الرقمية بدون تكلفة عالية في البداية.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="font-bold text-gray-900 mb-2">
+              هل رقمي مناسب لبيع ملفات PDF؟
+            </h3>
+            <p className="text-gray-600 leading-7">
+              نعم، يمكنك استخدام رقمي لبيع ملفات PDF مثل الكتب الإلكترونية، الملخصات، الأدلة، الملفات التعليمية،
+              الجداول، الكتيبات، والملفات الجاهزة للتحميل.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="font-bold text-gray-900 mb-2">
+              هل أقدر أبيع قوالب Canva وتصاميم؟
+            </h3>
+            <p className="text-gray-600 leading-7">
+              نعم، رقمي مناسب لبيع قوالب Canva، التصاميم، الملفات القابلة للتعديل، منتجات المصممين، وقوالب
+              السوشيال ميديا أو العروض أو السير الذاتية.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 p-4">
+            <h3 className="font-bold text-gray-900 mb-2">
+              هل أحتاج متجر معقد أو خبرة تقنية؟
+            </h3>
+            <p className="text-gray-600 leading-7">
+              لا، الفكرة الأساسية في رقمي هي تسهيل البداية. تنشئ متجرك، ترفع منتجك، وتحصل على رابط بيع مباشر
+              يمكنك مشاركته مع جمهورك.
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+};
+
 export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) => {
   const [products, setProducts] = useState<ProductWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -265,12 +518,12 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
             <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">
-                  {sellerFilterActive ? 'منتجات التاجر' : 'السوق العام'}
+                  {sellerFilterActive ? 'منتجات التاجر' : 'السوق العام للمنتجات الرقمية'}
                 </h1>
                 <p className="text-sm text-gray-500 mt-1">
                   {sellerFilterActive
                     ? 'تم عرض منتجات هذا التاجر فقط من خلال الرابط التسويقي'
-                    : 'ابحث في المنتجات الرقمية واستعرضها بسهولة'}
+                    : 'تصفح منتجات رقمية مثل ملفات PDF، قوالب Canva، الملخصات، التصاميم والملفات الجاهزة'}
                 </p>
               </div>
             </div>
@@ -285,7 +538,7 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
                   placeholder={
                     sellerFilterActive
                       ? 'ابحث داخل منتجات هذا التاجر...'
-                      : 'ابحث عن منتج، وصف، متجر...'
+                      : 'ابحث عن PDF، قالب Canva، ملخص، تصميم، متجر...'
                   }
                   className="w-full pr-12 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
@@ -372,6 +625,8 @@ export const MarketplacePage: React.FC<MarketplacePageProps> = ({ onNavigate }) 
             })}
           </div>
         )}
+
+        {!sellerFilterActive && <MarketplaceSeoContent onNavigate={onNavigate} />}
       </div>
     </div>
   );
