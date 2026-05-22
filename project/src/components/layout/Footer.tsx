@@ -9,7 +9,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
   return (
     <footer className="bg-gray-900 text-gray-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
           <div className="col-span-1 md:col-span-2">
             <button
               onClick={() => onNavigate('home')}
@@ -39,8 +39,8 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               </span>
             </button>
 
-            <p className="text-gray-400 mb-4 max-w-md">
-              منصة رقمي هي الحل الأمثل لبيع وشراء المنتجات الرقمية. انضم إلى آلاف التجار والعملاء الذين يثقون بنا.
+            <p className="text-gray-400 mb-4 max-w-md leading-7">
+              رقمي منصة عربية لبيع وشراء المنتجات الرقمية مثل ملفات PDF، قوالب Canva، الملخصات، التصاميم والملفات الجاهزة. أنشئ متجرك الرقمي وابدأ بيع منتجاتك من رابط واحد.
             </p>
 
             <div className="flex items-center gap-2">
@@ -63,6 +63,24 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               </li>
               <li>
                 <button onClick={() => onNavigate('support')} className="hover:text-white transition-colors">الدعم</button>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-white font-semibold mb-4">عن رقمي</h3>
+            <ul className="space-y-2">
+              <li>
+                <button onClick={() => onNavigate('about')} className="hover:text-white transition-colors">من نحن</button>
+              </li>
+              <li>
+                <button onClick={() => onNavigate('features')} className="hover:text-white transition-colors">مزايا رقمي</button>
+              </li>
+              <li>
+                <button onClick={() => onNavigate('why-raqmy')} className="hover:text-white transition-colors">لماذا رقمي؟</button>
+              </li>
+              <li>
+                <button onClick={() => onNavigate('faq')} className="hover:text-white transition-colors">الأسئلة الشائعة</button>
               </li>
             </ul>
           </div>
