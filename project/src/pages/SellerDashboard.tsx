@@ -212,6 +212,7 @@ type SellerDashboardTab =
 const FALLBACK_MIN_WITHDRAWAL_AMOUNT = 10;
 const WITHDRAWAL_PROOFS_BUCKET = 'withdrawal-proofs';
 const STORE_IMAGES_BUCKET = 'store-images';
+const FINANCIAL_CURRENCY_NOTE = 'يتم احتساب الأرباح والسحب بالريال السعودي.';
 const SELLER_DASHBOARD_BASE_PATH = '/seller-dashboard';
 const SELLER_DASHBOARD_TAB_PATHS: Record<SellerDashboardTab, string> = {
   overview: SELLER_DASHBOARD_BASE_PATH,
@@ -2557,6 +2558,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   {stats.totalRevenue.toFixed(2)} ريال
                 </div>
                 <p className="text-sm text-gray-600">إجمالي الأرباح</p>
+                <p className="mt-2 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
               </div>
 
               <div className="bg-white rounded-xl p-6 shadow-sm">
@@ -2611,6 +2613,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       </div>
                       <div className="text-2xl font-bold text-gray-900">{formatCurrency(averageRevenuePerSale)}</div>
                       <p className="text-xs text-gray-600 mt-2">محسوب من إجمالي الأرباح ÷ عدد المبيعات.</p>
+                      <p className="text-[11px] text-gray-400 mt-1">{FINANCIAL_CURRENCY_NOTE}</p>
                     </div>
 
                     <div className="rounded-2xl border border-purple-100 bg-purple-50/70 p-4">
@@ -2689,6 +2692,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       <p className="text-xs text-gray-600">طلبات سحب مكتملة الاعتماد من الإدارة حتى الآن.</p>
                     </div>
                   </div>
+
+                  <p className="mt-4 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
                 </div>
 
                 <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
@@ -2810,6 +2815,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     <div>
                       <h2 className="text-xl font-bold text-gray-900 mb-1">آخر الحركات المالية</h2>
                       <p className="text-sm text-gray-600">آخر التحديثات القادمة من المحفظة وسجل الأرباح والسحب.</p>
+                      <p className="mt-1 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
                     </div>
                     <Wallet className="w-6 h-6 text-gray-400" />
                   </div>
@@ -3501,6 +3507,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <p className="text-gray-600">
                     من هنا يمكنك متابعة رصيدك، مراجعة سجل المحفظة، وإرسال طلبات سحب الأرباح.
                   </p>
+                  <p className="mt-2 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
                 </div>
 
                 <button
@@ -3555,6 +3562,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(availableBalance)}</div>
                 <p className="text-sm text-gray-500">الرصيد المتاح حالياً</p>
+                <p className="mt-2 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
               </div>
 
               <div className="bg-white rounded-2xl shadow-sm p-6">
@@ -3568,6 +3576,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(pendingBalance)}</div>
                 <p className="text-sm text-gray-500">أرباح دخلت للتاجر وتصبح متاحة بعد انتهاء فترة التعليق</p>
+                <p className="mt-2 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
               </div>
 
               <div className="bg-white rounded-2xl shadow-sm p-6">
@@ -3581,6 +3590,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(approvedWithdrawalsTotal)}</div>
                 <p className="text-sm text-gray-500">إجمالي السحوبات المعتمدة</p>
+                <p className="mt-2 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
               </div>
             </div>
 
@@ -3591,6 +3601,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <p className="text-gray-600 text-sm">
                     أرسل طلب سحب من رصيدك المتاح، وسيتم مراجعته من الإدارة قبل الاعتماد.
                   </p>
+                  <p className="mt-2 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
                 </div>
 
                 <div className="mt-5 mb-6 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4">
@@ -3709,6 +3720,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       </>
                     )}
                     <p>بعد إرسال الطلب سيتم خصمه تنظيمياً كسحب قيد المراجعة حتى تعتمد الإدارة الطلب.</p>
+                    <p className="text-xs text-blue-700/80">{FINANCIAL_CURRENCY_NOTE}</p>
                   </div>
 
                   {!walletData && (
@@ -3744,6 +3756,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div>
                     <h3 className="text-xl font-bold text-gray-900 mb-1">آخر طلبات السحب</h3>
                     <p className="text-sm text-gray-500">متابعة حالة الطلبات الأخيرة الخاصة بك</p>
+                    <p className="mt-1 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
                   </div>
                 </div>
 
@@ -3845,6 +3858,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               <div className="mb-6">
                 <h3 className="text-xl font-bold text-gray-900 mb-1">سجل المحفظة</h3>
                 <p className="text-sm text-gray-500">آخر الحركات المالية المتعلقة بمحفظتك</p>
+                <p className="mt-1 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
               </div>
 
               {walletLoading ? (
