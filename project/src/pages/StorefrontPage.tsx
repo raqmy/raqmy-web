@@ -84,7 +84,11 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
 
   const [sortBy, setSortBy] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
-  const { currencies, selectedCurrency } = useCurrency();
+
+  const { currencies, selectedCurrency, changeCurrency } = useCurrency(
+    profile?.id,
+    (profile as any)?.preferred_currency
+  );
 
   useEffect(() => {
     fetchStoreAndProducts();
@@ -411,6 +415,21 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
               </div>
 
               <div className="flex items-center gap-2 md:gap-3 shrink-0">
+                <select
+                  value={selectedCurrency}
+                  onChange={(event) => changeCurrency(event.target.value)}
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  title="تغيير عملة العرض"
+                  aria-label="تغيير عملة العرض"
+                  dir="ltr"
+                >
+                  {currencies.map((currency) => (
+                    <option key={currency.code} value={currency.code}>
+                      {currency.code}
+                    </option>
+                  ))}
+                </select>
+
                 <button
                   onClick={handleShareStore}
                   className="flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
