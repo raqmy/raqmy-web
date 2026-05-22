@@ -418,7 +418,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ storeSlug, onNav
                 <select
                   value={selectedCurrency}
                   onChange={(event) => changeCurrency(event.target.value)}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  className="block rounded-xl border border-gray-200 bg-white px-2 sm:px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   title="تغيير عملة العرض"
                   aria-label="تغيير عملة العرض"
                   dir="ltr"
