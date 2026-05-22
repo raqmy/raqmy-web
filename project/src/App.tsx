@@ -44,6 +44,10 @@ import { RefundPolicyPage } from './pages/RefundPolicyPage';
 import { AffiliatePolicyPage } from './pages/AffiliatePolicyPage';
 import { MerchantAgreementPage } from './pages/MerchantAgreementPage';
 import { TermsPage } from './pages/TermsPage';
+import { AboutPage } from './pages/AboutPage';
+import { FeaturesPage } from './pages/FeaturesPage';
+import { WhyRaqmyPage } from './pages/WhyRaqmyPage';
+import { FAQPage } from './pages/FAQPage';
 import { VerifyPhonePage } from './pages/VerifyPhonePage';
 import { MerchantBankDetailsPage } from './pages/MerchantBankDetailsPage';
 import { supabase } from './lib/supabase';
@@ -257,6 +261,10 @@ const parsePathToPage = (pathname: string, search: string = window.location.sear
     favorites: 'favorites',
     'viewed-products': 'viewed-products',
     support: 'support',
+    about: 'about',
+    features: 'features',
+    'why-raqmy': 'why-raqmy',
+    faq: 'faq',
     profile: 'profile',
     'privacy-policy': 'privacy-policy',
     'refund-policy': 'refund-policy',
@@ -518,6 +526,10 @@ const getPublicPathFromPage = (page: string) => {
     pricing: '/pricing',
     marketplace: `/marketplace${getMarketplaceSearchParamsForSync()}`,
     support: '/support',
+    about: '/about',
+    features: '/features',
+    'why-raqmy': '/why-raqmy',
+    faq: '/faq',
     'privacy-policy': '/privacy-policy',
     'refund-policy': '/refund-policy',
     'affiliate-policy': '/affiliate-policy',
@@ -1503,6 +1515,18 @@ function AppContent() {
 
       case 'support':
         return <SupportPage />;
+
+      case 'about':
+        return <AboutPage onNavigate={navigateWithContext} />;
+
+      case 'features':
+        return <FeaturesPage onNavigate={navigateWithContext} />;
+
+      case 'why-raqmy':
+        return <WhyRaqmyPage onNavigate={navigateWithContext} />;
+
+      case 'faq':
+        return <FAQPage onNavigate={navigateWithContext} />;
 
       case 'profile-orders-tab':
       case 'profile':
