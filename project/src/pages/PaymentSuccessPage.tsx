@@ -7,6 +7,7 @@ import {
   Store as StoreIcon,
   ArrowLeft,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -33,6 +34,7 @@ interface Order {
   customer_email?: string | null;
   customer_phone?: string | null;
   created_at?: string | null;
+  paid_at?: string | null;
   payment_reference?: string | null;
 }
 
@@ -67,8 +69,9 @@ type ScopeInfo = {
   imageUrl?: string | null;
 };
 
-const RETRY_COUNT = 8;
+const RETRY_COUNT = 14;
 const RETRY_DELAY_MS = 1500;
+const VERIFY_ATTEMPTS = new Set([3, 6, 10]);
 
 const getActiveStoreScopeSlug = () => {
   try {
@@ -101,7 +104,6 @@ const getStoreImageUrl = (storeRecord: any): string | null => {
 
   return null;
 };
-
 
 const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   const slug = getActiveStoreScopeSlug();
@@ -143,6 +145,16 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   }
 
   return null;
+};
+
+const isPaidOrderStatus = (status?: string | null) => {
+  const normalized = String(status || '').toLowerCase().trim();
+  return ['paid', 'completed', 'success', 'succeeded'].includes(normalized);
+};
+
+const isPendingOrderStatus = (status?: string | null) => {
+  const normalized = String(status || '').toLowerCase().trim();
+  return ['pending_payment', 'pending', 'processing'].includes(normalized);
 };
 
 const getQuantityLimit = (product: ProductLite | null | undefined) => {
@@ -223,6 +235,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
   const [order, setOrder] = useState<Order | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItemView[]>([]);
   const [loading, setLoading] = useState(true);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [scopeInfo, setScopeInfo] = useState<ScopeInfo | null>(null);
 
@@ -233,12 +246,6 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
     };
 
     void loadScope();
-  }, []);
-
-  useEffect(() => {
-    localStorage.removeItem('pending_payment_order_id');
-    localStorage.removeItem('pending_payment_started_at');
-    localStorage.removeItem('pending_payment_return_expected');
   }, []);
 
   useEffect(() => {
@@ -254,6 +261,123 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const clearPendingPaymentStorage = () => {
+    try {
+      localStorage.removeItem('pending_payment_order_id');
+      localStorage.removeItem('pending_payment_started_at');
+      localStorage.removeItem('pending_payment_return_expected');
+    } catch {
+      // تجاهل أخطاء التخزين المحلي
+    }
+  };
+
+  const invokePaymobVerification = async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke('verify-paymob-transaction', {
+        body: { orderId },
+      });
+
+      if (error) {
+        console.warn('verify-paymob-transaction failed:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.warn('verify-paymob-transaction exception:', error);
+      return null;
+    }
+  };
+
+  const fetchOrder = async (): Promise<Order | null> => {
+    const { data: orderData, error: orderError } = await supabase
+      .from('orders')
+      .select(`
+        id,
+        order_number,
+        total_amount,
+        status,
+        customer_name,
+        customer_email,
+        customer_phone,
+        created_at,
+        paid_at,
+        payment_reference
+      `)
+      .eq('id', orderId)
+      .maybeSingle();
+
+    if (orderError) {
+      console.error('Error fetching order:', orderError);
+      throw orderError;
+    }
+
+    return (orderData as Order) || null;
+  };
+
+  const loadOrderItems = async () => {
+    const { data: itemsData, error: itemsError } = await supabase
+      .from('order_items')
+      .select('*')
+      .eq('order_id', orderId);
+
+    if (itemsError) {
+      console.error('Error fetching order items:', itemsError);
+      throw itemsError;
+    }
+
+    const rawItems = (itemsData || []) as RawOrderItem[];
+    const productIds = [...new Set(rawItems.map((item) => item.product_id).filter(Boolean))];
+
+    let productsMap = new Map<string, ProductLite>();
+
+    if (productIds.length > 0) {
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('id, name, title, price, quantity_limit, quantity_sold')
+        .in('id', productIds);
+
+      if (productsError) {
+        console.error('Error fetching products for success page:', productsError);
+      } else if (productsData) {
+        productsMap = new Map(
+          (productsData as ProductLite[]).map((product) => [product.id, product])
+        );
+      }
+    }
+
+    const normalizedItems: OrderItemView[] = rawItems.map((item) => {
+      const product = productsMap.get(item.product_id);
+
+      const quantity = Number(item.quantity ?? 1) || 1;
+      const unitPrice = Number(item.product_price ?? item.price ?? product?.price ?? 0) || 0;
+      const subtotal = Number(item.subtotal ?? unitPrice * quantity) || 0;
+      const productName =
+        item.product_name ||
+        product?.title ||
+        product?.name ||
+        'منتج';
+
+      const quantityLimit = getQuantityLimit(product);
+      const quantitySold = getQuantitySold(product);
+      const remainingQuantity = getRemainingQuantity(product);
+
+      return {
+        id: item.id,
+        product_id: item.product_id,
+        product_name: productName,
+        product_price: unitPrice,
+        quantity,
+        subtotal,
+        quantity_limit: quantityLimit,
+        quantity_sold: quantitySold,
+        remaining_quantity: remainingQuantity,
+      };
+    });
+
+    setOrderItems(normalizedItems);
+  };
+
   const fetchOrderDetailsWithRetry = async () => {
     setLoading(true);
     setErrorMessage('');
@@ -262,30 +386,17 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
       let foundOrder: Order | null = null;
 
       for (let attempt = 1; attempt <= RETRY_COUNT; attempt++) {
-        const { data: orderData, error: orderError } = await supabase
-          .from('orders')
-          .select(`
-            id,
-            order_number,
-            total_amount,
-            status,
-            customer_name,
-            customer_email,
-            customer_phone,
-            created_at,
-            payment_reference
-          `)
-          .eq('id', orderId)
-          .maybeSingle();
+        foundOrder = await fetchOrder();
 
-        if (orderError) {
-          console.error(`Error fetching order on attempt ${attempt}:`, orderError);
+        if (foundOrder && isPaidOrderStatus(foundOrder.status)) {
+          break;
         }
 
-        if (orderData) {
-          foundOrder = orderData as Order;
+        if (foundOrder && isPendingOrderStatus(foundOrder.status) && VERIFY_ATTEMPTS.has(attempt)) {
+          await invokePaymobVerification();
+          foundOrder = await fetchOrder();
 
-          if (foundOrder.status === 'paid' || foundOrder.status === 'completed') {
+          if (foundOrder && isPaidOrderStatus(foundOrder.status)) {
             break;
           }
         }
@@ -302,75 +413,22 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
         return;
       }
 
-      if (foundOrder.status !== 'paid' && foundOrder.status !== 'completed') {
+      if (!isPaidOrderStatus(foundOrder.status)) {
         setOrder(null);
         setOrderItems([]);
-        setErrorMessage(`تم العثور على الطلب لكن حالته الحالية هي: ${foundOrder.status}`);
+        setErrorMessage(
+          isPendingOrderStatus(foundOrder.status)
+            ? 'تم الدفع، لكن ما زال تأكيد الطلب قيد المعالجة. اضغط تحديث بعد لحظات، وإذا استمرت المشكلة تواصل مع الدعم.'
+            : `تم العثور على الطلب لكن حالته الحالية هي: ${foundOrder.status}`
+        );
         return;
       }
 
-      const { data: itemsData, error: itemsError } = await supabase
-        .from('order_items')
-        .select('*')
-        .eq('order_id', orderId);
-
-      if (itemsError) {
-        console.error('Error fetching order items:', itemsError);
-        throw itemsError;
-      }
-
-      const rawItems = (itemsData || []) as RawOrderItem[];
-      const productIds = [...new Set(rawItems.map((item) => item.product_id).filter(Boolean))];
-
-      let productsMap = new Map<string, ProductLite>();
-
-      if (productIds.length > 0) {
-        const { data: productsData, error: productsError } = await supabase
-          .from('products')
-          .select('id, name, title, price, quantity_limit, quantity_sold')
-          .in('id', productIds);
-
-        if (productsError) {
-          console.error('Error fetching products for success page:', productsError);
-        } else if (productsData) {
-          productsMap = new Map(
-            (productsData as ProductLite[]).map((product) => [product.id, product])
-          );
-        }
-      }
-
-      const normalizedItems: OrderItemView[] = rawItems.map((item) => {
-        const product = productsMap.get(item.product_id);
-
-        const quantity = Number(item.quantity ?? 1) || 1;
-        const unitPrice = Number(item.product_price ?? item.price ?? product?.price ?? 0) || 0;
-        const subtotal = Number(item.subtotal ?? unitPrice * quantity) || 0;
-        const productName =
-          item.product_name ||
-          product?.title ||
-          product?.name ||
-          'منتج';
-
-        const quantityLimit = getQuantityLimit(product);
-        const quantitySold = getQuantitySold(product);
-        const remainingQuantity = getRemainingQuantity(product);
-
-        return {
-          id: item.id,
-          product_id: item.product_id,
-          product_name: productName,
-          product_price: unitPrice,
-          quantity,
-          subtotal,
-          quantity_limit: quantityLimit,
-          quantity_sold: quantitySold,
-          remaining_quantity: remainingQuantity,
-        };
-      });
+      await loadOrderItems();
 
       setOrder(foundOrder);
-      setOrderItems(normalizedItems);
       setErrorMessage('');
+      clearPendingPaymentStorage();
     } catch (error: any) {
       console.error('Error fetching order details:', error);
       setOrder(null);
@@ -378,6 +436,17 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
       setErrorMessage(error?.message || 'حدث خطأ أثناء جلب بيانات الطلب');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleManualRefresh = async () => {
+    setManualRefreshing(true);
+
+    try {
+      await invokePaymobVerification();
+      await fetchOrderDetailsWithRetry();
+    } finally {
+      setManualRefreshing(false);
     }
   };
 
@@ -431,6 +500,9 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-green-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-600">جاري التحقق من حالة الطلب...</p>
+          <p className="text-xs text-gray-400 mt-2">
+            قد يستغرق تأكيد الدفع عدة ثواني بعد الرجوع من بوابة الدفع
+          </p>
         </div>
       </div>
     );
@@ -438,11 +510,20 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
 
   if (!order) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-xl p-8 shadow-sm text-center max-w-md">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="bg-white rounded-xl p-8 shadow-sm text-center max-w-md w-full">
           <p className="text-gray-600 mb-6">{errorMessage || 'لم يتم العثور على الطلب'}</p>
 
           <div className="flex flex-col gap-3">
+            <button
+              onClick={handleManualRefresh}
+              disabled={manualRefreshing}
+              className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+            >
+              <RefreshCw className={`w-5 h-5 ${manualRefreshing ? 'animate-spin' : ''}`} />
+              <span>{manualRefreshing ? 'جاري التحديث...' : 'تحديث حالة الدفع'}</span>
+            </button>
+
             <button
               onClick={() => onNavigate(ordersTarget)}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
