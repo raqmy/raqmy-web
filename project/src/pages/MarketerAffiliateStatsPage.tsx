@@ -434,84 +434,83 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
   };
 
   const hydratePerformanceFromDatabase = async (
-  baseData: PublicStatsData
-): Promise<PublicStatsData> => {
-  const linkId = baseData.link?.id ? String(baseData.link.id) : '';
-  const marketerId = baseData.link?.marketer_id
-    ? String(baseData.link.marketer_id)
-    : baseData.marketer?.id
-    ? String(baseData.marketer.id)
-    : '';
+    baseData: PublicStatsData
+  ): Promise<PublicStatsData> => {
+    const linkId = baseData.link?.id ? String(baseData.link.id) : '';
+    const marketerId = baseData.link?.marketer_id
+      ? String(baseData.link.marketer_id)
+      : baseData.marketer?.id
+      ? String(baseData.marketer.id)
+      : '';
 
-  if (!linkId || !marketerId) {
-    return baseData;
-  }
+    if (!linkId || !marketerId) {
+      return baseData;
+    }
 
-  const currentClicks = Number(baseData.link?.clicks || 0);
-  const currentSales = Number(baseData.link?.sales || 0);
-  const currentEarnings = Number(baseData.link?.earnings || 0);
+    const currentClicks = Number(baseData.link?.clicks || 0);
+    const currentSales = Number(baseData.link?.sales || 0);
+    const currentEarnings = Number(baseData.link?.earnings || 0);
 
-  try {
-    const [{ data: paidOrders, error: ordersError }, { data: commissionRows, error: commissionsError }] =
-      await Promise.all([
-        supabase
-          .from('orders')
-          .select('id, status')
-          .eq('status', 'paid')
-          .eq('affiliate_link_id', linkId)
-          .eq('affiliate_marketer_id', marketerId),
-        supabase
-          .from('affiliate_commissions')
-          .select('id, commission_amount, status')
-          .eq('link_id', linkId)
-          .eq('marketer_id', marketerId),
+    try {
+      const [{ data: paidOrders, error: ordersError }, { data: commissionRows, error: commissionsError }] =
+        await Promise.all([
+          supabase
+            .from('orders')
+            .select('id, status')
+            .eq('status', 'paid')
+            .eq('affiliate_link_id', linkId)
+            .eq('affiliate_marketer_id', marketerId),
+          supabase
+            .from('affiliate_commissions')
+            .select('id, commission_amount, status')
+            .eq('link_id', linkId)
+            .eq('marketer_id', marketerId),
+        ]);
+
+      if (ordersError) {
+        console.error('Error fetching paid affiliate orders for public stats:', ordersError);
+      }
+
+      if (commissionsError) {
+        console.error('Error fetching affiliate commissions for public stats:', commissionsError);
+      }
+
+      const paidSalesCount = ordersError
+        ? currentSales
+        : new Set(
+            ((paidOrders || []) as OrderRowForStats[])
+              .map((row) => row.id)
+              .filter(Boolean)
+          ).size;
+
+      const ignoredCommissionStatuses = new Set([
+        'rejected',
+        'cancelled',
+        'canceled',
+        'failed',
+        'void',
       ]);
 
-    if (ordersError) {
-      console.error('Error fetching paid affiliate orders for public stats:', ordersError);
+      const totalCommissionEarnings = commissionsError
+        ? currentEarnings
+        : ((commissionRows || []) as AffiliateCommissionRowForStats[])
+            .filter((row) => !ignoredCommissionStatuses.has(String(row.status || '').toLowerCase()))
+            .reduce((sum, row) => sum + Number(row.commission_amount || 0), 0);
+
+      return {
+        ...baseData,
+        link: {
+          ...baseData.link,
+          clicks: currentClicks,
+          sales: Math.max(currentSales, paidSalesCount),
+          earnings: Math.max(currentEarnings, totalCommissionEarnings),
+        },
+      };
+    } catch (error) {
+      console.error('hydratePerformanceFromDatabase error:', error);
+      return baseData;
     }
-
-    if (commissionsError) {
-      console.error('Error fetching affiliate commissions for public stats:', commissionsError);
-    }
-
-    const paidSalesCount = ordersError
-      ? currentSales
-      : new Set(
-          ((paidOrders || []) as OrderRowForStats[])
-            .map((row) => row.id)
-            .filter(Boolean)
-        ).size;
-
-    const ignoredCommissionStatuses = new Set([
-      'rejected',
-      'cancelled',
-      'canceled',
-      'failed',
-      'void',
-    ]);
-
-    const totalCommissionEarnings = commissionsError
-      ? currentEarnings
-      : ((commissionRows || []) as AffiliateCommissionRowForStats[])
-          .filter((row) => !ignoredCommissionStatuses.has(String(row.status || '').toLowerCase()))
-          .reduce((sum, row) => sum + Number(row.commission_amount || 0), 0);
-
-    return {
-      ...baseData,
-      link: {
-        ...baseData.link,
-        clicks: currentClicks,
-        sales: Math.max(currentSales, paidSalesCount),
-        earnings: Math.max(currentEarnings, totalCommissionEarnings),
-      },
-    };
-  } catch (error) {
-    console.error('hydratePerformanceFromDatabase error:', error);
-    return baseData;
-  }
-};
-
+  };
 
   const hydrateMarketerDisplayName = async (
     baseData: PublicStatsData
@@ -821,11 +820,6 @@ export const MarketerAffiliateStatsPage: React.FC = () => {
                   icon={<DollarSign className="w-4 h-4" />}
                   label="العمولة"
                   value={formatCommission(data.rule.commission_type, data.rule.commission_value)}
-                />
-                <InfoRow
-                  icon={<Target className="w-4 h-4" />}
-                  label="الأولوية"
-                  value={String(data.rule.priority || 100)}
                 />
                 <InfoRow
                   icon={<CheckCircle2 className="w-4 h-4" />}
