@@ -415,7 +415,7 @@ export const PaymentPage: React.FC<PaymentPageProps> = ({ onNavigate, orderId })
 
             {!isAlreadyPaid && !isQuantityError && (
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-                سيتم تحويلك إلى صفحة الدفع الآمنة لإدخال بيانات البطاقة وإتمام العملية.
+                يتم الدفع بعملة الريال السعودي (SAR)، وبعد التأكيد سيتم تحويلك إلى صفحة الدفع الآمنة لإكمال العملية.
               </div>
             )}
 
