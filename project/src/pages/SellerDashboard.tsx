@@ -1032,7 +1032,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       const productsWithThumbs = normalizedProducts.map((p) => ({
         ...p,
         thumbnail_url: p.thumbnail_url || thumbMap[p.id] || null,
-        views_count: productViewsMap[p.id] ?? Number(p.views_count || 0) ?? 0,
+        views_count: Math.max(Number(p.views_count || 0) || 0, productViewsMap[p.id] || 0),
         sales_count: productSalesMap[p.id] ?? Number(p.sales_count || 0) ?? 0,
       }));
 
