@@ -50,6 +50,9 @@ interface ServiceOrderDetail {
   service_status?: string | null;
   seller_delivery_note?: string | null;
   seller_delivery_file_url?: string | null;
+  delivery_message?: string | null;
+  delivery_url?: string | null;
+  revision_request?: string | null;
   delivered_at?: string | null;
   accepted_at?: string | null;
   completed_at?: string | null;
@@ -189,8 +192,8 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
 
         for (const order of enrichedOrders) {
           for (const detail of order.service_details || []) {
-            nextDeliveryNotes[detail.id] = detail.seller_delivery_note || '';
-            nextDeliveryLinks[detail.id] = detail.seller_delivery_file_url || '';
+            nextDeliveryNotes[detail.id] = detail.seller_delivery_note || detail.delivery_message || '';
+            nextDeliveryLinks[detail.id] = detail.seller_delivery_file_url || detail.delivery_url || '';
           }
         }
 
@@ -243,6 +246,16 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
         return;
       }
 
+      const payload = {
+        service_status: nextStatus,
+        seller_delivery_note: note.trim() || null,
+        seller_delivery_file_url: fileUrl.trim() || null,
+        delivery_message: note.trim() || null,
+        delivery_url: fileUrl.trim() || null,
+        delivered_at: nextStatus === 'delivered' ? new Date().toISOString() : detail.delivered_at || null,
+        updated_at: new Date().toISOString(),
+      };
+
       const { error } = await supabase.rpc('seller_update_service_delivery', {
         p_service_detail_id: detail.id,
         p_service_status: nextStatus,
@@ -250,7 +263,14 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
         p_seller_delivery_file_url: fileUrl.trim() || null,
       });
 
-      if (error) throw error;
+      if (error) {
+        const { error: updateError } = await supabase
+          .from('service_order_details')
+          .update(payload)
+          .eq('id', detail.id);
+
+        if (updateError) throw updateError;
+      }
 
       setServiceMessage(nextStatus === 'delivered' ? 'تم تسليم الخدمة للعميل.' : 'تم تحديث حالة الخدمة إلى قيد التنفيذ.');
       await fetchOrders();
@@ -623,22 +643,22 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
                               </p>
                             </div>
 
-                            {detail.buyer_revision_note && (
+                            {(detail.buyer_revision_note || detail.revision_request) && (
                               <div className="rounded-lg bg-orange-50 border border-orange-100 p-3">
                                 <p className="text-xs font-semibold text-orange-700 mb-1">ملاحظات تعديل من العميل</p>
-                                <p className="text-sm text-orange-900 whitespace-pre-line">{detail.buyer_revision_note}</p>
+                                <p className="text-sm text-orange-900 whitespace-pre-line">{detail.buyer_revision_note || detail.revision_request}</p>
                               </div>
                             )}
 
-                            {(detail.seller_delivery_note || detail.seller_delivery_file_url) && (
+                            {(detail.seller_delivery_note || detail.seller_delivery_file_url || detail.delivery_message || detail.delivery_url) && (
                               <div className="rounded-lg bg-green-50 border border-green-100 p-3">
                                 <p className="text-xs font-semibold text-green-700 mb-1">آخر تسليم مرسل</p>
-                                {detail.seller_delivery_note && (
-                                  <p className="text-sm text-green-900 whitespace-pre-line mb-2">{detail.seller_delivery_note}</p>
+                                {(detail.seller_delivery_note || detail.delivery_message) && (
+                                  <p className="text-sm text-green-900 whitespace-pre-line mb-2">{detail.seller_delivery_note || detail.delivery_message}</p>
                                 )}
-                                {detail.seller_delivery_file_url && (
+                                {(detail.seller_delivery_file_url || detail.delivery_url) && (
                                   <a
-                                    href={detail.seller_delivery_file_url}
+                                    href={detail.seller_delivery_file_url || detail.delivery_url || '#'}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-2 text-sm font-semibold text-green-700 hover:text-green-800"
