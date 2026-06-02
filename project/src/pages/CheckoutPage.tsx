@@ -11,6 +11,9 @@ import {
   XCircle,
   AlertTriangle,
   Briefcase,
+  Upload,
+  Paperclip,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Product } from '../lib/supabase';
@@ -95,6 +98,22 @@ interface DiscountCouponRow {
   end_date?: string | null;
 }
 
+interface ServiceOrderAttachmentInsert {
+  service_order_detail_id: string;
+  order_id: string;
+  order_item_id: string | null;
+  product_id: string | null;
+  uploader_id: string;
+  uploader_role: 'buyer' | 'seller';
+  attachment_context: 'requirements' | 'seller_delivery' | 'buyer_revision' | 'seller_note';
+  file_name: string;
+  file_path: string;
+  file_url: string | null;
+  file_type: string | null;
+  file_size: number | null;
+  note: string | null;
+}
+
 interface AppliedCouponState {
   coupon: DiscountCouponRow;
   eligibleProductIds: string[];
@@ -109,6 +128,46 @@ interface OrderItemPricing {
   discountedSubtotal: number;
   discountShare: number;
 }
+
+const SERVICE_ATTACHMENTS_BUCKET = 'service-order-attachments';
+const MAX_SERVICE_ATTACHMENT_SIZE_MB = 50;
+const MAX_SERVICE_ATTACHMENT_COUNT_PER_ITEM = 5;
+
+const sanitizeFileName = (fileName: string) => {
+  return fileName
+    .replace(/[\\/]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9._-\u0600-\u06FF]/g, '')
+    .slice(0, 120) || `file-${Date.now()}`;
+};
+
+const formatFileSize = (bytes?: number | null) => {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) return '';
+  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const isAllowedServiceAttachmentFile = (file: File) => {
+  const allowedTypes = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'application/pdf',
+    'application/zip',
+    'application/x-zip-compressed',
+    'text/plain',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  ];
+
+  return allowedTypes.includes(file.type) || /\.(jpg|jpeg|png|webp|gif|pdf|zip|txt|doc|docx|xls|xlsx|ppt|pptx)$/i.test(file.name);
+};
 
 const STORE_IMAGE_URL_FIELDS = [
   'store_image_url',
@@ -371,6 +430,91 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCouponState | null>(null);
   const [serviceRequirements, setServiceRequirements] = useState<Record<string, string>>({});
+  const [serviceRequirementFiles, setServiceRequirementFiles] = useState<Record<string, File[]>>({});
+
+  const handleServiceRequirementFilesSelected = (cartItemId: string, selectedFiles: FileList | null) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+
+    setError('');
+
+    const files = Array.from(selectedFiles);
+    const currentFiles = serviceRequirementFiles[cartItemId] || [];
+    const nextFiles = [...currentFiles];
+
+    for (const file of files) {
+      if (nextFiles.length >= MAX_SERVICE_ATTACHMENT_COUNT_PER_ITEM) {
+        setError(`يمكن إرفاق ${MAX_SERVICE_ATTACHMENT_COUNT_PER_ITEM} ملفات كحد أقصى لكل خدمة.`);
+        break;
+      }
+
+      if (file.size > MAX_SERVICE_ATTACHMENT_SIZE_MB * 1024 * 1024) {
+        setError(`حجم الملف "${file.name}" أكبر من ${MAX_SERVICE_ATTACHMENT_SIZE_MB}MB.`);
+        continue;
+      }
+
+      if (!isAllowedServiceAttachmentFile(file)) {
+        setError(`نوع الملف "${file.name}" غير مدعوم.`);
+        continue;
+      }
+
+      nextFiles.push(file);
+    }
+
+    setServiceRequirementFiles((current) => ({
+      ...current,
+      [cartItemId]: nextFiles,
+    }));
+  };
+
+  const removeServiceRequirementFile = (cartItemId: string, fileIndex: number) => {
+    setServiceRequirementFiles((current) => ({
+      ...current,
+      [cartItemId]: (current[cartItemId] || []).filter((_, index) => index !== fileIndex),
+    }));
+  };
+
+  const uploadServiceOrderAttachments = async (
+    detail: any,
+    item: CartItem,
+    files: File[]
+  ) => {
+    if (!profile?.id || files.length === 0) return [];
+
+    const attachmentRows: ServiceOrderAttachmentInsert[] = [];
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const safeName = sanitizeFileName(file.name);
+      const filePath = `${profile.id}/${detail.id}/${Date.now()}-${index}-${safeName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(SERVICE_ATTACHMENTS_BUCKET)
+        .upload(filePath, file, {
+          upsert: false,
+          contentType: file.type || undefined,
+        });
+
+      if (uploadError) throw uploadError;
+
+      attachmentRows.push({
+        service_order_detail_id: detail.id,
+        order_id: detail.order_id,
+        order_item_id: detail.order_item_id || null,
+        product_id: item.product_id || null,
+        uploader_id: profile.id,
+        uploader_role: 'buyer',
+        attachment_context: 'requirements',
+        file_name: file.name,
+        file_path: filePath,
+        file_url: null,
+        file_type: file.type || null,
+        file_size: file.size || null,
+        note: null,
+      });
+    }
+
+    return attachmentRows;
+  };
 
   useEffect(() => {
     const loadScopeAndCart = async () => {
@@ -1226,13 +1370,42 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         });
 
       if (serviceOrderDetails.length > 0) {
-        const { error: serviceDetailsError } = await supabase
+        const { data: insertedServiceDetails, error: serviceDetailsError } = await supabase
           .from('service_order_details')
-          .insert(serviceOrderDetails);
+          .insert(serviceOrderDetails)
+          .select('id, order_id, order_item_id, product_id');
 
         if (serviceDetailsError) {
           console.error('Service order details insert error:', serviceDetailsError);
           throw serviceDetailsError;
+        }
+
+        const serviceDetailsMap = new Map<string, any>(
+          ((insertedServiceDetails || []) as any[]).map((detail) => [String(detail.product_id), detail])
+        );
+
+        const allAttachmentRows: ServiceOrderAttachmentInsert[] = [];
+
+        for (const item of validatedCartItems.filter((cartItem) => isDigitalServiceProduct(cartItem.product))) {
+          const files = serviceRequirementFiles[item.id] || [];
+          const detail = serviceDetailsMap.get(String(item.product_id));
+          if (!detail || files.length === 0) continue;
+
+          const attachmentRows = await uploadServiceOrderAttachments(detail, item, files);
+          if (attachmentRows.length > 0) {
+            allAttachmentRows.push(...attachmentRows);
+          }
+        }
+
+        if (allAttachmentRows.length > 0) {
+          const { error: attachmentsError } = await supabase
+            .from('service_order_attachments')
+            .insert(allAttachmentRows);
+
+          if (attachmentsError) {
+            console.error('Service order attachments insert error:', attachmentsError);
+            throw attachmentsError;
+          }
         }
       }
 
@@ -1463,6 +1636,51 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                             className="w-full px-4 py-3 border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm bg-white"
                             required
                           />
+
+                          <div className="mt-3 rounded-lg border border-dashed border-purple-200 bg-white p-3">
+                            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700">
+                              <Upload className="w-4 h-4" />
+                              <span>إرفاق صور أو ملفات</span>
+                              <input
+                                type="file"
+                                multiple
+                                className="hidden"
+                                accept="image/*,.pdf,.zip,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                                onChange={(event) => {
+                                  handleServiceRequirementFilesSelected(item.id, event.target.files);
+                                  event.currentTarget.value = '';
+                                }}
+                              />
+                            </label>
+                            <p className="mt-2 text-xs text-purple-700">
+                              اختياري: يمكنك رفع صور أمثلة أو ملفات توضيحية للطلب. الحد الأقصى {MAX_SERVICE_ATTACHMENT_COUNT_PER_ITEM} ملفات، وحجم الملف {MAX_SERVICE_ATTACHMENT_SIZE_MB}MB.
+                            </p>
+
+                            {(serviceRequirementFiles[item.id] || []).length > 0 && (
+                              <div className="mt-3 space-y-2">
+                                {(serviceRequirementFiles[item.id] || []).map((file, fileIndex) => (
+                                  <div
+                                    key={`${file.name}-${fileIndex}`}
+                                    className="flex items-center justify-between gap-3 rounded-lg border border-purple-100 bg-purple-50 px-3 py-2 text-xs"
+                                  >
+                                    <div className="flex min-w-0 items-center gap-2 text-purple-900">
+                                      <Paperclip className="w-4 h-4 flex-shrink-0" />
+                                      <span className="truncate">{file.name}</span>
+                                      <span className="flex-shrink-0 text-purple-500">{formatFileSize(file.size)}</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeServiceRequirementFile(item.id, fileIndex)}
+                                      className="text-red-600 hover:text-red-700"
+                                      aria-label="حذف المرفق"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
 
                           <div className="mt-2 flex flex-wrap gap-2 text-xs text-purple-700">
                             {getPositiveIntegerOrNull(item.product?.service_delivery_days) && (
