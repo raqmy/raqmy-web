@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Package, Eye, CheckCircle, XCircle, Clock, DollarSign, TrendingUp, Download } from 'lucide-react';
+import { Package, Eye, CheckCircle, XCircle, Clock, DollarSign, TrendingUp, Download, Briefcase } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -25,7 +25,40 @@ interface Order {
     email: string;
   };
   items_count?: number;
+  service_details?: ServiceOrderDetail[];
 }
+
+interface ServiceOrderDetail {
+  id: string;
+  order_id: string;
+  order_item_id?: string | null;
+  product_id?: string | null;
+  buyer_requirements?: string | null;
+  seller_notes?: string | null;
+  service_status?: string | null;
+  created_at?: string | null;
+  products?: { title?: string | null; name?: string | null } | null;
+}
+
+const getServiceStatusText = (status?: string | null) => {
+  switch (String(status || '').toLowerCase()) {
+    case 'requirements_submitted':
+      return 'تم إرسال المتطلبات';
+    case 'in_progress':
+      return 'قيد التنفيذ';
+    case 'delivered':
+      return 'تم التسليم';
+    case 'revision_requested':
+      return 'طلب تعديل';
+    case 'completed':
+      return 'مكتملة';
+    case 'cancelled':
+      return 'ملغاة';
+    case 'pending_requirements':
+    default:
+      return 'بانتظار المتطلبات';
+  }
+};
 
 export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
@@ -63,15 +96,27 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
 
         const enrichedOrders = await Promise.all(
           ordersData.map(async (order) => {
-            const { data: itemsData } = await supabase
-              .from('order_items')
-              .select('id')
-              .eq('order_id', order.id);
+            const [{ data: itemsData }, { data: serviceDetailsData, error: serviceDetailsError }] = await Promise.all([
+              supabase
+                .from('order_items')
+                .select('id')
+                .eq('order_id', order.id),
+              supabase
+                .from('service_order_details')
+                .select('*, products(title, name)')
+                .eq('order_id', order.id)
+                .eq('seller_id', profile!.id),
+            ]);
+
+            if (serviceDetailsError) {
+              console.error('Error fetching service order details:', serviceDetailsError);
+            }
 
             return {
               ...order,
               buyer: usersData?.find(u => u.id === order.user_id),
-              items_count: itemsData?.length || 0
+              items_count: itemsData?.length || 0,
+              service_details: (serviceDetailsData || []) as ServiceOrderDetail[],
             };
           })
         );
@@ -307,6 +352,11 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
                     <p className="text-sm text-gray-600 mb-1">المبلغ الإجمالي</p>
                     <p className="text-2xl font-bold text-blue-600">{order.total_amount.toFixed(2)} ريال</p>
                     <p className="text-xs text-gray-500 mt-1">{order.items_count} منتج</p>
+                    {order.service_details && order.service_details.length > 0 && (
+                      <p className="text-xs text-purple-600 mt-1 font-semibold">
+                        {order.service_details.length} خدمة رقمية
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -395,6 +445,35 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
                     <p className="text-sm font-mono text-gray-700 bg-gray-50 p-3 rounded-lg">
                       {selectedOrder.payment_reference}
                     </p>
+                  </div>
+                )}
+
+                {selectedOrder.service_details && selectedOrder.service_details.length > 0 && (
+                  <div>
+                    <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                      <Briefcase className="w-5 h-5 text-purple-600" />
+                      <span>تفاصيل الخدمات المطلوبة</span>
+                    </h3>
+                    <div className="space-y-3">
+                      {selectedOrder.service_details.map((detail) => (
+                        <div key={detail.id} className="rounded-xl border border-purple-100 bg-purple-50/60 p-4">
+                          <div className="flex items-center justify-between gap-3 mb-3">
+                            <p className="font-bold text-purple-900">
+                              {detail.products?.title || detail.products?.name || 'خدمة رقمية'}
+                            </p>
+                            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-purple-700 border border-purple-100">
+                              {getServiceStatusText(detail.service_status)}
+                            </span>
+                          </div>
+                          <div className="rounded-lg bg-white border border-purple-100 p-3">
+                            <p className="text-xs font-semibold text-gray-500 mb-1">متطلبات العميل</p>
+                            <p className="text-sm text-gray-800 whitespace-pre-line">
+                              {detail.buyer_requirements || 'لا توجد متطلبات مكتوبة.'}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
