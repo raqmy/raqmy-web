@@ -26,6 +26,8 @@ import {
   Upload,
   RefreshCw,
   FileText,
+  Paperclip,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -46,6 +48,25 @@ type ScopeInfo = {
 type ProfileStats = {
   favorites_count: number;
   viewed_products_count: number;
+};
+
+type ServiceOrderAttachmentRow = {
+  id: string;
+  service_order_detail_id: string;
+  order_id?: string | null;
+  order_item_id?: string | null;
+  product_id?: string | null;
+  uploader_id?: string | null;
+  uploader_role?: 'buyer' | 'seller' | string | null;
+  attachment_context?: 'requirements' | 'seller_delivery' | 'buyer_revision' | 'seller_note' | string | null;
+  file_name: string;
+  file_path: string;
+  file_url?: string | null;
+  signed_url?: string | null;
+  file_type?: string | null;
+  file_size?: number | null;
+  note?: string | null;
+  created_at?: string | null;
 };
 
 type ProfileOrderItem = {
@@ -79,6 +100,7 @@ type ProfileOrderItem = {
   accepted_at?: string | null;
   revision_requested_at?: string | null;
   revisions_used?: number | null;
+  service_attachments?: ServiceOrderAttachmentRow[];
 };
 
 type ProfileOrder = {
@@ -131,6 +153,9 @@ const AVATAR_BUCKET = 'avatars';
 const IDENTITY_BUCKET = 'identity-documents';
 const MAX_AVATAR_SIZE_MB = 5;
 const MAX_IDENTITY_FILE_SIZE_MB = 10;
+const SERVICE_ATTACHMENTS_BUCKET = 'service-order-attachments';
+const MAX_SERVICE_ATTACHMENT_SIZE_MB = 50;
+const MAX_SERVICE_ATTACHMENT_COUNT_PER_ACTION = 5;
 
 const getActiveStoreScopeSlug = () => {
   try {
@@ -210,6 +235,49 @@ const getServiceStatusColor = (status?: string | null) => {
     default:
       return 'bg-purple-100 text-purple-700 border-purple-200';
   }
+};
+
+const sanitizeServiceAttachmentFileName = (fileName: string) => {
+  return fileName
+    .replace(/[\\/]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9._-\u0600-\u06FF]/g, '')
+    .slice(0, 120) || `file-${Date.now()}`;
+};
+
+const formatServiceAttachmentSize = (bytes?: number | null) => {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) return '';
+  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const isAllowedServiceAttachmentFile = (file: File) => {
+  const allowedTypes = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'application/pdf',
+    'application/zip',
+    'application/x-zip-compressed',
+    'text/plain',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  ];
+
+  return allowedTypes.includes(file.type) || /\.(jpg|jpeg|png|webp|gif|pdf|zip|txt|doc|docx|xls|xlsx|ppt|pptx)$/i.test(file.name);
+};
+
+const getServiceAttachmentsByContext = (
+  item: Pick<ProfileOrderItem, 'service_attachments'>,
+  context: ServiceOrderAttachmentRow['attachment_context']
+) => {
+  return (item.service_attachments || []).filter((attachment) => attachment.attachment_context === context);
 };
 
 
@@ -429,6 +497,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [serviceActionLoading, setServiceActionLoading] = useState<string | null>(null);
   const [serviceMessage, setServiceMessage] = useState('');
   const [revisionNotes, setRevisionNotes] = useState<Record<string, string>>({});
+  const [revisionFiles, setRevisionFiles] = useState<Record<string, File[]>>({});
 
   const [favorites, setFavorites] = useState<ProfileListedProduct[]>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
@@ -601,6 +670,180 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       setIdentityFrontFileName('');
       setIdentityBackFileName('');
     }
+  };
+
+  const fetchServiceAttachmentsByDetailIds = async (detailIds: string[]) => {
+    const cleanIds = Array.from(new Set(detailIds.filter(Boolean)));
+    const attachmentsMap = new Map<string, ServiceOrderAttachmentRow[]>();
+
+    if (cleanIds.length === 0) return attachmentsMap;
+
+    const { data, error } = await supabase
+      .from('service_order_attachments')
+      .select('*')
+      .in('service_order_detail_id', cleanIds)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching service order attachments:', error);
+      return attachmentsMap;
+    }
+
+    const signedRows = await Promise.all(
+      ((data || []) as ServiceOrderAttachmentRow[]).map(async (attachment) => {
+        let signedUrl = attachment.file_url || null;
+
+        if (!signedUrl && attachment.file_path) {
+          const { data: signedData, error: signedError } = await supabase.storage
+            .from(SERVICE_ATTACHMENTS_BUCKET)
+            .createSignedUrl(attachment.file_path, 60 * 60);
+
+          if (!signedError) {
+            signedUrl = signedData?.signedUrl || null;
+          }
+        }
+
+        return {
+          ...attachment,
+          signed_url: signedUrl,
+        };
+      })
+    );
+
+    for (const attachment of signedRows) {
+      const key = String(attachment.service_order_detail_id || '');
+      if (!key) continue;
+      attachmentsMap.set(key, [...(attachmentsMap.get(key) || []), attachment]);
+    }
+
+    return attachmentsMap;
+  };
+
+  const handleRevisionFilesSelected = (serviceDetailId: string, selectedFiles: FileList | null) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+
+    setServiceMessage('');
+
+    const files = Array.from(selectedFiles);
+    const currentFiles = revisionFiles[serviceDetailId] || [];
+    const nextFiles = [...currentFiles];
+
+    for (const file of files) {
+      if (nextFiles.length >= MAX_SERVICE_ATTACHMENT_COUNT_PER_ACTION) {
+        setServiceMessage(`يمكن إرفاق ${MAX_SERVICE_ATTACHMENT_COUNT_PER_ACTION} ملفات كحد أقصى مع طلب التعديل.`);
+        break;
+      }
+
+      if (file.size > MAX_SERVICE_ATTACHMENT_SIZE_MB * 1024 * 1024) {
+        setServiceMessage(`حجم الملف "${file.name}" أكبر من ${MAX_SERVICE_ATTACHMENT_SIZE_MB}MB.`);
+        continue;
+      }
+
+      if (!isAllowedServiceAttachmentFile(file)) {
+        setServiceMessage(`نوع الملف "${file.name}" غير مدعوم.`);
+        continue;
+      }
+
+      nextFiles.push(file);
+    }
+
+    setRevisionFiles((current) => ({
+      ...current,
+      [serviceDetailId]: nextFiles,
+    }));
+  };
+
+  const removeRevisionFile = (serviceDetailId: string, fileIndex: number) => {
+    setRevisionFiles((current) => ({
+      ...current,
+      [serviceDetailId]: (current[serviceDetailId] || []).filter((_, index) => index !== fileIndex),
+    }));
+  };
+
+  const uploadServiceAttachments = async (
+    item: ProfileOrderItem,
+    files: File[],
+    context: 'buyer_revision'
+  ) => {
+    if (!user?.id || !item.service_detail_id || files.length === 0) return;
+
+    const attachmentRows = [];
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const safeName = sanitizeServiceAttachmentFileName(file.name);
+      const filePath = `${user.id}/${item.service_detail_id}/${Date.now()}-${index}-${safeName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(SERVICE_ATTACHMENTS_BUCKET)
+        .upload(filePath, file, {
+          upsert: false,
+          contentType: file.type || undefined,
+        });
+
+      if (uploadError) throw uploadError;
+
+      attachmentRows.push({
+        service_order_detail_id: item.service_detail_id,
+        order_id: null,
+        order_item_id: item.id || null,
+        product_id: item.product_id || null,
+        uploader_id: user.id,
+        uploader_role: 'buyer',
+        attachment_context: context,
+        file_name: file.name,
+        file_path: filePath,
+        file_url: null,
+        file_type: file.type || null,
+        file_size: file.size || null,
+        note: null,
+      });
+    }
+
+    if (attachmentRows.length > 0) {
+      const { error } = await supabase.from('service_order_attachments').insert(attachmentRows);
+      if (error) throw error;
+    }
+  };
+
+  const renderServiceAttachmentList = (
+    attachments: ServiceOrderAttachmentRow[],
+    emptyText?: string
+  ) => {
+    if (!attachments || attachments.length === 0) {
+      if (!emptyText) return null;
+      return <p className="mt-2 text-xs text-gray-500">{emptyText}</p>;
+    }
+
+    return (
+      <div className="mt-2 space-y-2">
+        {attachments.map((attachment) => {
+          const href = attachment.signed_url || attachment.file_url || '';
+          return (
+            <a
+              key={attachment.id}
+              href={href || undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs ${
+                href ? 'hover:border-blue-200 hover:bg-blue-50' : 'cursor-default opacity-70'
+              }`}
+              onClick={(event) => {
+                if (!href) event.preventDefault();
+              }}
+            >
+              <span className="flex min-w-0 items-center gap-2 text-gray-700">
+                <Paperclip className="w-4 h-4 flex-shrink-0" />
+                <span className="truncate">{attachment.file_name || 'مرفق'}</span>
+              </span>
+              <span className="flex-shrink-0 text-gray-500">
+                {formatServiceAttachmentSize(attachment.file_size)}
+              </span>
+            </a>
+          );
+        })}
+      </div>
+    );
   };
 
   const fetchProfileStats = async () => {
@@ -893,6 +1136,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
       const serviceDetailsByOrderItemId = new Map<string, any>();
       const serviceDetailsByOrderAndProduct = new Map<string, any>();
+      let serviceAttachmentsByDetailId = new Map<string, ServiceOrderAttachmentRow[]>();
 
       try {
         const { data: serviceRows, error: serviceError } = await supabase
@@ -921,6 +1165,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       } catch (serviceError) {
         console.error('Error fetching service order details:', serviceError);
       }
+
+      serviceAttachmentsByDetailId = await fetchServiceAttachmentsByDetailIds(
+        Array.from(serviceDetailsByOrderItemId.values()).map((detail: any) => String(detail.id || '')).filter(Boolean)
+      );
 
       const itemsByOrderId = new Map<string, ProfileOrderItem[]>();
 
@@ -982,6 +1230,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
             serviceDetails?.revisions_used === null || serviceDetails?.revisions_used === undefined
               ? 0
               : Number(serviceDetails.revisions_used),
+          service_attachments: serviceDetails?.id
+            ? serviceAttachmentsByDetailId.get(String(serviceDetails.id)) || []
+            : [],
         };
 
         if (!itemsByOrderId.has(item.order_id)) {
@@ -1879,7 +2130,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         if (updateError) throw updateError;
       }
 
+      await uploadServiceAttachments(
+        item,
+        revisionFiles[item.service_detail_id as string] || [],
+        'buyer_revision'
+      );
+
       setRevisionNotes((prev) => ({ ...prev, [item.service_detail_id as string]: '' }));
+      setRevisionFiles((prev) => ({ ...prev, [item.service_detail_id as string]: [] }));
       setServiceMessage('تم إرسال طلب التعديل للتاجر.');
       await fetchOrders();
     } catch (error: any) {
@@ -2630,6 +2888,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                               </p>
                                             )}
 
+                                            {renderServiceAttachmentList(
+                                              getServiceAttachmentsByContext(item, 'requirements'),
+                                              'لا توجد مرفقات من العميل مع المتطلبات.'
+                                            )}
+
                                             {item.service_requirements_note && (
                                               <div className="mt-3 pt-3 border-t border-purple-100">
                                                 <p className="text-xs font-semibold text-purple-800 mb-1">
@@ -2664,6 +2927,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                                   <span>فتح رابط التسليم</span>
                                                 </a>
                                               )}
+
+                                              {renderServiceAttachmentList(
+                                                getServiceAttachmentsByContext(item, 'seller_delivery'),
+                                                'لا توجد مرفقات تسليم مرفوعة من التاجر.'
+                                              )}
                                             </div>
                                           )}
 
@@ -2675,6 +2943,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                               <p className="text-sm text-orange-900 whitespace-pre-wrap leading-7">
                                                 {item.buyer_revision_note}
                                               </p>
+                                              {renderServiceAttachmentList(
+                                                getServiceAttachmentsByContext(item, 'buyer_revision'),
+                                                'لا توجد مرفقات مع طلب التعديل.'
+                                              )}
                                             </div>
                                           )}
 
@@ -2700,6 +2972,50 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                                 placeholder="اكتب ملاحظات التعديل هنا عند الحاجة..."
                                                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                                               />
+                                              <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-3">
+                                                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700">
+                                                  <Upload className="w-4 h-4" />
+                                                  <span>إرفاق صور أو ملفات للتعديل</span>
+                                                  <input
+                                                    type="file"
+                                                    multiple
+                                                    className="hidden"
+                                                    accept="image/*,.pdf,.zip,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                                                    onChange={(event) => {
+                                                      handleRevisionFilesSelected(item.service_detail_id as string, event.target.files);
+                                                      event.currentTarget.value = '';
+                                                    }}
+                                                  />
+                                                </label>
+
+                                                {(revisionFiles[item.service_detail_id] || []).length > 0 && (
+                                                  <div className="mt-2 space-y-2">
+                                                    {(revisionFiles[item.service_detail_id] || []).map((file, fileIndex) => (
+                                                      <div
+                                                        key={`${file.name}-${fileIndex}`}
+                                                        className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs"
+                                                      >
+                                                        <span className="flex min-w-0 items-center gap-2">
+                                                          <Paperclip className="w-4 h-4 flex-shrink-0" />
+                                                          <span className="truncate">{file.name}</span>
+                                                          <span className="flex-shrink-0 text-gray-500">
+                                                            {formatServiceAttachmentSize(file.size)}
+                                                          </span>
+                                                        </span>
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => removeRevisionFile(item.service_detail_id as string, fileIndex)}
+                                                          className="text-red-600 hover:text-red-700"
+                                                          aria-label="حذف المرفق"
+                                                        >
+                                                          <X className="w-4 h-4" />
+                                                        </button>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                )}
+                                              </div>
+
                                               <div className="flex flex-wrap gap-2">
                                                 <button
                                                   type="button"
