@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { X, Package, AlertCircle, Loader2 } from 'lucide-react';
+import { X, Package, AlertCircle, Loader2, Briefcase, Download, Clock3 } from 'lucide-react';
 import { supabase, Store } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { ProductImagesManager, ProductImage } from './ProductImagesManager';
 import { ProductAttachmentsManager, ProductAttachment } from './ProductAttachmentsManager';
-import { detectProductMerchantColumn } from '../../lib/productSchema';
+import { detectProductMerchantColumn, ProductKind, ProductDeliveryMode, PRODUCT_KIND_LABELS, PRODUCT_DELIVERY_MODE_LABELS } from '../../lib/productSchema';
 import { useCurrency } from '../../lib/currency';
 
 interface CreateProductModalProps {
@@ -24,6 +24,11 @@ const FALLBACK_COLUMNS = [
   'visibility', 'is_active', 'store_id',
   'user_id', 'merchant_id', 'seller_id',
   'currency',
+  'product_kind',
+  'delivery_mode',
+  'service_delivery_days',
+  'service_revisions_count',
+  'service_requirements_note',
   'quantity_limit',
   'quantity_sold'
 ];
@@ -97,6 +102,11 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     description: '',
     price: '',
     currency: 'SAR',
+    product_kind: 'digital_product' as ProductKind,
+    delivery_mode: 'instant' as ProductDeliveryMode,
+    service_delivery_days: '',
+    service_revisions_count: '',
+    service_requirements_note: '',
     store_id: '',
     visibility: 'marketplace',
     quantity_limit_enabled: false,
@@ -120,6 +130,11 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       description: '',
       price: '',
       currency: 'SAR',
+      product_kind: 'digital_product' as ProductKind,
+      delivery_mode: 'instant' as ProductDeliveryMode,
+      service_delivery_days: '',
+      service_revisions_count: '',
+      service_requirements_note: '',
       store_id: '',
       visibility: 'marketplace',
       quantity_limit_enabled: false,
@@ -163,13 +178,44 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     return value;
   };
 
+  const isDigitalService = formData.product_kind === 'digital_service';
+  const requiresInstantAttachments = !isDigitalService && formData.delivery_mode === 'instant';
+
+  const isServiceDeliveryDaysValid = () => {
+    if (!isDigitalService) return true;
+    if (!formData.service_delivery_days.trim()) return true;
+    const value = Number(formData.service_delivery_days);
+    return Number.isInteger(value) && value > 0;
+  };
+
+  const isServiceRevisionsCountValid = () => {
+    if (!isDigitalService) return true;
+    if (!formData.service_revisions_count.trim()) return true;
+    const value = Number(formData.service_revisions_count);
+    return Number.isInteger(value) && value >= 0;
+  };
+
+  const getNullablePositiveInteger = (value: string) => {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed <= 0) return null;
+    return parsed;
+  };
+
+  const getNullableNonNegativeInteger = (value: string) => {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 0) return null;
+    return parsed;
+  };
+
   const isFormValid = () => {
     return (
       formData.name.trim().length > 0 &&
       formData.price.trim().length > 0 &&
       images.length > 0 &&
-      attachments.length > 0 &&
-      isQuantityLimitValid()
+      (!requiresInstantAttachments || attachments.length > 0) &&
+      isQuantityLimitValid() &&
+      isServiceDeliveryDaysValid() &&
+      isServiceRevisionsCountValid()
     );
   };
 
@@ -238,7 +284,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     }
 
     if (!isFormValid()) {
-      setError('يرجى إدخال جميع الحقول المطلوبة وإضافة صورة ومرفق واحد على الأقل');
+      setError(isDigitalService ? 'يرجى إدخال الحقول المطلوبة وإضافة صورة واحدة على الأقل للخدمة' : 'يرجى إدخال جميع الحقول المطلوبة وإضافة صورة ومرفق واحد على الأقل');
       return;
     }
 
@@ -250,6 +296,16 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
     if (formData.quantity_limit_enabled && !isQuantityLimitValid()) {
       setError('حد المبيعات يجب أن يكون رقمًا صحيحًا أكبر من صفر، أو اختر بدون حد.');
+      return;
+    }
+
+    if (!isServiceDeliveryDaysValid()) {
+      setError('مدة تنفيذ الخدمة يجب أن تكون رقمًا صحيحًا أكبر من صفر، أو اتركها فارغة.');
+      return;
+    }
+
+    if (!isServiceRevisionsCountValid()) {
+      setError('عدد التعديلات يجب أن يكون صفرًا أو رقمًا صحيحًا أكبر من صفر، أو اتركه فارغًا.');
       return;
     }
 
@@ -302,6 +358,23 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
       productPayload[priceColumn] = price;
 
       if (availableColumns.includes('currency')) productPayload['currency'] = formData.currency;
+      if (availableColumns.includes('product_kind')) productPayload['product_kind'] = formData.product_kind;
+      if (availableColumns.includes('delivery_mode')) productPayload['delivery_mode'] = isDigitalService ? 'manual' : formData.delivery_mode;
+      if (availableColumns.includes('service_delivery_days')) {
+        productPayload['service_delivery_days'] = isDigitalService
+          ? getNullablePositiveInteger(formData.service_delivery_days)
+          : null;
+      }
+      if (availableColumns.includes('service_revisions_count')) {
+        productPayload['service_revisions_count'] = isDigitalService
+          ? getNullableNonNegativeInteger(formData.service_revisions_count)
+          : null;
+      }
+      if (availableColumns.includes('service_requirements_note')) {
+        productPayload['service_requirements_note'] = isDigitalService && formData.service_requirements_note.trim()
+          ? formData.service_requirements_note.trim()
+          : null;
+      }
       if (availableColumns.includes('visibility')) productPayload['visibility'] = formData.visibility;
       if (availableColumns.includes('is_active')) productPayload['is_active'] = true;
       if (availableColumns.includes('store_id')) productPayload['store_id'] = formData.store_id || null;
@@ -378,56 +451,60 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
       if (imagesError) throw imagesError;
 
-      const uploadedAttachments = await Promise.all(
-        attachments.map(async (att, index) => {
-          if (att.attachment_type === 'text') {
-            return {
-              product_id: createdProductId,
-              title: att.title,
-              attachment_type: att.attachment_type,
-              file_url: null,
-              text_content: att.text_content || null,
-              file_size: null,
-              display_order: index,
-            };
-          }
+      const uploadedAttachments = attachments.length > 0
+        ? await Promise.all(
+            attachments.map(async (att, index) => {
+              if (att.attachment_type === 'text') {
+                return {
+                  product_id: createdProductId,
+                  title: att.title,
+                  attachment_type: att.attachment_type,
+                  file_url: null,
+                  text_content: att.text_content || null,
+                  file_size: null,
+                  display_order: index,
+                };
+              }
 
-          if (!att.file) {
-            return {
-              product_id: createdProductId,
-              title: att.title,
-              attachment_type: att.attachment_type,
-              file_url: att.file_url || null,
-              text_content: null,
-              file_size: att.file_size || null,
-              display_order: index,
-            };
-          }
+              if (!att.file) {
+                return {
+                  product_id: createdProductId,
+                  title: att.title,
+                  attachment_type: att.attachment_type,
+                  file_url: att.file_url || null,
+                  text_content: null,
+                  file_size: att.file_size || null,
+                  display_order: index,
+                };
+              }
 
-          const { publicUrl } = await uploadToStorage({
-            bucket: PRODUCT_ATTACHMENTS_BUCKET,
-            userId: authUserId,
-            productId: createdProductId!,
-            file: att.file,
-          });
+              const { publicUrl } = await uploadToStorage({
+                bucket: PRODUCT_ATTACHMENTS_BUCKET,
+                userId: authUserId,
+                productId: createdProductId!,
+                file: att.file,
+              });
 
-          return {
-            product_id: createdProductId,
-            title: att.title,
-            attachment_type: att.attachment_type,
-            file_url: publicUrl,
-            text_content: null,
-            file_size: att.file.size,
-            display_order: index,
-          };
-        })
-      );
+              return {
+                product_id: createdProductId,
+                title: att.title,
+                attachment_type: att.attachment_type,
+                file_url: publicUrl,
+                text_content: null,
+                file_size: att.file.size,
+                display_order: index,
+              };
+            })
+          )
+        : [];
 
-      const { error: attachmentsError } = await supabase
-        .from('product_attachments')
-        .insert(uploadedAttachments);
+      if (uploadedAttachments.length > 0) {
+        const { error: attachmentsError } = await supabase
+          .from('product_attachments')
+          .insert(uploadedAttachments);
 
-      if (attachmentsError) throw attachmentsError;
+        if (attachmentsError) throw attachmentsError;
+      }
 
       onSuccess();
       onClose();
@@ -515,6 +592,133 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
               />
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <button
+                type="button"
+                onClick={() =>
+                  setFormData({
+                    ...formData,
+                    product_kind: 'digital_product',
+                    delivery_mode: 'instant',
+                    service_delivery_days: '',
+                    service_revisions_count: '',
+                    service_requirements_note: '',
+                  })
+                }
+                className={`rounded-xl border p-4 text-right transition-colors ${
+                  formData.product_kind === 'digital_product'
+                    ? 'border-blue-600 bg-blue-50 text-blue-800'
+                    : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-bold mb-1">
+                  <Download className="w-5 h-5" />
+                  {PRODUCT_KIND_LABELS.digital_product}
+                </div>
+                <p className="text-xs leading-6">ملف أو قالب أو محتوى جاهز يحصل عليه العميل بعد الدفع.</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setFormData({
+                    ...formData,
+                    product_kind: 'digital_service',
+                    delivery_mode: 'manual',
+                  })
+                }
+                className={`rounded-xl border p-4 text-right transition-colors ${
+                  formData.product_kind === 'digital_service'
+                    ? 'border-purple-600 bg-purple-50 text-purple-800'
+                    : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-bold mb-1">
+                  <Briefcase className="w-5 h-5" />
+                  {PRODUCT_KIND_LABELS.digital_service}
+                </div>
+                <p className="text-xs leading-6">خدمة ينفذها التاجر بعد الشراء مثل تصميم أو إعداد أو استشارة.</p>
+              </button>
+            </div>
+
+            {!isDigitalService && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <label className="block text-sm font-medium text-gray-700 mb-3">طريقة تسليم المنتج</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, delivery_mode: 'instant' })}
+                    className={`rounded-lg border px-4 py-3 text-sm font-semibold transition-colors ${
+                      formData.delivery_mode === 'instant'
+                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {PRODUCT_DELIVERY_MODE_LABELS.instant}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, delivery_mode: 'manual' })}
+                    className={`rounded-lg border px-4 py-3 text-sm font-semibold transition-colors ${
+                      formData.delivery_mode === 'manual'
+                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {PRODUCT_DELIVERY_MODE_LABELS.manual}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {isDigitalService && (
+              <div className="rounded-xl border border-purple-100 bg-purple-50 p-4 space-y-4">
+                <div className="flex items-center gap-2 font-bold text-purple-900">
+                  <Clock3 className="w-5 h-5" />
+                  إعدادات الخدمة الرقمية
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">مدة التنفيذ بالأيام</label>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={formData.service_delivery_days}
+                      onChange={(e) => setFormData({ ...formData, service_delivery_days: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      placeholder="مثال: 3"
+                      dir="ltr"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">عدد التعديلات المشمولة</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={formData.service_revisions_count}
+                      onChange={(e) => setFormData({ ...formData, service_revisions_count: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      placeholder="مثال: 2"
+                      dir="ltr"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات ومتطلبات الخدمة</label>
+                  <textarea
+                    value={formData.service_requirements_note}
+                    onChange={(e) => setFormData({ ...formData, service_requirements_note: e.target.value })}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="مثال: بعد الشراء سيحتاج العميل إلى إرسال الألوان، النصوص، الشعار، والمقاسات المطلوبة."
+                  />
+                  <p className="text-xs text-purple-700 mt-2">هذه الملاحظة تساعد العميل يعرف ماذا سيجهز بعد شراء الخدمة.</p>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -561,8 +765,8 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">3. مرفقات المنتج الرقمي</h3>
-              <p className="text-sm text-gray-500 mt-1">المحتوى الذي سيحصل عليه العميل بعد الشراء</p>
+              <h3 className="text-lg font-bold text-gray-900">3. {isDigitalService ? 'مرفقات اختيارية للخدمة' : 'مرفقات المنتج الرقمي'}</h3>
+              <p className="text-sm text-gray-500 mt-1">{isDigitalService ? 'يمكنك إضافة ملف تعريفي أو تعليمات اختيارية، ولا يشترط وجود مرفق للخدمة.' : 'المحتوى الذي سيحصل عليه العميل بعد الشراء'}</p>
             </div>
 
             <ProductAttachmentsManager attachments={attachments} onChange={setAttachments} />
@@ -677,7 +881,9 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                 {!formData.name.trim() && <li>• إدخال اسم المنتج</li>}
                 {!formData.price.trim() && <li>• إدخال السعر</li>}
                 {images.length === 0 && <li>• إضافة صورة واحدة على الأقل</li>}
-                {attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل</li>}
+                {requiresInstantAttachments && attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل للمنتج الفوري</li>}
+                {!isServiceDeliveryDaysValid() && <li>• إدخال مدة تنفيذ صحيحة للخدمة</li>}
+                {!isServiceRevisionsCountValid() && <li>• إدخال عدد تعديلات صحيح للخدمة</li>}
                 {formData.quantity_limit_enabled && !isQuantityLimitValid() && (
                   <li>• إدخال حد مبيعات صحيح أكبر من صفر</li>
                 )}
@@ -704,7 +910,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                   <span>جاري الإضافة...</span>
                 </>
               ) : (
-                'إضافة المنتج'
+                'إضافة العرض'
               )}
             </button>
           </div>
