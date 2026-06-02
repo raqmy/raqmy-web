@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   FileText,
   Download,
+  Upload,
   Paperclip,
   X,
   Search,
@@ -152,6 +153,25 @@ interface EarningsOrderMeta {
   couponAmount?: number;
 }
 
+interface ServiceOrderAttachmentRow {
+  id: string;
+  service_order_detail_id: string;
+  order_id?: string | null;
+  order_item_id?: string | null;
+  product_id?: string | null;
+  uploader_id?: string | null;
+  uploader_role?: 'buyer' | 'seller' | string | null;
+  attachment_context?: 'requirements' | 'seller_delivery' | 'buyer_revision' | 'seller_note' | string | null;
+  file_name: string;
+  file_path: string;
+  file_url?: string | null;
+  signed_url?: string | null;
+  file_type?: string | null;
+  file_size?: number | null;
+  note?: string | null;
+  created_at?: string | null;
+}
+
 interface SellerOrderItemRow {
   id: string;
   order_id: string;
@@ -221,6 +241,7 @@ interface ServiceOrderDetailRow {
   delivery_url?: string | null;
   revision_request?: string | null;
   revisions_used?: number | null;
+  service_attachments?: ServiceOrderAttachmentRow[];
 }
 
 type NormalizedProduct = Product & {
@@ -248,6 +269,9 @@ type SellerDashboardTab =
 const FALLBACK_MIN_WITHDRAWAL_AMOUNT = 10;
 const WITHDRAWAL_PROOFS_BUCKET = 'withdrawal-proofs';
 const STORE_IMAGES_BUCKET = 'store-images';
+const SERVICE_ATTACHMENTS_BUCKET = 'service-order-attachments';
+const MAX_SERVICE_ATTACHMENT_SIZE_MB = 50;
+const MAX_SERVICE_ATTACHMENT_COUNT_PER_ACTION = 5;
 const FINANCIAL_CURRENCY_NOTE = 'يتم احتساب الأرباح والسحب بالريال السعودي.';
 const SELLER_DASHBOARD_BASE_PATH = '/seller-dashboard';
 const SELLER_DASHBOARD_TAB_PATHS: Record<SellerDashboardTab, string> = {
@@ -380,6 +404,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [serviceActionError, setServiceActionError] = useState('');
   const [serviceActionSuccess, setServiceActionSuccess] = useState('');
   const [serviceDeliveryForms, setServiceDeliveryForms] = useState<Record<string, { note: string; fileUrl: string }>>({});
+  const [serviceDeliveryFiles, setServiceDeliveryFiles] = useState<Record<string, File[]>>({});
 
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequestRow | null>(null);
   const [showWithdrawalDetails, setShowWithdrawalDetails] = useState(false);
@@ -625,6 +650,220 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   const safeArray = <T,>(v: T[] | null | undefined): T[] => (Array.isArray(v) ? v : []);
+
+  const sanitizeServiceAttachmentFileName = (fileName: string) => {
+    return fileName
+      .replace(/[\\/]/g, '-')
+      .replace(/\s+/g, '-')
+      .replace(/[^a-zA-Z0-9._-\u0600-\u06FF]/g, '')
+      .slice(0, 120) || `file-${Date.now()}`;
+  };
+
+  const formatServiceAttachmentSize = (bytes?: number | null) => {
+    const size = Number(bytes || 0);
+    if (!Number.isFinite(size) || size <= 0) return '';
+    if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const isAllowedServiceAttachmentFile = (file: File) => {
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'application/pdf',
+      'application/zip',
+      'application/x-zip-compressed',
+      'text/plain',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ];
+
+    return allowedTypes.includes(file.type) || /\.(jpg|jpeg|png|webp|gif|pdf|zip|txt|doc|docx|xls|xlsx|ppt|pptx)$/i.test(file.name);
+  };
+
+  const getServiceAttachmentsByContext = (
+    detail: ServiceOrderDetailRow | null | undefined,
+    context: ServiceOrderAttachmentRow['attachment_context']
+  ) => {
+    return (detail?.service_attachments || []).filter((attachment) => attachment.attachment_context === context);
+  };
+
+  const fetchServiceAttachmentsByDetailIds = async (detailIds: string[]) => {
+    const cleanIds = Array.from(new Set(detailIds.filter(Boolean)));
+    const attachmentsMap = new Map<string, ServiceOrderAttachmentRow[]>();
+
+    if (cleanIds.length === 0) return attachmentsMap;
+
+    const { data, error } = await supabase
+      .from('service_order_attachments')
+      .select('*')
+      .in('service_order_detail_id', cleanIds)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching service order attachments:', error);
+      return attachmentsMap;
+    }
+
+    const signedRows = await Promise.all(
+      ((data || []) as ServiceOrderAttachmentRow[]).map(async (attachment) => {
+        let signedUrl = attachment.file_url || null;
+
+        if (!signedUrl && attachment.file_path) {
+          const { data: signedData, error: signedError } = await supabase.storage
+            .from(SERVICE_ATTACHMENTS_BUCKET)
+            .createSignedUrl(attachment.file_path, 60 * 60);
+
+          if (!signedError) {
+            signedUrl = signedData?.signedUrl || null;
+          }
+        }
+
+        return {
+          ...attachment,
+          signed_url: signedUrl,
+        };
+      })
+    );
+
+    for (const attachment of signedRows) {
+      const key = String(attachment.service_order_detail_id || '');
+      if (!key) continue;
+      attachmentsMap.set(key, [...(attachmentsMap.get(key) || []), attachment]);
+    }
+
+    return attachmentsMap;
+  };
+
+  const handleServiceDeliveryFilesSelected = (detailId: string, selectedFiles: FileList | null) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+
+    setServiceActionError('');
+    setServiceActionSuccess('');
+
+    const files = Array.from(selectedFiles);
+    const currentFiles = serviceDeliveryFiles[detailId] || [];
+    const nextFiles = [...currentFiles];
+
+    for (const file of files) {
+      if (nextFiles.length >= MAX_SERVICE_ATTACHMENT_COUNT_PER_ACTION) {
+        setServiceActionError(`يمكن إرفاق ${MAX_SERVICE_ATTACHMENT_COUNT_PER_ACTION} ملفات كحد أقصى عند التسليم.`);
+        break;
+      }
+
+      if (file.size > MAX_SERVICE_ATTACHMENT_SIZE_MB * 1024 * 1024) {
+        setServiceActionError(`حجم الملف "${file.name}" أكبر من ${MAX_SERVICE_ATTACHMENT_SIZE_MB}MB.`);
+        continue;
+      }
+
+      if (!isAllowedServiceAttachmentFile(file)) {
+        setServiceActionError(`نوع الملف "${file.name}" غير مدعوم.`);
+        continue;
+      }
+
+      nextFiles.push(file);
+    }
+
+    setServiceDeliveryFiles((current) => ({
+      ...current,
+      [detailId]: nextFiles,
+    }));
+  };
+
+  const removeServiceDeliveryFile = (detailId: string, fileIndex: number) => {
+    setServiceDeliveryFiles((current) => ({
+      ...current,
+      [detailId]: (current[detailId] || []).filter((_, index) => index !== fileIndex),
+    }));
+  };
+
+  const uploadServiceDeliveryAttachments = async (detail: ServiceOrderDetailRow, files: File[]) => {
+    if (!profile?.id || !detail?.id || files.length === 0) return;
+
+    const attachmentRows = [];
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const safeName = sanitizeServiceAttachmentFileName(file.name);
+      const filePath = `${profile.id}/${detail.id}/${Date.now()}-${index}-${safeName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(SERVICE_ATTACHMENTS_BUCKET)
+        .upload(filePath, file, {
+          upsert: false,
+          contentType: file.type || undefined,
+        });
+
+      if (uploadError) throw uploadError;
+
+      attachmentRows.push({
+        service_order_detail_id: detail.id,
+        order_id: detail.order_id || null,
+        order_item_id: detail.order_item_id || null,
+        product_id: detail.product_id || null,
+        uploader_id: profile.id,
+        uploader_role: 'seller',
+        attachment_context: 'seller_delivery',
+        file_name: file.name,
+        file_path: filePath,
+        file_url: null,
+        file_type: file.type || null,
+        file_size: file.size || null,
+        note: null,
+      });
+    }
+
+    if (attachmentRows.length > 0) {
+      const { error } = await supabase.from('service_order_attachments').insert(attachmentRows);
+      if (error) throw error;
+    }
+  };
+
+  const renderServiceAttachmentList = (
+    attachments: ServiceOrderAttachmentRow[],
+    emptyText?: string
+  ) => {
+    if (!attachments || attachments.length === 0) {
+      if (!emptyText) return null;
+      return <p className="mt-2 text-xs text-gray-500">{emptyText}</p>;
+    }
+
+    return (
+      <div className="mt-2 space-y-2">
+        {attachments.map((attachment) => {
+          const href = attachment.signed_url || attachment.file_url || '';
+          return (
+            <a
+              key={attachment.id}
+              href={href || undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs ${
+                href ? 'hover:border-blue-200 hover:bg-blue-50' : 'cursor-default opacity-70'
+              }`}
+              onClick={(event) => {
+                if (!href) event.preventDefault();
+              }}
+            >
+              <span className="flex min-w-0 items-center gap-2 text-gray-700">
+                <Paperclip className="w-4 h-4 flex-shrink-0" />
+                <span className="truncate">{attachment.file_name || 'مرفق'}</span>
+              </span>
+              <span className="flex-shrink-0 text-gray-500">
+                {formatServiceAttachmentSize(attachment.file_size)}
+              </span>
+            </a>
+          );
+        })}
+      </div>
+    );
+  };
 
   const isProductSoftDeleted = (product: any) => {
     return String(product?.status || '').toLowerCase() === 'deleted';
@@ -1329,12 +1568,22 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     const form = serviceDeliveryForms[detailId] || { note: '', fileUrl: '' };
     const deliveryNote = form.note.trim();
     const deliveryUrl = form.fileUrl.trim();
+    const detail =
+      selectedOrder?.items
+        .map((item) => item.service_detail)
+        .find((serviceDetail) => serviceDetail?.id === detailId) || null;
+    const files = serviceDeliveryFiles[detailId] || [];
 
     setServiceActionError('');
     setServiceActionSuccess('');
 
-    if (!deliveryNote && !deliveryUrl) {
-      setServiceActionError('اكتب رسالة التسليم أو ضع رابط ملف/نتيجة الخدمة قبل التسليم.');
+    if (!deliveryNote && !deliveryUrl && files.length === 0) {
+      setServiceActionError('اكتب رسالة التسليم أو ضع رابط ملف/نتيجة الخدمة أو أرفق ملف قبل التسليم.');
+      return;
+    }
+
+    if (!detail) {
+      setServiceActionError('تعذر العثور على تفاصيل الخدمة لهذا الطلب.');
       return;
     }
 
@@ -1349,11 +1598,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       if (error) throw error;
 
+      await uploadServiceDeliveryAttachments(detail, files);
+
       setServiceActionSuccess('تم تسليم الخدمة للعميل بنجاح.');
       setServiceDeliveryForms((prev) => ({
         ...prev,
         [detailId]: { note: '', fileUrl: '' },
       }));
+      setServiceDeliveryFiles((prev) => ({ ...prev, [detailId]: [] }));
       await fetchOrdersData();
     } catch (error: any) {
       console.error('seller_update_service_delivery error:', error);
@@ -1468,10 +1720,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         }
       }
 
+      const serviceAttachmentsByDetailId = await fetchServiceAttachmentsByDetailIds(
+        serviceDetailsRows.map((detail) => String(detail?.id || '')).filter(Boolean)
+      );
+
       const serviceDetailByOrderItemId: Record<string, ServiceOrderDetailRow> = {};
       const serviceDetailByOrderAndProductId: Record<string, ServiceOrderDetailRow> = {};
 
       for (const detail of serviceDetailsRows) {
+        if (detail?.id) {
+          detail.service_attachments = serviceAttachmentsByDetailId.get(String(detail.id)) || [];
+        }
+
         if (detail?.order_item_id) {
           serviceDetailByOrderItemId[detail.order_item_id] = detail;
         }
@@ -3829,6 +4089,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                           <p className="whitespace-pre-line rounded-lg bg-white p-3 text-sm text-gray-700 border border-purple-100">
                                             {requirementText || 'لم يكتب العميل تفاصيل واضحة.'}
                                           </p>
+                                          {renderServiceAttachmentList(
+                                            getServiceAttachmentsByContext(detail, 'requirements'),
+                                            'لا توجد مرفقات من العميل مع المتطلبات.'
+                                          )}
                                         </div>
 
                                         {detail && item.service_revisions_count !== null && item.service_revisions_count !== undefined && (
@@ -3845,6 +4109,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                             <p className="whitespace-pre-line rounded-lg bg-white p-3 text-sm text-gray-700 border border-orange-100">
                                               {revisionText}
                                             </p>
+                                            {renderServiceAttachmentList(
+                                              getServiceAttachmentsByContext(detail, 'buyer_revision'),
+                                              'لا توجد مرفقات مع طلب التعديل.'
+                                            )}
                                           </div>
                                         )}
 
@@ -3866,6 +4134,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                                 <LinkIcon className="w-4 h-4" />
                                                 فتح رابط التسليم
                                               </a>
+                                            )}
+                                            {renderServiceAttachmentList(
+                                              getServiceAttachmentsByContext(detail, 'seller_delivery'),
+                                              'لا توجد مرفقات تسليم مرفوعة.'
                                             )}
                                           </div>
                                         ) : null}
@@ -3918,6 +4190,50 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                                   className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                                                   placeholder="رابط ملف التسليم إن وجد: Google Drive / Canva / ملف..."
                                                 />
+                                                <div className="rounded-lg border border-dashed border-purple-200 bg-purple-50/60 p-3">
+                                                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700">
+                                                    <Upload className="w-4 h-4" />
+                                                    <span>إرفاق ملفات التسليم</span>
+                                                    <input
+                                                      type="file"
+                                                      multiple
+                                                      className="hidden"
+                                                      accept="image/*,.pdf,.zip,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                                                      onChange={(event) => {
+                                                        handleServiceDeliveryFilesSelected(detailId, event.target.files);
+                                                        event.currentTarget.value = '';
+                                                      }}
+                                                    />
+                                                  </label>
+
+                                                  {(serviceDeliveryFiles[detailId] || []).length > 0 && (
+                                                    <div className="mt-2 space-y-2">
+                                                      {(serviceDeliveryFiles[detailId] || []).map((file, fileIndex) => (
+                                                        <div
+                                                          key={`${file.name}-${fileIndex}`}
+                                                          className="flex items-center justify-between gap-2 rounded-lg border border-purple-100 bg-white px-3 py-2 text-xs"
+                                                        >
+                                                          <span className="flex min-w-0 items-center gap-2">
+                                                            <Paperclip className="w-4 h-4 flex-shrink-0" />
+                                                            <span className="truncate">{file.name}</span>
+                                                            <span className="flex-shrink-0 text-gray-500">
+                                                              {formatServiceAttachmentSize(file.size)}
+                                                            </span>
+                                                          </span>
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => removeServiceDeliveryFile(detailId, fileIndex)}
+                                                            className="text-red-600 hover:text-red-700"
+                                                            aria-label="حذف المرفق"
+                                                          >
+                                                            <X className="w-4 h-4" />
+                                                          </button>
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  )}
+                                                </div>
+
                                                 <button
                                                   type="button"
                                                   onClick={() => handleDeliverService(detailId)}
