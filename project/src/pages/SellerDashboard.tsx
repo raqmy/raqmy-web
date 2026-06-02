@@ -190,7 +190,36 @@ interface SellerOrderUI extends SellerOrderRow {
     product_name: string;
     quantity: number;
     amount: number;
+    product_kind?: string | null;
+    delivery_mode?: string | null;
+    service_delivery_days?: number | null;
+    service_revisions_count?: number | null;
+    service_detail?: ServiceOrderDetailRow | null;
   }>;
+}
+
+interface ServiceOrderDetailRow {
+  id: string;
+  order_id: string;
+  order_item_id: string | null;
+  product_id: string | null;
+  buyer_id: string | null;
+  seller_id: string | null;
+  buyer_requirements: string | null;
+  seller_notes?: string | null;
+  service_status?: string | null;
+  delivered_at?: string | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  seller_delivery_note?: string | null;
+  seller_delivery_file_url?: string | null;
+  accepted_at?: string | null;
+  revision_requested_at?: string | null;
+  buyer_revision_note?: string | null;
+  delivery_message?: string | null;
+  delivery_url?: string | null;
+  revision_request?: string | null;
 }
 
 type NormalizedProduct = Product & {
@@ -234,7 +263,7 @@ const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
-const SELLER_DASHBOARD_CACHE_VERSION = 4;
+const SELLER_DASHBOARD_CACHE_VERSION = 6;
 const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
 
 const getSellerDashboardCacheKey = (profileId: string) => {
@@ -346,6 +375,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [ordersSortBy, setOrdersSortBy] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
   const [selectedOrder, setSelectedOrder] = useState<SellerOrderUI | null>(null);
   const [showOrderDetails, setShowOrderDetails] = useState(false);
+  const [serviceActionLoadingId, setServiceActionLoadingId] = useState<string | null>(null);
+  const [serviceActionError, setServiceActionError] = useState('');
+  const [serviceActionSuccess, setServiceActionSuccess] = useState('');
+  const [serviceDeliveryForms, setServiceDeliveryForms] = useState<Record<string, { note: string; fileUrl: string }>>({});
 
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequestRow | null>(null);
   const [showWithdrawalDetails, setShowWithdrawalDetails] = useState(false);
@@ -1197,6 +1230,119 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     return 'bg-gray-100 text-gray-700';
   };
 
+
+  const normalizeServiceStatus = (status: string | null | undefined) => {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'requirements_submitted' || normalized === 'pending_requirements') return 'requirements_submitted';
+    if (normalized === 'in_progress') return 'in_progress';
+    if (normalized === 'delivered') return 'delivered';
+    if (normalized === 'revision_requested') return 'revision_requested';
+    if (normalized === 'completed' || normalized === 'accepted') return 'completed';
+    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
+    return normalized || 'requirements_submitted';
+  };
+
+  const getServiceStatusLabel = (status: string | null | undefined) => {
+    const normalized = normalizeServiceStatus(status);
+    if (normalized === 'requirements_submitted') return 'تم إرسال المتطلبات';
+    if (normalized === 'in_progress') return 'قيد التنفيذ';
+    if (normalized === 'delivered') return 'تم التسليم بانتظار العميل';
+    if (normalized === 'revision_requested') return 'طلب العميل تعديل';
+    if (normalized === 'completed') return 'مكتملة';
+    if (normalized === 'cancelled') return 'ملغاة';
+    return 'تم إرسال المتطلبات';
+  };
+
+  const getServiceStatusClass = (status: string | null | undefined) => {
+    const normalized = normalizeServiceStatus(status);
+    if (normalized === 'requirements_submitted') return 'bg-purple-100 text-purple-700';
+    if (normalized === 'in_progress') return 'bg-blue-100 text-blue-700';
+    if (normalized === 'delivered') return 'bg-emerald-100 text-emerald-700';
+    if (normalized === 'revision_requested') return 'bg-orange-100 text-orange-700';
+    if (normalized === 'completed') return 'bg-green-100 text-green-700';
+    if (normalized === 'cancelled') return 'bg-red-100 text-red-700';
+    return 'bg-gray-100 text-gray-700';
+  };
+
+  const getServiceRequirementText = (detail: ServiceOrderDetailRow | null | undefined) => {
+    return String(detail?.buyer_requirements || '').trim();
+  };
+
+  const getServiceDeliveryNoteText = (detail: ServiceOrderDetailRow | null | undefined) => {
+    return String(detail?.seller_delivery_note || detail?.delivery_message || '').trim();
+  };
+
+  const getServiceDeliveryUrlText = (detail: ServiceOrderDetailRow | null | undefined) => {
+    return String(detail?.seller_delivery_file_url || detail?.delivery_url || '').trim();
+  };
+
+  const getServiceRevisionText = (detail: ServiceOrderDetailRow | null | undefined) => {
+    return String(detail?.buyer_revision_note || detail?.revision_request || '').trim();
+  };
+  const handleStartServiceWork = async (detailId: string) => {
+    if (!canPerformSellerAction()) return;
+
+    setServiceActionError('');
+    setServiceActionSuccess('');
+
+    try {
+      setServiceActionLoadingId(detailId);
+      const { error } = await supabase.rpc('seller_start_service_work', {
+        p_service_detail_id: detailId,
+      });
+
+      if (error) throw error;
+
+      setServiceActionSuccess('تم تحديث حالة الخدمة إلى قيد التنفيذ.');
+      await fetchOrdersData();
+    } catch (error: any) {
+      console.error('seller_start_service_work error:', error);
+      setServiceActionError(error?.message || 'تعذر بدء تنفيذ الخدمة حالياً.');
+    } finally {
+      setServiceActionLoadingId(null);
+    }
+  };
+
+  const handleDeliverService = async (detailId: string) => {
+    if (!canPerformSellerAction()) return;
+
+    const form = serviceDeliveryForms[detailId] || { note: '', fileUrl: '' };
+    const deliveryNote = form.note.trim();
+    const deliveryUrl = form.fileUrl.trim();
+
+    setServiceActionError('');
+    setServiceActionSuccess('');
+
+    if (!deliveryNote && !deliveryUrl) {
+      setServiceActionError('اكتب رسالة التسليم أو ضع رابط ملف/نتيجة الخدمة قبل التسليم.');
+      return;
+    }
+
+    try {
+      setServiceActionLoadingId(detailId);
+      const { error } = await supabase.rpc('seller_update_service_delivery', {
+        p_service_detail_id: detailId,
+        p_delivery_message: deliveryNote || null,
+        p_delivery_url: deliveryUrl || null,
+        p_seller_notes: null,
+      });
+
+      if (error) throw error;
+
+      setServiceActionSuccess('تم تسليم الخدمة للعميل بنجاح.');
+      setServiceDeliveryForms((prev) => ({
+        ...prev,
+        [detailId]: { note: '', fileUrl: '' },
+      }));
+      await fetchOrdersData();
+    } catch (error: any) {
+      console.error('seller_update_service_delivery error:', error);
+      setServiceActionError(error?.message || 'تعذر تسليم الخدمة حالياً.');
+    } finally {
+      setServiceActionLoadingId(null);
+    }
+  };
+
   const fetchOrdersData = async () => {
     if (!profile) return;
 
@@ -1268,6 +1414,53 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         }
       }
 
+      let serviceDetailsRows: ServiceOrderDetailRow[] = [];
+      if (orderIds.length > 0) {
+        try {
+          const { data: rpcServiceDetails, error: rpcServiceDetailsError } = await supabase.rpc(
+            'get_my_seller_service_order_details'
+          );
+
+          if (!rpcServiceDetailsError && Array.isArray(rpcServiceDetails)) {
+            const orderIdSet = new Set(orderIds);
+            serviceDetailsRows = (rpcServiceDetails as ServiceOrderDetailRow[]).filter((detail) => {
+              return detail?.order_id && orderIdSet.has(detail.order_id);
+            });
+          } else {
+            if (rpcServiceDetailsError) {
+              console.error('get_my_seller_service_order_details rpc error:', rpcServiceDetailsError);
+            }
+
+            const { data: directServiceDetails, error: directServiceDetailsError } = await supabase
+              .from('service_order_details')
+              .select('*')
+              .in('order_id', orderIds)
+              .eq('seller_id', profile.id);
+
+            if (directServiceDetailsError) {
+              console.error('service_order_details direct fetch error:', directServiceDetailsError);
+            } else {
+              serviceDetailsRows = safeArray(directServiceDetails) as ServiceOrderDetailRow[];
+            }
+          }
+        } catch (error) {
+          console.error('service_order_details fetch unexpected error:', error);
+        }
+      }
+
+      const serviceDetailByOrderItemId: Record<string, ServiceOrderDetailRow> = {};
+      const serviceDetailByOrderAndProductId: Record<string, ServiceOrderDetailRow> = {};
+
+      for (const detail of serviceDetailsRows) {
+        if (detail?.order_item_id) {
+          serviceDetailByOrderItemId[detail.order_item_id] = detail;
+        }
+
+        if (detail?.order_id && detail?.product_id) {
+          serviceDetailByOrderAndProductId[`${detail.order_id}:${detail.product_id}`] = detail;
+        }
+      }
+
       const itemsByOrder: Record<string, SellerOrderUI['items']> = {};
       for (const row of orderItemsRows) {
         const orderId = row?.order_id;
@@ -1277,14 +1470,30 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         const quantity = Number(row?.quantity || 1) || 1;
         const itemAmount = Number(row?.subtotal ?? row?.seller_amount ?? row?.price_at_time ?? product?.price ?? 0) || 0;
         const productName = row?.product_name || row?.product_title || product?.title || product?.name || 'منتج';
+        const productKind = normalizeProductKind(product?.product_kind || row?.product_kind);
+        const serviceDetail =
+          (row?.id ? serviceDetailByOrderItemId[row.id] : null) ||
+          (row?.product_id ? serviceDetailByOrderAndProductId[`${orderId}:${row.product_id}`] : null) ||
+          null;
 
         if (!itemsByOrder[orderId]) itemsByOrder[orderId] = [];
         itemsByOrder[orderId].push({
-          id: row?.id || `${orderId}-${row?.product_id || Math.random()}`,
+          id: row?.id || serviceDetail?.order_item_id || `${orderId}-${row?.product_id || Math.random()}`,
           product_id: row?.product_id || null,
           product_name: productName,
           quantity,
           amount: itemAmount,
+          product_kind: productKind,
+          delivery_mode: product?.delivery_mode ?? (productKind === 'digital_service' ? 'manual' : 'instant'),
+          service_delivery_days:
+            product?.service_delivery_days !== undefined && product?.service_delivery_days !== null
+              ? Number(product.service_delivery_days)
+              : null,
+          service_revisions_count:
+            product?.service_revisions_count !== undefined && product?.service_revisions_count !== null
+              ? Number(product.service_revisions_count)
+              : null,
+          service_detail: serviceDetail,
         });
       }
 
@@ -1300,6 +1509,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       });
 
       setSellerOrders(normalizedOrders);
+      setSelectedOrder((current) => {
+        if (!current) return current;
+        return normalizedOrders.find((order) => order.id === current.id) || current;
+      });
     } catch (error: any) {
       console.error('Error fetching seller orders:', error);
       setOrdersError(error?.message || 'حدث خطأ أثناء تحميل الطلبات');
@@ -3476,6 +3689,17 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   </div>
 
                   <div className="p-6 space-y-6">
+                    {serviceActionError && (
+                      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                        {serviceActionError}
+                      </div>
+                    )}
+                    {serviceActionSuccess && (
+                      <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+                        {serviceActionSuccess}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="rounded-xl bg-gray-50 p-4">
                         <p className="text-sm text-gray-500 mb-1">اسم العميل</p>
@@ -3505,17 +3729,185 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                             لا توجد عناصر ظاهرة لهذا الطلب.
                           </div>
                         ) : (
-                          selectedOrder.items.map((item) => (
-                            <div key={item.id} className="rounded-xl border border-gray-200 p-4 flex items-center justify-between gap-4">
-                              <div>
-                                <p className="font-bold text-gray-900">{item.product_name}</p>
-                                <p className="text-sm text-gray-500 mt-1">الكمية: {item.quantity}</p>
+                          selectedOrder.items.map((item) => {
+                            const isServiceItem =
+                              normalizeProductKind(item.product_kind) === 'digital_service' || Boolean(item.service_detail);
+                            const detail = item.service_detail || null;
+                            const detailId = detail?.id || '';
+                            const status = normalizeServiceStatus(detail?.service_status);
+                            const requirementText = getServiceRequirementText(detail);
+                            const deliveryNoteText = getServiceDeliveryNoteText(detail);
+                            const deliveryUrlText = getServiceDeliveryUrlText(detail);
+                            const revisionText = getServiceRevisionText(detail);
+                            const canStartWork =
+                              Boolean(detailId) &&
+                              (status === 'requirements_submitted' || status === 'revision_requested');
+                            const canDeliver =
+                              Boolean(detailId) &&
+                              (status === 'requirements_submitted' ||
+                                status === 'in_progress' ||
+                                status === 'revision_requested');
+                            const formValue = serviceDeliveryForms[detailId] || { note: '', fileUrl: '' };
+
+                            return (
+                              <div key={item.id} className="rounded-xl border border-gray-200 p-4 space-y-4">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="font-bold text-gray-900">{item.product_name}</p>
+                                      {isServiceItem && (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-1 text-xs font-semibold text-purple-700">
+                                          <Briefcase className="w-3 h-3" />
+                                          خدمة رقمية
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-sm text-gray-500 mt-1">الكمية: {item.quantity}</p>
+                                    {isServiceItem && (
+                                      <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-500">
+                                        {item.service_delivery_days ? (
+                                          <span className="rounded-full bg-gray-100 px-2 py-1">
+                                            مدة التنفيذ: {item.service_delivery_days} يوم
+                                          </span>
+                                        ) : null}
+                                        {item.service_revisions_count !== null &&
+                                        item.service_revisions_count !== undefined ? (
+                                          <span className="rounded-full bg-gray-100 px-2 py-1">
+                                            التعديلات: {item.service_revisions_count}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="text-lg font-bold text-blue-600">{formatCurrency(item.amount)}</p>
+                                    {isServiceItem && (
+                                      <span
+                                        className={`mt-2 inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${getServiceStatusClass(
+                                          detail?.service_status
+                                        )}`}
+                                      >
+                                        {getServiceStatusLabel(detail?.service_status)}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {isServiceItem && (
+                                  <div className="rounded-xl border border-purple-100 bg-purple-50 p-4 space-y-4">
+                                    {!detail ? (
+                                      <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+                                        هذه خدمة رقمية، لكن لم تصل تفاصيل تنفيذها لهذا الطلب. غالباً يحتاج تشغيل SQL الخاص
+                                        بدالة جلب تفاصيل الخدمات أو تحديث الطلبات.
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div>
+                                          <h5 className="text-sm font-bold text-purple-900 mb-2">متطلبات العميل</h5>
+                                          <p className="whitespace-pre-line rounded-lg bg-white p-3 text-sm text-gray-700 border border-purple-100">
+                                            {requirementText || 'لم يكتب العميل تفاصيل واضحة.'}
+                                          </p>
+                                        </div>
+
+                                        {revisionText && (
+                                          <div>
+                                            <h5 className="text-sm font-bold text-orange-700 mb-2">طلب التعديل من العميل</h5>
+                                            <p className="whitespace-pre-line rounded-lg bg-white p-3 text-sm text-gray-700 border border-orange-100">
+                                              {revisionText}
+                                            </p>
+                                          </div>
+                                        )}
+
+                                        {deliveryNoteText || deliveryUrlText ? (
+                                          <div>
+                                            <h5 className="text-sm font-bold text-green-700 mb-2">آخر تسليم مرسل للعميل</h5>
+                                            {deliveryNoteText && (
+                                              <p className="whitespace-pre-line rounded-lg bg-white p-3 text-sm text-gray-700 border border-green-100">
+                                                {deliveryNoteText}
+                                              </p>
+                                            )}
+                                            {deliveryUrlText && (
+                                              <a
+                                                href={deliveryUrlText}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
+                                              >
+                                                <LinkIcon className="w-4 h-4" />
+                                                فتح رابط التسليم
+                                              </a>
+                                            )}
+                                          </div>
+                                        ) : null}
+
+                                        {status !== 'completed' && status !== 'cancelled' && (
+                                          <div className="rounded-lg bg-white p-3 border border-purple-100 space-y-3">
+                                            <div className="flex flex-wrap gap-2">
+                                              {canStartWork && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleStartServiceWork(detailId)}
+                                                  disabled={serviceActionLoadingId === detailId}
+                                                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                                                >
+                                                  <Clock3 className="w-4 h-4" />
+                                                  {serviceActionLoadingId === detailId ? 'جاري التحديث...' : 'بدء تنفيذ الخدمة'}
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {canDeliver && (
+                                              <div className="space-y-3">
+                                                <textarea
+                                                  rows={3}
+                                                  value={formValue.note}
+                                                  onChange={(e) =>
+                                                    setServiceDeliveryForms((prev) => ({
+                                                      ...prev,
+                                                      [detailId]: {
+                                                        ...(prev[detailId] || { note: '', fileUrl: '' }),
+                                                        note: e.target.value,
+                                                      },
+                                                    }))
+                                                  }
+                                                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                                  placeholder="اكتب رسالة التسليم للعميل مثل: تم تنفيذ التصميم، وهذه التفاصيل النهائية..."
+                                                />
+                                                <input
+                                                  type="url"
+                                                  value={formValue.fileUrl}
+                                                  onChange={(e) =>
+                                                    setServiceDeliveryForms((prev) => ({
+                                                      ...prev,
+                                                      [detailId]: {
+                                                        ...(prev[detailId] || { note: '', fileUrl: '' }),
+                                                        fileUrl: e.target.value,
+                                                      },
+                                                    }))
+                                                  }
+                                                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                                  placeholder="رابط ملف التسليم إن وجد: Google Drive / Canva / ملف..."
+                                                />
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleDeliverService(detailId)}
+                                                  disabled={serviceActionLoadingId === detailId}
+                                                  className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-60"
+                                                >
+                                                  <Check className="w-4 h-4" />
+                                                  {serviceActionLoadingId === detailId ? 'جاري التسليم...' : 'تسليم الخدمة للعميل'}
+                                                </button>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                )}
                               </div>
-                              <div className="text-left">
-                                <p className="text-lg font-bold text-blue-600">{formatCurrency(item.amount)}</p>
-                              </div>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     </div>
