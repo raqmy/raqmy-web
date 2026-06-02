@@ -65,19 +65,6 @@ type ProfileOrderItem = {
   service_revisions_count?: number | null;
   service_requirements_note?: string | null;
   buyer_requirements?: string | null;
-  service_detail_id?: string | null;
-  service_status?: string | null;
-  seller_delivery_note?: string | null;
-  seller_delivery_file_url?: string | null;
-  seller_notes?: string | null;
-  buyer_revision_note?: string | null;
-  delivery_message?: string | null;
-  delivery_url?: string | null;
-  revision_request?: string | null;
-  delivered_at?: string | null;
-  completed_at?: string | null;
-  accepted_at?: string | null;
-  revision_requested_at?: string | null;
 };
 
 type ProfileOrder = {
@@ -165,50 +152,6 @@ const getDeliveryModeLabel = (value?: string | null, productKind?: string | null
   }
 
   return value === 'manual' ? 'يتم العمل عليه بعد الشراء' : 'فوري بعد الدفع';
-};
-
-const normalizeServiceStatus = (status?: string | null) => {
-  const value = String(status || '').trim().toLowerCase();
-  return value || 'requirements_submitted';
-};
-
-const getServiceStatusText = (status?: string | null) => {
-  switch (normalizeServiceStatus(status)) {
-    case 'requirements_submitted':
-    case 'pending_requirements':
-      return 'تم إرسال المتطلبات';
-    case 'in_progress':
-      return 'قيد التنفيذ';
-    case 'delivered':
-      return 'تم تسليم الخدمة';
-    case 'revision_requested':
-      return 'طلبت تعديل';
-    case 'completed':
-    case 'accepted':
-      return 'مكتملة';
-    case 'cancelled':
-      return 'ملغاة';
-    default:
-      return status || 'تم إرسال المتطلبات';
-  }
-};
-
-const getServiceStatusColor = (status?: string | null) => {
-  switch (normalizeServiceStatus(status)) {
-    case 'delivered':
-      return 'bg-green-100 text-green-700 border-green-200';
-    case 'completed':
-    case 'accepted':
-      return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-    case 'revision_requested':
-      return 'bg-orange-100 text-orange-700 border-orange-200';
-    case 'in_progress':
-      return 'bg-blue-100 text-blue-700 border-blue-200';
-    case 'cancelled':
-      return 'bg-gray-100 text-gray-700 border-gray-200';
-    default:
-      return 'bg-purple-100 text-purple-700 border-purple-200';
-  }
 };
 
 const productMatchesScope = (product: any, scope: ScopeInfo | null) => {
@@ -406,9 +349,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [orders, setOrders] = useState<ProfileOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
-  const [serviceActionLoading, setServiceActionLoading] = useState<string | null>(null);
-  const [serviceMessage, setServiceMessage] = useState('');
-  const [revisionNotes, setRevisionNotes] = useState<Record<string, string>>({});
 
   const [favorites, setFavorites] = useState<ProfileListedProduct[]>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
@@ -627,9 +567,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
           .in('order_id', orderIds);
 
         const items = rawItems || [];
-        const orderItemProductIds = Array.from(
-          new Set<string>(items.map((i: any) => String(i.product_id || '')).filter(Boolean))
-        );
+        const orderItemProductIds = [
+          ...new Set(items.map((i: any) => i.product_id).filter(Boolean)),
+        ];
         const { productsMap: orderProductsMap } = await fetchProductsMapByIds(orderItemProductIds);
 
         const validOrderIds = new Set<string>();
@@ -866,9 +806,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       if (itemsError) throw itemsError;
 
       const safeItems = rawItems || [];
-      const productIds = Array.from(
-        new Set<string>(safeItems.map((item: any) => String(item.product_id || '')).filter(Boolean))
-      );
+      const productIds = [...new Set(safeItems.map((item: any) => item.product_id).filter(Boolean))];
       const { productsMap, imageMap } = await fetchProductsMapByIds(productIds);
 
       const serviceDetailsByOrderItemId = new Map<string, any>();
@@ -878,7 +816,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         const { data: serviceRows, error: serviceError } = await supabase
           .from('service_order_details')
           .select(
-            'id, order_id, order_item_id, product_id, buyer_id, seller_id, buyer_requirements, seller_notes, service_status, seller_delivery_note, seller_delivery_file_url, buyer_revision_note, delivery_message, delivery_url, revision_request, delivered_at, completed_at, accepted_at, revision_requested_at, created_at, updated_at'
+            'id, order_id, order_item_id, product_id, buyer_id, seller_id, buyer_requirements, created_at, updated_at'
           )
           .in('order_id', orderIds);
 
@@ -942,22 +880,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
               : Number(product.service_revisions_count),
           service_requirements_note: product?.service_requirements_note || null,
           buyer_requirements: serviceDetails?.buyer_requirements || null,
-          service_detail_id: serviceDetails?.id || null,
-          service_status: serviceDetails?.service_status || null,
-          seller_delivery_note:
-            serviceDetails?.seller_delivery_note || serviceDetails?.delivery_message || null,
-          seller_delivery_file_url:
-            serviceDetails?.seller_delivery_file_url || serviceDetails?.delivery_url || null,
-          seller_notes: serviceDetails?.seller_notes || null,
-          buyer_revision_note:
-            serviceDetails?.buyer_revision_note || serviceDetails?.revision_request || null,
-          delivery_message: serviceDetails?.delivery_message || null,
-          delivery_url: serviceDetails?.delivery_url || null,
-          revision_request: serviceDetails?.revision_request || null,
-          delivered_at: serviceDetails?.delivered_at || null,
-          completed_at: serviceDetails?.completed_at || null,
-          accepted_at: serviceDetails?.accepted_at || null,
-          revision_requested_at: serviceDetails?.revision_requested_at || null,
         };
 
         if (!itemsByOrderId.has(item.order_id)) {
@@ -1771,92 +1693,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     }
   };
 
-  const handleAcceptServiceDelivery = async (item: ProfileOrderItem) => {
-    if (!item.service_detail_id) {
-      setServiceMessage('تعذر العثور على تفاصيل الخدمة لهذا الطلب.');
-      return;
-    }
-
-    setServiceActionLoading(`${item.service_detail_id}:accept`);
-    setServiceMessage('');
-
-    try {
-      const { error: rpcError } = await supabase.rpc('buyer_accept_service_delivery', {
-        p_service_detail_id: item.service_detail_id,
-      });
-
-      if (rpcError) {
-        const { error: updateError } = await supabase
-          .from('service_order_details')
-          .update({
-            service_status: 'completed',
-            completed_at: new Date().toISOString(),
-            accepted_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', item.service_detail_id);
-
-        if (updateError) throw updateError;
-      }
-
-      setServiceMessage('تم قبول الخدمة بنجاح.');
-      await fetchOrders();
-    } catch (error: any) {
-      console.error('Error accepting service delivery:', error);
-      setServiceMessage(error?.message || 'حدث خطأ أثناء قبول الخدمة.');
-    } finally {
-      setServiceActionLoading(null);
-    }
-  };
-
-  const handleRequestServiceRevision = async (item: ProfileOrderItem) => {
-    if (!item.service_detail_id) {
-      setServiceMessage('تعذر العثور على تفاصيل الخدمة لهذا الطلب.');
-      return;
-    }
-
-    const note = String(revisionNotes[item.service_detail_id] || '').trim();
-
-    if (!note) {
-      setServiceMessage('اكتب ملاحظات التعديل قبل إرسال الطلب.');
-      return;
-    }
-
-    setServiceActionLoading(`${item.service_detail_id}:revision`);
-    setServiceMessage('');
-
-    try {
-      const { error: rpcError } = await supabase.rpc('buyer_request_service_revision', {
-        p_service_detail_id: item.service_detail_id,
-        p_buyer_revision_note: note,
-      });
-
-      if (rpcError) {
-        const { error: updateError } = await supabase
-          .from('service_order_details')
-          .update({
-            service_status: 'revision_requested',
-            buyer_revision_note: note,
-            revision_request: note,
-            revision_requested_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', item.service_detail_id);
-
-        if (updateError) throw updateError;
-      }
-
-      setRevisionNotes((prev) => ({ ...prev, [item.service_detail_id as string]: '' }));
-      setServiceMessage('تم إرسال طلب التعديل للتاجر.');
-      await fetchOrders();
-    } catch (error: any) {
-      console.error('Error requesting service revision:', error);
-      setServiceMessage(error?.message || 'حدث خطأ أثناء طلب التعديل.');
-    } finally {
-      setServiceActionLoading(null);
-    }
-  };
-
   const canAccessFiles = (status: string) => ['paid', 'completed', 'delivered'].includes(status);
 
   const getStatusIcon = (status: string) => {
@@ -2399,12 +2235,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     </button>
                   </div>
 
-                  {serviceMessage && (
-                    <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                      {serviceMessage}
-                    </div>
-                  )}
-
                   {ordersLoading ? (
                     <div className="text-center py-12">
                       <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
@@ -2567,125 +2397,30 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                                       </div>
 
                                       {isServiceItem && (
-                                        <div className="space-y-3">
-                                          <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
-                                            <div className="flex items-center justify-between gap-3 mb-2">
-                                              <div className="flex items-center gap-2 text-purple-800 font-bold">
-                                                <FileText className="w-4 h-4" />
-                                                <span>تفاصيل تنفيذ الخدمة المرسلة</span>
-                                              </div>
-                                              <span
-                                                className={`rounded-full border px-3 py-1 text-xs font-semibold ${getServiceStatusColor(
-                                                  item.service_status
-                                                )}`}
-                                              >
-                                                {getServiceStatusText(item.service_status)}
-                                              </span>
-                                            </div>
-
-                                            {hasBuyerRequirements ? (
-                                              <p className="text-sm text-purple-900 whitespace-pre-wrap leading-7">
-                                                {item.buyer_requirements}
-                                              </p>
-                                            ) : (
-                                              <p className="text-sm text-purple-700">
-                                                لم يتم تسجيل تفاصيل تنفيذ لهذه الخدمة.
-                                              </p>
-                                            )}
-
-                                            {item.service_requirements_note && (
-                                              <div className="mt-3 pt-3 border-t border-purple-100">
-                                                <p className="text-xs font-semibold text-purple-800 mb-1">
-                                                  تعليمات التاجر:
-                                                </p>
-                                                <p className="text-xs text-purple-700 whitespace-pre-wrap leading-6">
-                                                  {item.service_requirements_note}
-                                                </p>
-                                              </div>
-                                            )}
+                                        <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+                                          <div className="flex items-center gap-2 mb-2 text-purple-800 font-bold">
+                                            <FileText className="w-4 h-4" />
+                                            <span>تفاصيل تنفيذ الخدمة المرسلة</span>
                                           </div>
 
-                                          {(item.seller_delivery_note || item.seller_delivery_file_url) && (
-                                            <div className="bg-green-50 border border-green-100 rounded-xl p-4">
-                                              <div className="flex items-center gap-2 mb-2 text-green-800 font-bold">
-                                                <CheckCircle className="w-4 h-4" />
-                                                <span>تسليم التاجر</span>
-                                              </div>
-                                              {item.seller_delivery_note && (
-                                                <p className="text-sm text-green-900 whitespace-pre-wrap leading-7 mb-2">
-                                                  {item.seller_delivery_note}
-                                                </p>
-                                              )}
-                                              {item.seller_delivery_file_url && (
-                                                <a
-                                                  href={item.seller_delivery_file_url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="inline-flex items-center gap-2 text-sm font-semibold text-green-700 hover:text-green-800"
-                                                >
-                                                  <Download className="w-4 h-4" />
-                                                  <span>فتح رابط التسليم</span>
-                                                </a>
-                                              )}
-                                            </div>
+                                          {hasBuyerRequirements ? (
+                                            <p className="text-sm text-purple-900 whitespace-pre-wrap leading-7">
+                                              {item.buyer_requirements}
+                                            </p>
+                                          ) : (
+                                            <p className="text-sm text-purple-700">
+                                              لم يتم تسجيل تفاصيل تنفيذ لهذه الخدمة.
+                                            </p>
                                           )}
 
-                                          {item.buyer_revision_note && (
-                                            <div className="bg-orange-50 border border-orange-100 rounded-xl p-4">
-                                              <p className="text-xs font-semibold text-orange-700 mb-1">
-                                                آخر طلب تعديل
+                                          {item.service_requirements_note && (
+                                            <div className="mt-3 pt-3 border-t border-purple-100">
+                                              <p className="text-xs font-semibold text-purple-800 mb-1">
+                                                تعليمات التاجر:
                                               </p>
-                                              <p className="text-sm text-orange-900 whitespace-pre-wrap leading-7">
-                                                {item.buyer_revision_note}
+                                              <p className="text-xs text-purple-700 whitespace-pre-wrap leading-6">
+                                                {item.service_requirements_note}
                                               </p>
-                                            </div>
-                                          )}
-
-                                          {normalizeServiceStatus(item.service_status) === 'delivered' && item.service_detail_id && (
-                                            <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
-                                              <p className="text-sm font-bold text-gray-900">
-                                                راجع التسليم، ثم اقبل الخدمة أو اطلب تعديل من التاجر.
-                                              </p>
-                                              <textarea
-                                                rows={3}
-                                                value={revisionNotes[item.service_detail_id] || ''}
-                                                onChange={(event) =>
-                                                  setRevisionNotes((prev) => ({
-                                                    ...prev,
-                                                    [item.service_detail_id as string]: event.target.value,
-                                                  }))
-                                                }
-                                                placeholder="اكتب ملاحظات التعديل هنا عند الحاجة..."
-                                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                              />
-                                              <div className="flex flex-wrap gap-2">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleAcceptServiceDelivery(item)}
-                                                  disabled={serviceActionLoading === `${item.service_detail_id}:accept`}
-                                                  className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
-                                                >
-                                                  <CheckCircle className="w-4 h-4" />
-                                                  <span>
-                                                    {serviceActionLoading === `${item.service_detail_id}:accept`
-                                                      ? 'جاري القبول...'
-                                                      : 'قبول الخدمة'}
-                                                  </span>
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleRequestServiceRevision(item)}
-                                                  disabled={serviceActionLoading === `${item.service_detail_id}:revision`}
-                                                  className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-semibold hover:bg-orange-700 disabled:opacity-50"
-                                                >
-                                                  <RefreshCw className="w-4 h-4" />
-                                                  <span>
-                                                    {serviceActionLoading === `${item.service_detail_id}:revision`
-                                                      ? 'جاري الإرسال...'
-                                                      : 'طلب تعديل'}
-                                                  </span>
-                                                </button>
-                                              </div>
                                             </div>
                                           )}
                                         </div>
