@@ -220,6 +220,7 @@ interface ServiceOrderDetailRow {
   delivery_message?: string | null;
   delivery_url?: string | null;
   revision_request?: string | null;
+  revisions_used?: number | null;
 }
 
 type NormalizedProduct = Product & {
@@ -263,7 +264,7 @@ const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
-const SELLER_DASHBOARD_CACHE_VERSION = 6;
+const SELLER_DASHBOARD_CACHE_VERSION = 7;
 const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
 
 const getSellerDashboardCacheKey = (profileId: string) => {
@@ -1278,6 +1279,25 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
   const getServiceRevisionText = (detail: ServiceOrderDetailRow | null | undefined) => {
     return String(detail?.buyer_revision_note || detail?.revision_request || '').trim();
+  };
+
+  const getServiceUsedRevisions = (detail: ServiceOrderDetailRow | null | undefined) => {
+    const rawValue = Number(detail?.revisions_used ?? 0);
+    if (!Number.isFinite(rawValue) || rawValue < 0) return 0;
+    return Math.floor(rawValue);
+  };
+
+  const getServiceMaxRevisions = (item: { service_revisions_count?: number | null }) => {
+    const rawValue = Number(item.service_revisions_count ?? 0);
+    if (!Number.isFinite(rawValue) || rawValue < 0) return 0;
+    return Math.floor(rawValue);
+  };
+
+  const getServiceRemainingRevisions = (
+    item: { service_revisions_count?: number | null },
+    detail: ServiceOrderDetailRow | null | undefined
+  ) => {
+    return Math.max(getServiceMaxRevisions(item) - getServiceUsedRevisions(detail), 0);
   };
   const handleStartServiceWork = async (detailId: string) => {
     if (!canPerformSellerAction()) return;
@@ -3773,7 +3793,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                         {item.service_revisions_count !== null &&
                                         item.service_revisions_count !== undefined ? (
                                           <span className="rounded-full bg-gray-100 px-2 py-1">
-                                            التعديلات: {item.service_revisions_count}
+                                            التعديلات المستخدمة: {getServiceUsedRevisions(detail)} من{' '}
+                                            {getServiceMaxRevisions(item)} — المتبقي:{' '}
+                                            {getServiceRemainingRevisions(item, detail)}
                                           </span>
                                         ) : null}
                                       </div>
@@ -3808,6 +3830,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                                             {requirementText || 'لم يكتب العميل تفاصيل واضحة.'}
                                           </p>
                                         </div>
+
+                                        {detail && item.service_revisions_count !== null && item.service_revisions_count !== undefined && (
+                                          <div className="rounded-lg bg-white p-3 text-xs font-semibold text-purple-700 border border-purple-100">
+                                            التعديلات المستخدمة: {getServiceUsedRevisions(detail)} من{' '}
+                                            {getServiceMaxRevisions(item)} — المتبقي:{' '}
+                                            {getServiceRemainingRevisions(item, detail)}
+                                          </div>
+                                        )}
 
                                         {revisionText && (
                                           <div>
