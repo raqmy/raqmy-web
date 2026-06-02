@@ -1,5 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { Package, Eye, CheckCircle, XCircle, Clock, DollarSign, TrendingUp, Download, Briefcase } from 'lucide-react';
+import {
+  Package,
+  Eye,
+  CheckCircle,
+  XCircle,
+  Clock,
+  DollarSign,
+  TrendingUp,
+  Briefcase,
+  Send,
+  Link as LinkIcon,
+  RefreshCw,
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -36,12 +48,25 @@ interface ServiceOrderDetail {
   buyer_requirements?: string | null;
   seller_notes?: string | null;
   service_status?: string | null;
+  seller_delivery_note?: string | null;
+  seller_delivery_file_url?: string | null;
+  delivered_at?: string | null;
+  accepted_at?: string | null;
+  completed_at?: string | null;
+  revision_requested_at?: string | null;
+  buyer_revision_note?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
   products?: { title?: string | null; name?: string | null } | null;
 }
 
+const normalizeServiceStatus = (status?: string | null) => {
+  const value = String(status || '').trim().toLowerCase();
+  return value || 'requirements_submitted';
+};
+
 const getServiceStatusText = (status?: string | null) => {
-  switch (String(status || '').toLowerCase()) {
+  switch (normalizeServiceStatus(status)) {
     case 'requirements_submitted':
       return 'تم إرسال المتطلبات';
     case 'in_progress':
@@ -49,7 +74,7 @@ const getServiceStatusText = (status?: string | null) => {
     case 'delivered':
       return 'تم التسليم';
     case 'revision_requested':
-      return 'طلب تعديل';
+      return 'طلب تعديل من العميل';
     case 'completed':
       return 'مكتملة';
     case 'cancelled':
@@ -60,53 +85,84 @@ const getServiceStatusText = (status?: string | null) => {
   }
 };
 
+const getServiceStatusColor = (status?: string | null) => {
+  switch (normalizeServiceStatus(status)) {
+    case 'requirements_submitted':
+      return 'bg-purple-100 text-purple-700 border-purple-200';
+    case 'in_progress':
+      return 'bg-blue-100 text-blue-700 border-blue-200';
+    case 'delivered':
+      return 'bg-green-100 text-green-700 border-green-200';
+    case 'revision_requested':
+      return 'bg-orange-100 text-orange-700 border-orange-200';
+    case 'completed':
+      return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+    case 'cancelled':
+      return 'bg-gray-100 text-gray-700 border-gray-200';
+    default:
+      return 'bg-gray-100 text-gray-700 border-gray-200';
+  }
+};
+
 export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNavigate }) => {
+  void onNavigate;
   const { profile } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'paid' | 'pending' | 'completed'>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [serviceActionLoading, setServiceActionLoading] = useState<string | null>(null);
+  const [serviceMessage, setServiceMessage] = useState('');
+  const [deliveryNotes, setDeliveryNotes] = useState<Record<string, string>>({});
+  const [deliveryLinks, setDeliveryLinks] = useState<Record<string, string>>({});
   const [stats, setStats] = useState({
     totalOrders: 0,
     totalRevenue: 0,
     pendingOrders: 0,
-    completedOrders: 0
+    completedOrders: 0,
   });
 
   useEffect(() => {
     if (profile) {
       fetchOrders();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   const fetchOrders = async () => {
+    if (!profile?.id) return;
+
     try {
-      const { data: ordersData } = await supabase
+      setRefreshing(true);
+
+      const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select('*')
-        .eq('seller_id', profile!.id)
+        .eq('seller_id', profile.id)
         .order('created_at', { ascending: false });
 
+      if (ordersError) throw ordersError;
+
       if (ordersData) {
-        const buyerIds = [...new Set(ordersData.map(o => o.user_id))];
-        const { data: usersData } = await supabase
-          .from('users_profile')
-          .select('id, name, email')
-          .in('id', buyerIds);
+        const buyerIds = [...new Set(ordersData.map((o: any) => o.user_id).filter(Boolean))];
+        const { data: usersData } = buyerIds.length
+          ? await supabase.from('users_profile').select('id, name, email').in('id', buyerIds)
+          : { data: [] as any[] };
 
         const enrichedOrders = await Promise.all(
-          ordersData.map(async (order) => {
-            const [{ data: itemsData }, { data: serviceDetailsData, error: serviceDetailsError }] = await Promise.all([
-              supabase
-                .from('order_items')
-                .select('id')
-                .eq('order_id', order.id),
-              supabase
-                .from('service_order_details')
-                .select('*, products(title, name)')
-                .eq('order_id', order.id)
-                .eq('seller_id', profile!.id),
-            ]);
+          ordersData.map(async (order: any) => {
+            const [{ data: itemsData }, { data: serviceDetailsData, error: serviceDetailsError }] =
+              await Promise.all([
+                supabase.from('order_items').select('id').eq('order_id', order.id),
+                supabase
+                  .from('service_order_details')
+                  .select(
+                    '*, products(title, name)'
+                  )
+                  .eq('order_id', order.id)
+                  .eq('seller_id', profile.id),
+              ]);
 
             if (serviceDetailsError) {
               console.error('Error fetching service order details:', serviceDetailsError);
@@ -114,7 +170,7 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
 
             return {
               ...order,
-              buyer: usersData?.find(u => u.id === order.user_id),
+              buyer: usersData?.find((u: any) => u.id === order.user_id),
               items_count: itemsData?.length || 0,
               service_details: (serviceDetailsData || []) as ServiceOrderDetail[],
             };
@@ -123,12 +179,32 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
 
         setOrders(enrichedOrders);
 
+        if (selectedOrder) {
+          const freshSelectedOrder = enrichedOrders.find((order) => order.id === selectedOrder.id) || null;
+          setSelectedOrder(freshSelectedOrder);
+        }
+
+        const nextDeliveryNotes: Record<string, string> = {};
+        const nextDeliveryLinks: Record<string, string> = {};
+
+        for (const order of enrichedOrders) {
+          for (const detail of order.service_details || []) {
+            nextDeliveryNotes[detail.id] = detail.seller_delivery_note || '';
+            nextDeliveryLinks[detail.id] = detail.seller_delivery_file_url || '';
+          }
+        }
+
+        setDeliveryNotes((prev) => ({ ...nextDeliveryNotes, ...prev }));
+        setDeliveryLinks((prev) => ({ ...nextDeliveryLinks, ...prev }));
+
         const totalOrders = enrichedOrders.length;
         const totalRevenue = enrichedOrders
-          .filter(o => o.status === 'paid' || o.status === 'completed')
-          .reduce((sum, o) => sum + Number(o.total_amount), 0);
-        const pendingOrders = enrichedOrders.filter(o => o.status === 'pending' || o.status === 'paid').length;
-        const completedOrders = enrichedOrders.filter(o => o.status === 'completed').length;
+          .filter((o) => o.status === 'paid' || o.status === 'completed')
+          .reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+        const pendingOrders = enrichedOrders.filter(
+          (o) => o.status === 'pending' || o.status === 'paid'
+        ).length;
+        const completedOrders = enrichedOrders.filter((o) => o.status === 'completed').length;
 
         setStats({ totalOrders, totalRevenue, pendingOrders, completedOrders });
       }
@@ -136,20 +212,53 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
       console.error('Error fetching orders:', error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   const updateOrderStatus = async (orderId: string, newStatus: string) => {
     try {
-      await supabase
-        .from('orders')
-        .update({ status: newStatus })
-        .eq('id', orderId);
+      await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
 
-      fetchOrders();
+      await fetchOrders();
       setSelectedOrder(null);
     } catch (error) {
       console.error('Error updating order:', error);
+    }
+  };
+
+  const updateServiceDelivery = async (
+    detail: ServiceOrderDetail,
+    nextStatus: 'in_progress' | 'delivered'
+  ) => {
+    setServiceActionLoading(`${detail.id}:${nextStatus}`);
+    setServiceMessage('');
+
+    try {
+      const note = deliveryNotes[detail.id] || '';
+      const fileUrl = deliveryLinks[detail.id] || '';
+
+      if (nextStatus === 'delivered' && !note.trim() && !fileUrl.trim()) {
+        setServiceMessage('قبل تسليم الخدمة، اكتب ملاحظة التسليم أو أضف رابط ملف التسليم.');
+        return;
+      }
+
+      const { error } = await supabase.rpc('seller_update_service_delivery', {
+        p_service_detail_id: detail.id,
+        p_service_status: nextStatus,
+        p_seller_delivery_note: note.trim() || null,
+        p_seller_delivery_file_url: fileUrl.trim() || null,
+      });
+
+      if (error) throw error;
+
+      setServiceMessage(nextStatus === 'delivered' ? 'تم تسليم الخدمة للعميل.' : 'تم تحديث حالة الخدمة إلى قيد التنفيذ.');
+      await fetchOrders();
+    } catch (error: any) {
+      console.error('Error updating service delivery:', error);
+      setServiceMessage(error?.message || 'حدث خطأ أثناء تحديث حالة الخدمة.');
+    } finally {
+      setServiceActionLoading(null);
     }
   };
 
@@ -221,9 +330,20 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">إدارة الطلبات</h1>
-          <p className="text-gray-600">تتبع وإدارة جميع طلبات عملائك</p>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">إدارة الطلبات</h1>
+            <p className="text-gray-600">تتبع وإدارة جميع طلبات عملائك من داخل لوحة التحكم.</p>
+          </div>
+          <button
+            type="button"
+            onClick={fetchOrders}
+            disabled={refreshing}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <span>تحديث الطلبات</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -244,7 +364,9 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
               </div>
               <TrendingUp className="w-5 h-5 text-green-600" />
             </div>
-            <div className="text-2xl font-bold text-gray-900 mb-1">{stats.totalRevenue.toFixed(2)} ريال</div>
+            <div className="text-2xl font-bold text-gray-900 mb-1">
+              {stats.totalRevenue.toFixed(2)} ريال
+            </div>
             <p className="text-sm text-gray-600">إجمالي الأرباح</p>
           </div>
 
@@ -319,9 +441,7 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-bold text-gray-900">
-                        طلب #{order.order_number}
-                      </h3>
+                      <h3 className="text-lg font-bold text-gray-900">طلب #{order.order_number}</h3>
                       <div
                         className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(
                           order.status
@@ -338,7 +458,9 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
                       </div>
                       <div>
                         <p className="text-gray-600 mb-1">الهاتف</p>
-                        <p className="font-semibold text-gray-900" dir="ltr">{order.customer_phone}</p>
+                        <p className="font-semibold text-gray-900" dir="ltr">
+                          {order.customer_phone || '—'}
+                        </p>
                       </div>
                       <div>
                         <p className="text-gray-600 mb-1">التاريخ</p>
@@ -350,7 +472,9 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
                   </div>
                   <div className="text-left">
                     <p className="text-sm text-gray-600 mb-1">المبلغ الإجمالي</p>
-                    <p className="text-2xl font-bold text-blue-600">{order.total_amount.toFixed(2)} ريال</p>
+                    <p className="text-2xl font-bold text-blue-600">
+                      {Number(order.total_amount || 0).toFixed(2)} ريال
+                    </p>
                     <p className="text-xs text-gray-500 mt-1">{order.items_count} منتج</p>
                     {order.service_details && order.service_details.length > 0 && (
                       <p className="text-xs text-purple-600 mt-1 font-semibold">
@@ -385,20 +509,26 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
 
         {selectedOrder && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-200">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900">تفاصيل الطلب</h2>
-                  <button
-                    onClick={() => setSelectedOrder(null)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">تفاصيل الطلب</h2>
+                    <p className="text-sm text-gray-500 mt-1">طلب #{selectedOrder.order_number}</p>
+                  </div>
+                  <button onClick={() => setSelectedOrder(null)} className="text-gray-500 hover:text-gray-700">
                     <XCircle className="w-6 h-6" />
                   </button>
                 </div>
               </div>
 
               <div className="p-6 space-y-6">
+                {serviceMessage && (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 text-blue-800 px-4 py-3 text-sm">
+                    {serviceMessage}
+                  </div>
+                )}
+
                 <div>
                   <h3 className="font-bold text-gray-900 mb-3">معلومات الطلب</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
@@ -408,7 +538,11 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
                     </div>
                     <div>
                       <p className="text-gray-600">الحالة</p>
-                      <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(selectedOrder.status)}`}>
+                      <div
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(
+                          selectedOrder.status
+                        )}`}
+                      >
                         {getStatusIcon(selectedOrder.status)}
                         <span>{getStatusText(selectedOrder.status)}</span>
                       </div>
@@ -419,15 +553,21 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
                     </div>
                     <div>
                       <p className="text-gray-600">البريد الإلكتروني</p>
-                      <p className="font-semibold" dir="ltr">{selectedOrder.customer_email}</p>
+                      <p className="font-semibold" dir="ltr">
+                        {selectedOrder.customer_email}
+                      </p>
                     </div>
                     <div>
                       <p className="text-gray-600">رقم الهاتف</p>
-                      <p className="font-semibold" dir="ltr">{selectedOrder.customer_phone}</p>
+                      <p className="font-semibold" dir="ltr">
+                        {selectedOrder.customer_phone || '—'}
+                      </p>
                     </div>
                     <div>
                       <p className="text-gray-600">المبلغ الإجمالي</p>
-                      <p className="font-semibold text-blue-600">{selectedOrder.total_amount.toFixed(2)} ريال</p>
+                      <p className="font-semibold text-blue-600">
+                        {Number(selectedOrder.total_amount || 0).toFixed(2)} ريال
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -454,25 +594,125 @@ export const OrdersManagementPage: React.FC<OrdersManagementPageProps> = ({ onNa
                       <Briefcase className="w-5 h-5 text-purple-600" />
                       <span>تفاصيل الخدمات المطلوبة</span>
                     </h3>
-                    <div className="space-y-3">
-                      {selectedOrder.service_details.map((detail) => (
-                        <div key={detail.id} className="rounded-xl border border-purple-100 bg-purple-50/60 p-4">
-                          <div className="flex items-center justify-between gap-3 mb-3">
-                            <p className="font-bold text-purple-900">
-                              {detail.products?.title || detail.products?.name || 'خدمة رقمية'}
-                            </p>
-                            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-purple-700 border border-purple-100">
-                              {getServiceStatusText(detail.service_status)}
-                            </span>
+                    <div className="space-y-4">
+                      {selectedOrder.service_details.map((detail) => {
+                        const status = normalizeServiceStatus(detail.service_status);
+                        const canStart = ['pending_requirements', 'requirements_submitted', 'revision_requested'].includes(status);
+                        const canDeliver = ['pending_requirements', 'requirements_submitted', 'in_progress', 'revision_requested'].includes(status);
+                        const isLocked = ['completed', 'cancelled'].includes(status);
+
+                        return (
+                          <div key={detail.id} className="rounded-xl border border-purple-100 bg-purple-50/60 p-4 space-y-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="font-bold text-purple-900">
+                                {detail.products?.title || detail.products?.name || 'خدمة رقمية'}
+                              </p>
+                              <span
+                                className={`rounded-full px-3 py-1 text-xs font-semibold border ${getServiceStatusColor(
+                                  detail.service_status
+                                )}`}
+                              >
+                                {getServiceStatusText(detail.service_status)}
+                              </span>
+                            </div>
+
+                            <div className="rounded-lg bg-white border border-purple-100 p-3">
+                              <p className="text-xs font-semibold text-gray-500 mb-1">متطلبات العميل</p>
+                              <p className="text-sm text-gray-800 whitespace-pre-line">
+                                {detail.buyer_requirements || 'لا توجد متطلبات مكتوبة.'}
+                              </p>
+                            </div>
+
+                            {detail.buyer_revision_note && (
+                              <div className="rounded-lg bg-orange-50 border border-orange-100 p-3">
+                                <p className="text-xs font-semibold text-orange-700 mb-1">ملاحظات تعديل من العميل</p>
+                                <p className="text-sm text-orange-900 whitespace-pre-line">{detail.buyer_revision_note}</p>
+                              </div>
+                            )}
+
+                            {(detail.seller_delivery_note || detail.seller_delivery_file_url) && (
+                              <div className="rounded-lg bg-green-50 border border-green-100 p-3">
+                                <p className="text-xs font-semibold text-green-700 mb-1">آخر تسليم مرسل</p>
+                                {detail.seller_delivery_note && (
+                                  <p className="text-sm text-green-900 whitespace-pre-line mb-2">{detail.seller_delivery_note}</p>
+                                )}
+                                {detail.seller_delivery_file_url && (
+                                  <a
+                                    href={detail.seller_delivery_file_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-2 text-sm font-semibold text-green-700 hover:text-green-800"
+                                  >
+                                    <LinkIcon className="w-4 h-4" />
+                                    <span>فتح رابط التسليم</span>
+                                  </a>
+                                )}
+                              </div>
+                            )}
+
+                            {!isLocked && (
+                              <div className="rounded-lg bg-white border border-purple-100 p-3 space-y-3">
+                                <div>
+                                  <label className="block text-xs font-semibold text-gray-600 mb-1">ملاحظة التسليم للعميل</label>
+                                  <textarea
+                                    rows={3}
+                                    value={deliveryNotes[detail.id] || ''}
+                                    onChange={(event) =>
+                                      setDeliveryNotes((prev) => ({ ...prev, [detail.id]: event.target.value }))
+                                    }
+                                    placeholder="مثال: تم تنفيذ الخدمة، وهذه تفاصيل التسليم..."
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-semibold text-gray-600 mb-1">رابط ملف التسليم اختياري</label>
+                                  <input
+                                    type="url"
+                                    dir="ltr"
+                                    value={deliveryLinks[detail.id] || ''}
+                                    onChange={(event) =>
+                                      setDeliveryLinks((prev) => ({ ...prev, [detail.id]: event.target.value }))
+                                    }
+                                    placeholder="https://..."
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                  />
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                  {canStart && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateServiceDelivery(detail, 'in_progress')}
+                                      disabled={serviceActionLoading === `${detail.id}:in_progress`}
+                                      className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+                                    >
+                                      <Clock className="w-4 h-4" />
+                                      <span>
+                                        {serviceActionLoading === `${detail.id}:in_progress` ? 'جاري التحديث...' : 'بدء التنفيذ'}
+                                      </span>
+                                    </button>
+                                  )}
+
+                                  {canDeliver && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateServiceDelivery(detail, 'delivered')}
+                                      disabled={serviceActionLoading === `${detail.id}:delivered`}
+                                      className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
+                                    >
+                                      <Send className="w-4 h-4" />
+                                      <span>
+                                        {serviceActionLoading === `${detail.id}:delivered` ? 'جاري التسليم...' : 'تسليم الخدمة'}
+                                      </span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          <div className="rounded-lg bg-white border border-purple-100 p-3">
-                            <p className="text-xs font-semibold text-gray-500 mb-1">متطلبات العميل</p>
-                            <p className="text-sm text-gray-800 whitespace-pre-line">
-                              {detail.buyer_requirements || 'لا توجد متطلبات مكتوبة.'}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
