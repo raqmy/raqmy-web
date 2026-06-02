@@ -59,6 +59,12 @@ type ProfileOrderItem = {
   thumbnail_url?: string | null;
   store_id?: string | null;
   user_id?: string | null;
+  product_kind?: string | null;
+  delivery_mode?: string | null;
+  service_delivery_days?: number | null;
+  service_revisions_count?: number | null;
+  service_requirements_note?: string | null;
+  buyer_requirements?: string | null;
 };
 
 type ProfileOrder = {
@@ -121,6 +127,32 @@ const getActiveStoreScopeSlug = () => {
 };
 
 const normalizeProductName = (product: any) => product?.title || product?.name || 'منتج';
+
+const normalizeProductKind = (value?: string | null) => {
+  const normalized = String(value || '').trim();
+
+  if (normalized === 'digital_service' || normalized === 'service') {
+    return 'digital_service';
+  }
+
+  return 'digital_product';
+};
+
+const isDigitalServiceProduct = (value?: string | null) => {
+  return normalizeProductKind(value) === 'digital_service';
+};
+
+const getProductKindLabel = (value?: string | null) => {
+  return isDigitalServiceProduct(value) ? 'خدمة رقمية' : 'منتج رقمي';
+};
+
+const getDeliveryModeLabel = (value?: string | null, productKind?: string | null) => {
+  if (isDigitalServiceProduct(productKind)) {
+    return 'يتم العمل عليه بعد الشراء';
+  }
+
+  return value === 'manual' ? 'يتم العمل عليه بعد الشراء' : 'فوري بعد الدفع';
+};
 
 const productMatchesScope = (product: any, scope: ScopeInfo | null) => {
   if (!scope) return true;
@@ -458,7 +490,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
     const { data, error } = await supabase
       .from('products')
-      .select('id, title, description, price, slug, store_id, merchant_id')
+      .select('id, title, name, description, price, slug, store_id, merchant_id, user_id, product_kind, delivery_mode, service_delivery_days, service_revisions_count, service_requirements_note')
       .in('id', cleanIds);
 
     if (error) throw error;
@@ -777,6 +809,37 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       const productIds = [...new Set(safeItems.map((item: any) => item.product_id).filter(Boolean))];
       const { productsMap, imageMap } = await fetchProductsMapByIds(productIds);
 
+      const serviceDetailsByOrderItemId = new Map<string, any>();
+      const serviceDetailsByOrderAndProduct = new Map<string, any>();
+
+      try {
+        const { data: serviceRows, error: serviceError } = await supabase
+          .from('service_order_details')
+          .select(
+            'id, order_id, order_item_id, product_id, buyer_id, seller_id, buyer_requirements, created_at, updated_at'
+          )
+          .in('order_id', orderIds);
+
+        if (serviceError) {
+          console.error('Error fetching service order details:', serviceError);
+        } else {
+          for (const serviceRow of serviceRows || []) {
+            if (serviceRow.order_item_id) {
+              serviceDetailsByOrderItemId.set(String(serviceRow.order_item_id), serviceRow);
+            }
+
+            if (serviceRow.order_id && serviceRow.product_id) {
+              serviceDetailsByOrderAndProduct.set(
+                `${serviceRow.order_id}:${serviceRow.product_id}`,
+                serviceRow
+              );
+            }
+          }
+        }
+      } catch (serviceError) {
+        console.error('Error fetching service order details:', serviceError);
+      }
+
       const itemsByOrderId = new Map<string, ProfileOrderItem[]>();
 
       for (const item of safeItems as any[]) {
@@ -789,6 +852,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         );
         const resolvedQuantity = Number(item.quantity ?? 1);
 
+        const serviceDetails =
+          serviceDetailsByOrderItemId.get(String(item.id)) ||
+          serviceDetailsByOrderAndProduct.get(`${item.order_id}:${item.product_id}`) ||
+          null;
+
         const normalizedItem: ProfileOrderItem = {
           id: item.id,
           product_id: item.product_id,
@@ -799,7 +867,19 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
           product_slug: product?.slug || null,
           thumbnail_url: imageMap.get(item.product_id) || null,
           store_id: product?.store_id || null,
-          user_id: product?.merchant_id || null,
+          user_id: product?.merchant_id || product?.user_id || null,
+          product_kind: normalizeProductKind(product?.product_kind),
+          delivery_mode: product?.delivery_mode || null,
+          service_delivery_days:
+            product?.service_delivery_days === null || product?.service_delivery_days === undefined
+              ? null
+              : Number(product.service_delivery_days),
+          service_revisions_count:
+            product?.service_revisions_count === null || product?.service_revisions_count === undefined
+              ? null
+              : Number(product.service_revisions_count),
+          service_requirements_note: product?.service_requirements_note || null,
+          buyer_requirements: serviceDetails?.buyer_requirements || null,
         };
 
         if (!itemsByOrderId.has(item.order_id)) {
@@ -2216,56 +2296,138 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
 
                             {order.items.length > 0 ? (
                               <div className="space-y-3">
-                                {order.items.map((item) => (
-                                  <div
-                                    key={item.id}
-                                    className="border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
-                                  >
-                                    <div className="flex items-center gap-4 min-w-0">
-                                      <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0">
-                                        {item.thumbnail_url ? (
-                                          <img
-                                            src={item.thumbnail_url}
-                                            alt={item.product_name}
-                                            className="w-full h-full object-cover"
-                                          />
-                                        ) : (
-                                          <Package className="w-8 h-8 text-blue-600" />
-                                        )}
+                                {order.items.map((item) => {
+                                  const isServiceItem = isDigitalServiceProduct(item.product_kind);
+                                  const hasBuyerRequirements = !!String(
+                                    item.buyer_requirements || ''
+                                  ).trim();
+
+                                  return (
+                                    <div
+                                      key={item.id}
+                                      className="border border-gray-200 rounded-xl p-4 space-y-4"
+                                    >
+                                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                        <div className="flex items-center gap-4 min-w-0">
+                                          <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0">
+                                            {item.thumbnail_url ? (
+                                              <img
+                                                src={item.thumbnail_url}
+                                                alt={item.product_name}
+                                                className="w-full h-full object-cover"
+                                              />
+                                            ) : (
+                                              <Package className="w-8 h-8 text-blue-600" />
+                                            )}
+                                          </div>
+
+                                          <div className="min-w-0">
+                                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                                              <p className="font-bold text-gray-900 truncate">
+                                                {item.product_name}
+                                              </p>
+
+                                              <span
+                                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                                                  isServiceItem
+                                                    ? 'bg-purple-100 text-purple-700'
+                                                    : 'bg-blue-100 text-blue-700'
+                                                }`}
+                                              >
+                                                {isServiceItem ? (
+                                                  <FileText className="w-3 h-3" />
+                                                ) : (
+                                                  <Package className="w-3 h-3" />
+                                                )}
+                                                {getProductKindLabel(item.product_kind)}
+                                              </span>
+                                            </div>
+
+                                            <p className="text-sm text-gray-500">
+                                              الكمية: {item.quantity}
+                                            </p>
+
+                                            {isServiceItem && (
+                                              <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-gray-500">
+                                                <span>{getDeliveryModeLabel(item.delivery_mode, item.product_kind)}</span>
+                                                {item.service_delivery_days ? (
+                                                  <span>• مدة التنفيذ: {item.service_delivery_days} يوم</span>
+                                                ) : null}
+                                                {item.service_revisions_count !== null &&
+                                                item.service_revisions_count !== undefined ? (
+                                                  <span>• التعديلات: {item.service_revisions_count}</span>
+                                                ) : null}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-3 justify-end">
+                                          <div className="text-lg font-bold text-blue-600">
+                                            {item.subtotal.toFixed(2)} ريال
+                                          </div>
+
+                                          <button
+                                            onClick={() => openScopedProduct(item)}
+                                            className="px-4 py-2 border border-gray-200 rounded-lg font-medium hover:bg-gray-50"
+                                          >
+                                            عرض المنتج
+                                          </button>
+
+                                          {canAccessFiles(order.status) && !isServiceItem && (
+                                            <button
+                                              onClick={() => openScopedProduct(item)}
+                                              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2"
+                                            >
+                                              <Download className="w-4 h-4" />
+                                              <span>الوصول للملفات</span>
+                                            </button>
+                                          )}
+
+                                          {canAccessFiles(order.status) && isServiceItem && (
+                                            <button
+                                              onClick={() => openScopedProduct(item)}
+                                              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 inline-flex items-center gap-2"
+                                            >
+                                              <FileText className="w-4 h-4" />
+                                              <span>عرض الخدمة</span>
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
 
-                                      <div className="min-w-0">
-                                        <p className="font-bold text-gray-900 truncate">
-                                          {item.product_name}
-                                        </p>
-                                        <p className="text-sm text-gray-500">الكمية: {item.quantity}</p>
-                                      </div>
-                                    </div>
+                                      {isServiceItem && (
+                                        <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+                                          <div className="flex items-center gap-2 mb-2 text-purple-800 font-bold">
+                                            <FileText className="w-4 h-4" />
+                                            <span>تفاصيل تنفيذ الخدمة المرسلة</span>
+                                          </div>
 
-                                    <div className="flex flex-wrap items-center gap-3 justify-end">
-                                      <div className="text-lg font-bold text-blue-600">
-                                        {item.subtotal.toFixed(2)} ريال
-                                      </div>
+                                          {hasBuyerRequirements ? (
+                                            <p className="text-sm text-purple-900 whitespace-pre-wrap leading-7">
+                                              {item.buyer_requirements}
+                                            </p>
+                                          ) : (
+                                            <p className="text-sm text-purple-700">
+                                              لم يتم تسجيل تفاصيل تنفيذ لهذه الخدمة.
+                                            </p>
+                                          )}
 
-                                      <button
-                                        onClick={() => openScopedProduct(item)}
-                                        className="px-4 py-2 border border-gray-200 rounded-lg font-medium hover:bg-gray-50"
-                                      >
-                                        عرض المنتج
-                                      </button>
-
-                                      {canAccessFiles(order.status) && (
-                                        <button
-                                          onClick={() => openScopedProduct(item)}
-                                          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2"
-                                        >
-                                          <Download className="w-4 h-4" />
-                                          <span>الوصول للملفات</span>
-                                        </button>
+                                          {item.service_requirements_note && (
+                                            <div className="mt-3 pt-3 border-t border-purple-100">
+                                              <p className="text-xs font-semibold text-purple-800 mb-1">
+                                                تعليمات التاجر:
+                                              </p>
+                                              <p className="text-xs text-purple-700 whitespace-pre-wrap leading-6">
+                                                {item.service_requirements_note}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             ) : (
                               <p className="text-sm text-gray-500">لا توجد عناصر لهذا الطلب</p>
