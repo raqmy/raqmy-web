@@ -25,7 +25,8 @@ import {
   X,
   Search,
   ImagePlus,
-  Trash2
+  Trash2,
+  Briefcase
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Store, Product } from '../lib/supabase';
@@ -33,6 +34,7 @@ import { CreateStoreModal } from '../components/store/CreateStoreModal';
 import { CreateProductModal } from '../components/product/CreateProductModal';
 import { EditStoreModal } from '../components/store/EditStoreModal';
 import { EditProductModal } from '../components/product/EditProductModal';
+import { PRODUCT_KIND_LABELS, normalizeProductKind } from '../lib/productSchema';
 
 interface SellerDashboardProps {
   onNavigate: (page: string) => void;
@@ -198,6 +200,10 @@ type NormalizedProduct = Product & {
   sales_count: number;
   currency: string;
   thumbnail_url?: string | null;
+  product_kind?: string | null;
+  delivery_mode?: string | null;
+  service_delivery_days?: number | null;
+  service_revisions_count?: number | null;
 };
 
 type StoreImageRecord = Store & Record<string, any>;
@@ -567,6 +573,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     const views_count = Number(row?.views_count ?? row?.views ?? 0) || 0;
     const sales_count = Number(row?.sales_count ?? 0) || 0;
     const currency = row?.currency ?? 'SAR';
+    const product_kind = normalizeProductKind(row?.product_kind);
 
     return {
       ...(row as Product),
@@ -575,6 +582,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       views_count,
       sales_count,
       currency,
+      product_kind,
+      delivery_mode: row?.delivery_mode ?? (product_kind === 'digital_service' ? 'manual' : 'instant'),
+      service_delivery_days: row?.service_delivery_days ?? null,
+      service_revisions_count: row?.service_revisions_count ?? null,
       thumbnail_url: row?.thumbnail_url ?? null,
     } as NormalizedProduct;
   };
@@ -2972,6 +2983,23 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                           >
                             {product.name || 'بدون اسم'}
                           </h3>
+
+                          <div className="mb-3">
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
+                                product.product_kind === 'digital_service'
+                                  ? 'bg-purple-50 text-purple-700'
+                                  : 'bg-blue-50 text-blue-700'
+                              }`}
+                            >
+                              {product.product_kind === 'digital_service' ? (
+                                <Briefcase className="w-3.5 h-3.5" />
+                              ) : (
+                                <Package className="w-3.5 h-3.5" />
+                              )}
+                              {PRODUCT_KIND_LABELS[normalizeProductKind(product.product_kind)]}
+                            </span>
+                          </div>
 
                           <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
                             <span>{product.sales_count || 0} مبيعات</span>
