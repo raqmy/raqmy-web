@@ -10,10 +10,13 @@ import {
   Heart,
   FileText,
   Lock,
+  Briefcase,
+  Clock3,
   AlertTriangle,
 } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 import { formatProductPrice, useCurrency } from '../lib/currency';
+import { PRODUCT_KIND_LABELS, PRODUCT_DELIVERY_MODE_LABELS, normalizeProductKind, normalizeProductDeliveryMode } from '../lib/productSchema';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ProductDetailPageProps {
@@ -28,6 +31,11 @@ interface ProductWithDetails extends Product {
   seller?: UserProfile | null;
   quantity_limit?: number | null;
   quantity_sold?: number | null;
+  product_kind?: string | null;
+  delivery_mode?: string | null;
+  service_delivery_days?: number | null;
+  service_revisions_count?: number | null;
+  service_requirements_note?: string | null;
 }
 
 interface ProductImage {
@@ -880,7 +888,15 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   }
 
   const canAccessAttachments = isOwner || hasPurchased;
-  const productTitle = product.name || (product as any).title || 'منتج رقمي';
+  const productKind = normalizeProductKind((product as any).product_kind);
+  const isDigitalService = productKind === 'digital_service';
+  const deliveryMode = normalizeProductDeliveryMode((product as any).delivery_mode, productKind);
+  const productKindLabel = PRODUCT_KIND_LABELS[productKind];
+  const deliveryModeLabel = PRODUCT_DELIVERY_MODE_LABELS[deliveryMode];
+  const serviceDeliveryDays = Number((product as any).service_delivery_days || 0);
+  const serviceRevisionsCount = Number((product as any).service_revisions_count || 0);
+  const serviceRequirementsNote = String((product as any).service_requirements_note || '').trim();
+  const productTitle = product.name || (product as any).title || (isDigitalService ? 'خدمة رقمية' : 'منتج رقمي');
   const productDescription = product.description?.trim() || 'لا يوجد وصف لهذا المنتج حالياً.';
   const storedViewsCount = Number((product as any).views_count ?? 0);
   const displayedViewsCount = Math.max(
@@ -996,6 +1012,15 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
             <div className="flex items-center gap-4 mb-6 flex-wrap">
               <div className="text-gray-600">{displayedViewsCount} مشاهدة</div>
+
+              <span className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold border ${
+                isDigitalService
+                  ? 'bg-purple-50 text-purple-700 border-purple-100'
+                  : 'bg-blue-50 text-blue-700 border-blue-100'
+              }`}>
+                {isDigitalService ? <Briefcase className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+                {productKindLabel}
+              </span>
 
               {hasQuantityLimit && (
                 isSoldOut ? (
@@ -1127,12 +1152,24 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             <div className="border-t pt-6 space-y-3 text-sm text-gray-600">
               <div className="flex items-center justify-between">
                 <span>النوع</span>
-                <span className="font-medium text-gray-900">منتج رقمي</span>
+                <span className="font-medium text-gray-900">{productKindLabel}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>التوصيل</span>
-                <span className="font-medium text-gray-900">فوري بعد الدفع</span>
+                <span>{isDigitalService ? 'آلية التنفيذ' : 'التوصيل'}</span>
+                <span className="font-medium text-gray-900">{deliveryModeLabel}</span>
               </div>
+              {isDigitalService && serviceDeliveryDays > 0 && (
+                <div className="flex items-center justify-between">
+                  <span>مدة التنفيذ</span>
+                  <span className="font-medium text-gray-900">خلال {serviceDeliveryDays} يوم</span>
+                </div>
+              )}
+              {isDigitalService && serviceRevisionsCount >= 0 && String((product as any).service_revisions_count ?? '').trim() !== '' && (
+                <div className="flex items-center justify-between">
+                  <span>التعديلات المشمولة</span>
+                  <span className="font-medium text-gray-900">{serviceRevisionsCount} تعديل</span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span>الترخيص</span>
                 <span className="font-medium text-gray-900">حسب وصف المنتج</span>
@@ -1155,6 +1192,16 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           </div>
         </div>
 
+        {isDigitalService && serviceRequirementsNote && (
+          <div className="bg-purple-50 border border-purple-100 rounded-xl p-6 shadow-sm mb-8">
+            <div className="flex items-center gap-2 mb-3 text-purple-900 font-bold">
+              <Clock3 className="w-5 h-5" />
+              متطلبات تنفيذ الخدمة
+            </div>
+            <p className="text-sm leading-7 text-purple-900 whitespace-pre-line">{serviceRequirementsNote}</p>
+          </div>
+        )}
+
         <div className="bg-white rounded-xl p-8 shadow-sm">
           <div className="flex items-center gap-3 mb-6">
             {canAccessAttachments ? (
@@ -1162,7 +1209,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             ) : (
               <Lock className="w-6 h-6 text-gray-400" />
             )}
-            <h2 className="text-2xl font-bold text-gray-900">محتوى المنتج</h2>
+            <h2 className="text-2xl font-bold text-gray-900">{isDigitalService ? 'مرفقات وتعليمات الخدمة' : 'محتوى المنتج'}</h2>
           </div>
 
           {canAccessAttachments ? (
@@ -1213,7 +1260,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               </div>
             ) : (
               <div className="text-center py-12 text-gray-500">
-                لا توجد ملفات أو مرفقات متاحة لهذا المنتج حالياً.
+                {isDigitalService ? 'لا توجد مرفقات إضافية لهذه الخدمة حالياً. سيتم تنفيذ الخدمة حسب الوصف والمتطلبات.' : 'لا توجد ملفات أو مرفقات متاحة لهذا المنتج حالياً.'}
               </div>
             )
           ) : (
@@ -1221,14 +1268,14 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <Lock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-900 mb-2">المحتوى محمي</h3>
               <p className="text-gray-600 mb-6">
-                ستتمكن من الوصول إلى ملفات ومرفقات المنتج مباشرة بعد إتمام الشراء.
+                {isDigitalService ? 'بعد الشراء ستظهر الخدمة ضمن مشترياتك، ويمكنك متابعة تفاصيل الطلب مع التاجر حسب آلية المنصة.' : 'ستتمكن من الوصول إلى ملفات ومرفقات المنتج مباشرة بعد إتمام الشراء.'}
               </p>
               <button
                 onClick={handleBuyNow}
                 disabled={purchasing || isOwner || isSoldOut}
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSoldOut ? 'نفدت الكمية' : 'اشترِ للوصول إلى المحتوى'}
+                {isSoldOut ? 'نفدت الكمية' : isDigitalService ? 'اشترِ الخدمة' : 'اشترِ للوصول إلى المحتوى'}
               </button>
             </div>
           )}
