@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  Briefcase,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Product } from '../lib/supabase';
@@ -45,6 +46,11 @@ interface ProductWithMeta extends Product {
   quantity_limit?: number | null;
   quantity_sold?: number | null;
   is_active?: boolean | null;
+  product_kind?: string | null;
+  delivery_mode?: string | null;
+  service_delivery_days?: number | null;
+  service_revisions_count?: number | null;
+  service_requirements_note?: string | null;
 }
 
 interface CartItem {
@@ -213,6 +219,16 @@ const getProductTitle = (product: ProductWithMeta | null | undefined) => {
   return product?.title || product?.name || 'منتج';
 };
 
+const isDigitalServiceProduct = (product: ProductWithMeta | null | undefined) => {
+  return String(product?.product_kind || '').toLowerCase() === 'digital_service';
+};
+
+const getPositiveIntegerOrNull = (value: unknown) => {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) return null;
+  return Math.floor(numberValue);
+};
+
 const getProductSellerId = (product: ProductWithMeta | null | undefined) => {
   return product?.user_id || product?.merchant_id || null;
 };
@@ -354,6 +370,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const [couponSuccess, setCouponSuccess] = useState('');
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCouponState | null>(null);
+  const [serviceRequirements, setServiceRequirements] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const loadScopeAndCart = async () => {
@@ -548,7 +565,19 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     return getCartItemQuantityIssueMessage(firstIssue) || 'يوجد منتج غير متاح أو كمية غير صالحة داخل الطلب.';
   }, [quantityInvalidItems]);
 
-  const canSubmitCheckout = cartItems.length > 0 && quantityInvalidItems.length === 0 && !processing;
+  const serviceCartItems = useMemo(() => {
+    return cartItems.filter((item) => isDigitalServiceProduct(item.product));
+  }, [cartItems]);
+
+  const missingServiceRequirements = useMemo(() => {
+    return serviceCartItems.filter((item) => !String(serviceRequirements[item.id] || '').trim());
+  }, [serviceCartItems, serviceRequirements]);
+
+  const canSubmitCheckout =
+    cartItems.length > 0 &&
+    quantityInvalidItems.length === 0 &&
+    missingServiceRequirements.length === 0 &&
+    !processing;
 
   const getCouponEligibleItems = (
     items: CartItem[],
@@ -1165,11 +1194,46 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         };
       });
 
-      const { error: orderItemsError } = await supabase.from('order_items').insert(orderItems);
+      const { data: insertedOrderItems, error: orderItemsError } = await supabase
+        .from('order_items')
+        .insert(orderItems)
+        .select('id, product_id, seller_id');
 
       if (orderItemsError) {
         console.error('Order items insert error:', orderItemsError);
         throw orderItemsError;
+      }
+
+      const insertedOrderItemsMap = new Map<string, any>(
+        ((insertedOrderItems || []) as any[]).map((item) => [String(item.product_id), item])
+      );
+
+      const serviceOrderDetails = validatedCartItems
+        .filter((item) => isDigitalServiceProduct(item.product))
+        .map((item) => {
+          const insertedOrderItem = insertedOrderItemsMap.get(String(item.product_id));
+          const sellerId = getProductSellerId(item.product);
+
+          return {
+            order_id: order.id,
+            order_item_id: insertedOrderItem?.id || null,
+            product_id: item.product_id,
+            buyer_id: profile.id,
+            seller_id: insertedOrderItem?.seller_id || sellerId,
+            buyer_requirements: String(serviceRequirements[item.id] || '').trim(),
+            service_status: 'requirements_submitted',
+          };
+        });
+
+      if (serviceOrderDetails.length > 0) {
+        const { error: serviceDetailsError } = await supabase
+          .from('service_order_details')
+          .insert(serviceOrderDetails);
+
+        if (serviceDetailsError) {
+          console.error('Service order details insert error:', serviceDetailsError);
+          throw serviceDetailsError;
+        }
       }
 
       if (scopeInfo) {
@@ -1371,11 +1435,61 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                           {getCartItemQuantityIssueMessage(item)}
                         </p>
                       )}
+
+                      {isDigitalServiceProduct(item.product) && (
+                        <div className="mt-4 rounded-xl border border-purple-100 bg-purple-50/60 p-4">
+                          <div className="flex items-start gap-2 mb-3">
+                            <Briefcase className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <h5 className="font-bold text-purple-900">تفاصيل تنفيذ الخدمة</h5>
+                              <p className="text-xs text-purple-700 mt-1">
+                                اكتب للتاجر كل التفاصيل المطلوبة لتنفيذ الخدمة، مثل المقاس، اللون، النصوص، الروابط، الملفات، أو أي ملاحظات مهمة.
+                              </p>
+                            </div>
+                          </div>
+
+                          <textarea
+                            value={serviceRequirements[item.id] || ''}
+                            onChange={(e) => {
+                              setServiceRequirements((current) => ({
+                                ...current,
+                                [item.id]: e.target.value,
+                              }));
+                              setError('');
+                            }}
+                            rows={4}
+                            maxLength={2000}
+                            placeholder={item.product?.service_requirements_note || 'مثال: أريد تصميم بلون أزرق، بالمقاس 1080×1080، والنص المطلوب هو...'}
+                            className="w-full px-4 py-3 border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm bg-white"
+                            required
+                          />
+
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs text-purple-700">
+                            {getPositiveIntegerOrNull(item.product?.service_delivery_days) && (
+                              <span className="inline-flex items-center rounded-full bg-white px-3 py-1 border border-purple-100">
+                                مدة التنفيذ: {getPositiveIntegerOrNull(item.product?.service_delivery_days)} يوم
+                              </span>
+                            )}
+                            {getPositiveIntegerOrNull(item.product?.service_revisions_count) && (
+                              <span className="inline-flex items-center rounded-full bg-white px-3 py-1 border border-purple-100">
+                                التعديلات: {getPositiveIntegerOrNull(item.product?.service_revisions_count)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
+
+            {missingServiceRequirements.length > 0 && (
+              <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <span>يوجد خدمة رقمية تحتاج كتابة تفاصيل التنفيذ قبل إتمام الدفع.</span>
+              </div>
+            )}
 
             <div className="mb-6 p-4 border border-gray-200 rounded-xl bg-gray-50">
               <div className="flex items-center gap-2 mb-3">
