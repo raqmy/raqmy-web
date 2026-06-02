@@ -181,17 +181,6 @@ interface SellerOrderRow {
   currency?: string | null;
 }
 
-interface ServiceOrderDetailRow {
-  id: string;
-  order_id: string;
-  order_item_id?: string | null;
-  product_id?: string | null;
-  buyer_requirements?: string | null;
-  seller_notes?: string | null;
-  service_status?: string | null;
-  created_at?: string | null;
-}
-
 interface SellerOrderUI extends SellerOrderRow {
   customer_name: string;
   customer_phone: string;
@@ -201,10 +190,6 @@ interface SellerOrderUI extends SellerOrderRow {
     product_name: string;
     quantity: number;
     amount: number;
-    product_kind?: string | null;
-    service_delivery_days?: number | null;
-    service_revisions_count?: number | null;
-    service_detail?: ServiceOrderDetailRow | null;
   }>;
 }
 
@@ -234,26 +219,6 @@ const FALLBACK_MIN_WITHDRAWAL_AMOUNT = 10;
 const WITHDRAWAL_PROOFS_BUCKET = 'withdrawal-proofs';
 const STORE_IMAGES_BUCKET = 'store-images';
 const FINANCIAL_CURRENCY_NOTE = 'يتم احتساب الأرباح والسحب بالريال السعودي.';
-
-const getServiceStatusLabel = (status?: string | null) => {
-  switch (String(status || '').toLowerCase()) {
-    case 'requirements_submitted':
-      return 'تم إرسال المتطلبات';
-    case 'in_progress':
-      return 'قيد التنفيذ';
-    case 'delivered':
-      return 'تم التسليم';
-    case 'revision_requested':
-      return 'طلب تعديل';
-    case 'completed':
-      return 'مكتملة';
-    case 'cancelled':
-      return 'ملغاة';
-    case 'pending_requirements':
-    default:
-      return 'بانتظار المتطلبات';
-  }
-};
 const SELLER_DASHBOARD_BASE_PATH = '/seller-dashboard';
 const SELLER_DASHBOARD_TAB_PATHS: Record<SellerDashboardTab, string> = {
   overview: SELLER_DASHBOARD_BASE_PATH,
@@ -1287,23 +1252,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         }
       }
 
-      const serviceDetailsMap: Record<string, ServiceOrderDetailRow> = {};
-      if (orderIds.length > 0) {
-        const { data: serviceDetailsRows, error: serviceDetailsErr } = await supabase
-          .from('service_order_details')
-          .select('*')
-          .in('order_id', orderIds)
-          .eq('seller_id', profile.id);
-
-        if (serviceDetailsErr) {
-          console.error('orders service details fetch error:', serviceDetailsErr);
-        } else {
-          for (const row of safeArray(serviceDetailsRows) as ServiceOrderDetailRow[]) {
-            if (row?.order_item_id) serviceDetailsMap[row.order_item_id] = row;
-          }
-        }
-      }
-
       const customerMap: Record<string, any> = {};
       if (customerIds.length > 0) {
         const { data: customerRows, error: customersErr } = await supabase
@@ -1331,17 +1279,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         const productName = row?.product_name || row?.product_title || product?.title || product?.name || 'منتج';
 
         if (!itemsByOrder[orderId]) itemsByOrder[orderId] = [];
-        const itemId = row?.id || `${orderId}-${row?.product_id || Math.random()}`;
         itemsByOrder[orderId].push({
-          id: itemId,
+          id: row?.id || `${orderId}-${row?.product_id || Math.random()}`,
           product_id: row?.product_id || null,
           product_name: productName,
           quantity,
           amount: itemAmount,
-          product_kind: product?.product_kind || null,
-          service_delivery_days: product?.service_delivery_days ?? null,
-          service_revisions_count: product?.service_revisions_count ?? null,
-          service_detail: serviceDetailsMap[itemId] || null,
         });
       }
 
@@ -3563,29 +3506,14 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                           </div>
                         ) : (
                           selectedOrder.items.map((item) => (
-                            <div key={item.id} className="rounded-xl border border-gray-200 p-4">
-                              <div className="flex items-center justify-between gap-4">
-                                <div>
-                                  <p className="font-bold text-gray-900">{item.product_name}</p>
-                                  <p className="text-sm text-gray-500 mt-1">الكمية: {item.quantity}</p>
-                                  {String(item.product_kind || '').toLowerCase() === 'digital_service' && (
-                                    <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-700">
-                                      <Briefcase className="w-3.5 h-3.5" />
-                                      خدمة رقمية - {getServiceStatusLabel(item.service_detail?.service_status)}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-left">
-                                  <p className="text-lg font-bold text-blue-600">{formatCurrency(item.amount)}</p>
-                                </div>
+                            <div key={item.id} className="rounded-xl border border-gray-200 p-4 flex items-center justify-between gap-4">
+                              <div>
+                                <p className="font-bold text-gray-900">{item.product_name}</p>
+                                <p className="text-sm text-gray-500 mt-1">الكمية: {item.quantity}</p>
                               </div>
-
-                              {String(item.product_kind || '').toLowerCase() === 'digital_service' && item.service_detail?.buyer_requirements && (
-                                <div className="mt-4 rounded-xl border border-purple-100 bg-purple-50/60 p-4">
-                                  <p className="text-sm font-bold text-purple-900 mb-2">متطلبات العميل</p>
-                                  <p className="text-sm text-gray-800 whitespace-pre-line">{item.service_detail.buyer_requirements}</p>
-                                </div>
-                              )}
+                              <div className="text-left">
+                                <p className="text-lg font-bold text-blue-600">{formatCurrency(item.amount)}</p>
+                              </div>
                             </div>
                           ))
                         )}
