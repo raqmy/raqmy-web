@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   AlertTriangle,
   RefreshCw,
+  Briefcase,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -23,6 +24,9 @@ interface ProductLite {
   price?: number | null;
   quantity_limit?: number | null;
   quantity_sold?: number | null;
+  product_kind?: string | null;
+  service_delivery_days?: number | null;
+  service_revisions_count?: number | null;
 }
 
 interface Order {
@@ -58,6 +62,18 @@ interface OrderItemView {
   quantity_limit: number | null;
   quantity_sold: number;
   remaining_quantity: number | null;
+  product_kind?: string | null;
+  service_delivery_days?: number | null;
+  service_revisions_count?: number | null;
+  service_detail?: ServiceOrderDetail | null;
+}
+
+interface ServiceOrderDetail {
+  id: string;
+  order_item_id?: string | null;
+  product_id?: string | null;
+  buyer_requirements?: string | null;
+  service_status?: string | null;
 }
 
 type ScopeInfo = {
@@ -145,6 +161,10 @@ const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
   }
 
   return null;
+};
+
+const isDigitalServiceItem = (item: OrderItemView | null | undefined) => {
+  return String(item?.product_kind || '').toLowerCase() === 'digital_service';
 };
 
 const isPaidOrderStatus = (status?: string | null) => {
@@ -334,7 +354,7 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
     if (productIds.length > 0) {
       const { data: productsData, error: productsError } = await supabase
         .from('products')
-        .select('id, name, title, price, quantity_limit, quantity_sold')
+        .select('id, name, title, price, quantity_limit, quantity_sold, product_kind, service_delivery_days, service_revisions_count')
         .in('id', productIds);
 
       if (productsError) {
@@ -342,6 +362,24 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
       } else if (productsData) {
         productsMap = new Map(
           (productsData as ProductLite[]).map((product) => [product.id, product])
+        );
+      }
+    }
+
+    let serviceDetailsMap = new Map<string, ServiceOrderDetail>();
+
+    if (rawItems.length > 0) {
+      const orderItemIds = rawItems.map((item) => item.id).filter(Boolean);
+      const { data: serviceDetailsData, error: serviceDetailsError } = await supabase
+        .from('service_order_details')
+        .select('*')
+        .in('order_item_id', orderItemIds);
+
+      if (serviceDetailsError) {
+        console.error('Error fetching service details for success page:', serviceDetailsError);
+      } else if (serviceDetailsData) {
+        serviceDetailsMap = new Map(
+          (serviceDetailsData as ServiceOrderDetail[]).map((detail) => [String(detail.order_item_id), detail])
         );
       }
     }
@@ -372,6 +410,10 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
         quantity_limit: quantityLimit,
         quantity_sold: quantitySold,
         remaining_quantity: remainingQuantity,
+        product_kind: product?.product_kind ?? null,
+        service_delivery_days: product?.service_delivery_days ?? null,
+        service_revisions_count: product?.service_revisions_count ?? null,
+        service_detail: serviceDetailsMap.get(String(item.id)) || null,
       };
     });
 
@@ -614,7 +656,13 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex-1">
                           <h4 className="font-semibold text-gray-900">{item.product_name}</h4>
-                          <p className="text-sm text-gray-600">
+                          {isDigitalServiceItem(item) && (
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-700">
+                              <Briefcase className="w-3.5 h-3.5" />
+                              خدمة رقمية - تم إرسال المتطلبات للتاجر
+                            </span>
+                          )}
+                          <p className="text-sm text-gray-600 mt-1">
                             الكمية: {item.quantity} × {item.product_price.toFixed(2)} ريال
                           </p>
                         </div>
@@ -635,6 +683,13 @@ export const PaymentSuccessPage: React.FC<PaymentSuccessPageProps> = ({ onNaviga
                           </span>
                         )}
                       </div>
+
+                      {isDigitalServiceItem(item) && item.service_detail?.buyer_requirements && (
+                        <div className="mt-3 rounded-lg border border-purple-100 bg-white p-3 text-sm">
+                          <p className="font-semibold text-gray-800 mb-1">تفاصيل طلب الخدمة:</p>
+                          <p className="text-gray-700 whitespace-pre-line">{item.service_detail.buyer_requirements}</p>
+                        </div>
+                      )}
                     </div>
                   ))
                 ) : (
