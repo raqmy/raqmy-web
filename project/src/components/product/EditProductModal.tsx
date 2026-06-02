@@ -6,7 +6,8 @@ import { CopyLinkButton } from '../shared/CopyLinkButton';
 import { ProductImagesManager, ProductImage } from './ProductImagesManager';
 import { ProductAttachmentsManager, ProductAttachment } from './ProductAttachmentsManager';
 import { useCurrency } from '../../lib/currency';
-import { ProductKind, ProductDeliveryMode, PRODUCT_KIND_LABELS, PRODUCT_DELIVERY_MODE_LABELS, normalizeProductKind, normalizeProductDeliveryMode } from '../../lib/productSchema';
+import { PRODUCT_KIND_LABELS, PRODUCT_DELIVERY_MODE_LABELS, normalizeProductKind, normalizeProductDeliveryMode } from '../../lib/productSchema';
+import type { ProductKind, ProductDeliveryMode } from '../../lib/productSchema';
 
 interface EditProductModalProps {
   isOpen: boolean;
