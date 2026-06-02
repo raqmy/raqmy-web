@@ -8,6 +8,7 @@ import {
   Download,
   Store as StoreIcon,
   ArrowLeft,
+  Briefcase,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -26,6 +27,10 @@ interface ProductLite {
   slug?: string | null;
   store_id?: string | null;
   user_id?: string | null;
+  product_kind?: string | null;
+  delivery_mode?: string | null;
+  service_delivery_days?: number | null;
+  service_revisions_count?: number | null;
 }
 
 interface RawOrderItem {
@@ -49,6 +54,22 @@ interface OrderItemView {
   product_slug?: string | null;
   store_id?: string | null;
   user_id?: string | null;
+  product_kind?: string | null;
+  delivery_mode?: string | null;
+  service_delivery_days?: number | null;
+  service_revisions_count?: number | null;
+  service_detail?: ServiceOrderDetail | null;
+}
+
+interface ServiceOrderDetail {
+  id: string;
+  order_item_id?: string | null;
+  product_id?: string | null;
+  buyer_requirements?: string | null;
+  service_status?: string | null;
+  seller_notes?: string | null;
+  delivered_at?: string | null;
+  completed_at?: string | null;
 }
 
 interface Order {
@@ -74,6 +95,30 @@ const getActiveStoreScopeSlug = () => {
     return sessionStorage.getItem('active_store_slug');
   } catch {
     return null;
+  }
+};
+
+const isDigitalServiceItem = (item: OrderItemView | null | undefined) => {
+  return String(item?.product_kind || '').toLowerCase() === 'digital_service';
+};
+
+const getServiceStatusText = (status?: string | null) => {
+  switch (String(status || '').toLowerCase()) {
+    case 'requirements_submitted':
+      return 'تم إرسال المتطلبات';
+    case 'in_progress':
+      return 'قيد التنفيذ';
+    case 'delivered':
+      return 'تم التسليم';
+    case 'revision_requested':
+      return 'طلب تعديل';
+    case 'completed':
+      return 'مكتملة';
+    case 'cancelled':
+      return 'ملغاة';
+    case 'pending_requirements':
+    default:
+      return 'بانتظار المتطلبات';
   }
 };
 
@@ -219,7 +264,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
           if (productIds.length > 0) {
             const { data: productsData, error: productsError } = await supabase
               .from('products')
-              .select('id, name, title, price, currency, thumbnail_url, slug, store_id, user_id')
+              .select('id, name, title, price, currency, thumbnail_url, slug, store_id, user_id, product_kind, delivery_mode, service_delivery_days, service_revisions_count')
               .in('id', productIds);
 
             if (productsError) {
@@ -227,6 +272,24 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
             } else if (productsData) {
               productsMap = new Map(
                 (productsData as ProductLite[]).map((product) => [product.id, product])
+              );
+            }
+          }
+
+          let serviceDetailsMap = new Map<string, ServiceOrderDetail>();
+
+          if (itemsArray.length > 0) {
+            const orderItemIds = itemsArray.map((item) => item.id).filter(Boolean);
+            const { data: serviceDetailsData, error: serviceDetailsError } = await supabase
+              .from('service_order_details')
+              .select('*')
+              .in('order_item_id', orderItemIds);
+
+            if (serviceDetailsError) {
+              console.error('Error fetching service order details:', serviceDetailsError);
+            } else if (serviceDetailsData) {
+              serviceDetailsMap = new Map(
+                (serviceDetailsData as ServiceOrderDetail[]).map((detail) => [String(detail.order_item_id), detail])
               );
             }
           }
@@ -252,6 +315,11 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
                 product_slug: product?.slug ?? null,
                 store_id: product?.store_id ?? null,
                 user_id: product?.user_id ?? null,
+                product_kind: product?.product_kind ?? null,
+                delivery_mode: product?.delivery_mode ?? null,
+                service_delivery_days: product?.service_delivery_days ?? null,
+                service_revisions_count: product?.service_revisions_count ?? null,
+                service_detail: serviceDetailsMap.get(String(item.id)) || null,
               } as OrderItemView;
             })
             .filter(Boolean) as OrderItemView[];
@@ -546,7 +614,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
                                 عرض المنتج
                               </button>
 
-                              {canAccessFiles(order.status) && (
+                              {canAccessFiles(order.status) && !isDigitalServiceItem(item) && (
                                 <button
                                   onClick={() => handleOpenProductFiles(item)}
                                   className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2"
@@ -556,6 +624,36 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ onNavigate }) => {
                                 </button>
                               )}
                             </div>
+
+                            {isDigitalServiceItem(item) && (
+                              <div className="mt-3 rounded-xl border border-purple-100 bg-purple-50/70 p-4 text-sm">
+                                <div className="flex items-center gap-2 mb-2 text-purple-900 font-bold">
+                                  <Briefcase className="w-4 h-4" />
+                                  <span>تفاصيل الخدمة</span>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3 text-xs text-purple-800">
+                                  <span className="rounded-lg bg-white px-3 py-2 border border-purple-100">
+                                    الحالة: {getServiceStatusText(item.service_detail?.service_status)}
+                                  </span>
+                                  {item.service_delivery_days ? (
+                                    <span className="rounded-lg bg-white px-3 py-2 border border-purple-100">
+                                      مدة التنفيذ: {item.service_delivery_days} يوم
+                                    </span>
+                                  ) : null}
+                                  {item.service_revisions_count !== null && item.service_revisions_count !== undefined ? (
+                                    <span className="rounded-lg bg-white px-3 py-2 border border-purple-100">
+                                      التعديلات: {item.service_revisions_count}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {item.service_detail?.buyer_requirements && (
+                                  <div className="rounded-lg bg-white border border-purple-100 p-3">
+                                    <p className="font-semibold text-gray-800 mb-1">متطلباتك المرسلة للتاجر:</p>
+                                    <p className="text-gray-700 whitespace-pre-line">{item.service_detail.buyer_requirements}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
