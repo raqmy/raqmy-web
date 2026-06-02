@@ -4,7 +4,8 @@ import { supabase, Store } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { ProductImagesManager, ProductImage } from './ProductImagesManager';
 import { ProductAttachmentsManager, ProductAttachment } from './ProductAttachmentsManager';
-import { detectProductMerchantColumn, ProductKind, ProductDeliveryMode, PRODUCT_KIND_LABELS, PRODUCT_DELIVERY_MODE_LABELS } from '../../lib/productSchema';
+import { detectProductMerchantColumn, PRODUCT_KIND_LABELS, PRODUCT_DELIVERY_MODE_LABELS } from '../../lib/productSchema';
+import type { ProductKind, ProductDeliveryMode } from '../../lib/productSchema';
 import { useCurrency } from '../../lib/currency';
 
 interface CreateProductModalProps {
