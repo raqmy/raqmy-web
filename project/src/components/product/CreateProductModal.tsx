@@ -533,6 +533,10 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
     }
   };
 
+  const itemLabel = isDigitalService ? 'الخدمة' : 'المنتج';
+  const itemLabelWithDigital = isDigitalService ? 'الخدمة الرقمية' : 'المنتج الرقمي';
+  const createButtonLabel = isDigitalService ? 'إضافة الخدمة' : 'إضافة المنتج';
+
   if (!isOpen) return null;
 
   return (
@@ -543,7 +547,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
             <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
               <Package className="w-5 h-5 text-blue-600" />
             </div>
-            <h2 className="text-2xl font-bold text-gray-900">إضافة منتج جديد</h2>
+            <h2 className="text-2xl font-bold text-gray-900">إضافة {itemLabel} جديد</h2>
           </div>
           <button
             onClick={onClose}
@@ -564,33 +568,8 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">1. معلومات المنتج الأساسية</h3>
-              <p className="text-sm text-gray-500 mt-1">أدخل المعلومات الأساسية للمنتج</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                اسم المنتج <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="مثال: دورة تصميم الجرافيك الشاملة"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">وصف المنتج</label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="اكتب وصفاً تفصيلياً عن المنتج ومميزاته"
-              />
+              <h3 className="text-lg font-bold text-gray-900">1. نوع العرض</h3>
+              <p className="text-sm text-gray-500 mt-1">اختر هل تريد بيع منتج رقمي جاهز أو خدمة رقمية يتم تنفيذها بعد الطلب.</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -616,7 +595,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                   <Download className="w-5 h-5" />
                   {PRODUCT_KIND_LABELS.digital_product}
                 </div>
-                <p className="text-xs leading-6">ملف أو قالب أو محتوى جاهز يحصل عليه العميل بعد الدفع.</p>
+                <p className="text-xs leading-6">ملف أو قالب أو محتوى جاهز يحصل عليه العميل فورًا بعد الدفع.</p>
               </button>
 
               <button
@@ -638,10 +617,41 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                   <Briefcase className="w-5 h-5" />
                   {PRODUCT_KIND_LABELS.digital_service}
                 </div>
-                <p className="text-xs leading-6">خدمة ينفذها التاجر بعد الشراء مثل تصميم أو إعداد أو استشارة.</p>
+                <p className="text-xs leading-6">خدمة ينفذها التاجر بعد الشراء مثل تصميم، إعداد، كتابة محتوى، أو استشارة.</p>
               </button>
             </div>
+          </div>
 
+          <div className="space-y-6">
+            <div className="pb-3 border-b border-gray-200">
+              <h3 className="text-lg font-bold text-gray-900">2. معلومات {itemLabel} الأساسية</h3>
+              <p className="text-sm text-gray-500 mt-1">أدخل المعلومات الأساسية لـ {itemLabelWithDigital}</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                اسم {itemLabel} <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder={isDigitalService ? 'مثال: تصميم بوست احترافي لحسابك' : 'مثال: قالب إدارة الميزانية الشهرية'}
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">وصف {itemLabel}</label>
+              <textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                rows={4}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder={isDigitalService ? 'اكتب وصفًا واضحًا للخدمة، ما الذي ستنفذه، وما الذي سيحصل عليه العميل.' : 'اكتب وصفًا تفصيليًا عن المنتج ومميزاته.'}
+              />
+            </div>
 
             {isDigitalService && (
               <div className="rounded-xl border border-purple-100 bg-purple-50 p-4 space-y-4">
@@ -651,7 +661,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">مدة التنفيذ بالأيام</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">مدة تنفيذ الخدمة بالأيام</label>
                     <input
                       type="number"
                       min="1"
@@ -678,7 +688,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات ومتطلبات الخدمة</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">متطلبات تنفيذ الخدمة</label>
                   <textarea
                     value={formData.service_requirements_note}
                     onChange={(e) => setFormData({ ...formData, service_requirements_note: e.target.value })}
@@ -686,7 +696,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     placeholder="مثال: بعد الشراء سيحتاج العميل إلى إرسال الألوان، النصوص، الشعار، والمقاسات المطلوبة."
                   />
-                  <p className="text-xs text-purple-700 mt-2">هذه الملاحظة تساعد العميل يعرف ماذا سيجهز بعد شراء الخدمة.</p>
+                  <p className="text-xs text-purple-700 mt-2">هذه الملاحظة تظهر للعميل وتساعده يعرف ما الذي يجب إرساله بعد شراء الخدمة.</p>
                 </div>
               </div>
             )}
@@ -728,8 +738,8 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">2. صور المنتج</h3>
-              <p className="text-sm text-gray-500 mt-1">أضف صور توضيحية للمنتج</p>
+              <h3 className="text-lg font-bold text-gray-900">3. صور {itemLabel}</h3>
+              <p className="text-sm text-gray-500 mt-1">أضف صورًا توضيحية لـ {itemLabelWithDigital}</p>
             </div>
 
             <ProductImagesManager images={images} onChange={setImages} maxImages={8} />
@@ -737,16 +747,16 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">3. {isDigitalService ? 'مرفقات اختيارية للخدمة' : 'مرفقات المنتج الرقمي'}</h3>
+              <h3 className="text-lg font-bold text-gray-900">4. {isDigitalService ? 'مرفقات اختيارية للخدمة' : 'مرفقات المنتج الرقمي'}</h3>
               <p className="text-sm text-gray-500 mt-1">{isDigitalService ? 'يمكنك إضافة ملف تعريفي أو تعليمات اختيارية، ولا يشترط وجود مرفق للخدمة.' : 'المحتوى الذي سيحصل عليه العميل بعد الشراء'}</p>
             </div>
 
-            <ProductAttachmentsManager attachments={attachments} onChange={setAttachments} />
+            <ProductAttachmentsManager attachments={attachments} onChange={setAttachments} productKind={formData.product_kind} required={requiresInstantAttachments} />
           </div>
 
           <div className="space-y-6">
             <div className="pb-3 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">4. التسعير والظهور</h3>
+              <h3 className="text-lg font-bold text-gray-900">5. التسعير والظهور</h3>
               <p className="text-sm text-gray-500 mt-1">حدد إعدادات النشر والعرض وحد المبيعات</p>
             </div>
 
@@ -757,7 +767,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                 onChange={(e) => setFormData({ ...formData, store_id: e.target.value })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">منتج مستقل (بدون متجر)</option>
+                <option value="">{isDigitalService ? 'خدمة مستقلة (بدون متجر)' : 'منتج مستقل (بدون متجر)'}</option>
                 {stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}
@@ -835,12 +845,12 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                     dir="ltr"
                   />
                   <p className="text-xs text-gray-500 mt-2">
-                    عند الوصول لهذا العدد سيتم منع شراء المنتج حتى ترفع الحد أو تجعله بدون حد.
+                    عند الوصول لهذا العدد سيتم منع شراء {itemLabel} حتى ترفع الحد أو تجعله بدون حد.
                   </p>
                 </div>
               ) : (
                 <p className="text-xs text-gray-500">
-                  المنتج متاح للبيع بدون حد أقصى لعدد مرات الشراء.
+                  {itemLabel} متاح للبيع بدون حد أقصى لعدد مرات الشراء.
                 </p>
               )}
             </div>
@@ -848,12 +858,12 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
           {!isFormValid() && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm font-medium text-blue-900 mb-2">لإتمام إنشاء المنتج، يجب:</p>
+              <p className="text-sm font-medium text-blue-900 mb-2">لإتمام إنشاء {itemLabel}، يجب:</p>
               <ul className="text-sm text-blue-800 space-y-1 mr-4">
-                {!formData.name.trim() && <li>• إدخال اسم المنتج</li>}
+                {!formData.name.trim() && <li>• إدخال اسم {itemLabel}</li>}
                 {!formData.price.trim() && <li>• إدخال السعر</li>}
                 {images.length === 0 && <li>• إضافة صورة واحدة على الأقل</li>}
-                {requiresInstantAttachments && attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل للمنتج الفوري</li>}
+                {requiresInstantAttachments && attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل للمنتج الرقمي</li>}
                 {!isServiceDeliveryDaysValid() && <li>• إدخال مدة تنفيذ صحيحة للخدمة</li>}
                 {!isServiceRevisionsCountValid() && <li>• إدخال عدد تعديلات صحيح للخدمة</li>}
                 {formData.quantity_limit_enabled && !isQuantityLimitValid() && (
@@ -882,7 +892,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                   <span>جاري الإضافة...</span>
                 </>
               ) : (
-                'إضافة العرض'
+                createButtonLabel
               )}
             </button>
           </div>
