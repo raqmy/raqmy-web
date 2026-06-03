@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FileText, Image, Type, X, File } from 'lucide-react';
+import type { ProductKind } from '../../lib/productSchema';
 
 export interface ProductAttachment {
   id?: string;
@@ -15,15 +16,26 @@ export interface ProductAttachment {
 interface ProductAttachmentsManagerProps {
   attachments: ProductAttachment[];
   onChange: (attachments: ProductAttachment[]) => void;
+  productKind?: ProductKind;
+  required?: boolean;
 }
 
 export const ProductAttachmentsManager: React.FC<ProductAttachmentsManagerProps> = ({
   attachments,
   onChange,
+  productKind = 'digital_product',
+  required = productKind === 'digital_product',
 }) => {
   const [showTextModal, setShowTextModal] = useState(false);
   const [textTitle, setTextTitle] = useState('');
   const [textContent, setTextContent] = useState('');
+
+  const isDigitalService = productKind === 'digital_service';
+
+  const sectionTitle = isDigitalService ? 'مرفقات اختيارية للخدمة' : 'مرفقات المنتج الرقمي';
+  const sectionDescription = isDigitalService
+    ? 'اختياري: أضف ملف تعريفي، نماذج أعمال، تعليمات، أو أمثلة تساعد العميل قبل/بعد شراء الخدمة.'
+    : 'المحتوى الذي سيحصل عليه العميل بعد الشراء مباشرة، مثل الملفات والصور والنصوص.';
 
   const handleFileSelect = (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -111,10 +123,10 @@ export const ProductAttachmentsManager: React.FC<ProductAttachmentsManagerProps>
     <div className="space-y-4">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          مرفقات المنتج الرقمي <span className="text-red-500">*</span>
+          {sectionTitle} {required && <span className="text-red-500">*</span>}
         </label>
         <p className="text-xs text-gray-500 mb-4">
-          المحتوى الذي سيحصل عليه العميل بعد الشراء (ملفات، صور، أو نصوص)
+          {sectionDescription}
         </p>
       </div>
 
@@ -200,9 +212,15 @@ export const ProductAttachmentsManager: React.FC<ProductAttachmentsManagerProps>
       )}
 
       {attachments.length === 0 && (
-        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
-          يجب إضافة مرفق واحد على الأقل لنشر المنتج
-        </div>
+        required ? (
+          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+            يجب إضافة مرفق واحد على الأقل لنشر المنتج الرقمي لأن العميل سيحصل عليه مباشرة بعد الشراء.
+          </div>
+        ) : (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
+            المرفقات اختيارية لهذه الخدمة. يمكنك تركها فارغة أو إضافة ملفات/صور توضيحية عند الحاجة.
+          </div>
+        )
       )}
 
       {showTextModal && (
@@ -211,6 +229,7 @@ export const ProductAttachmentsManager: React.FC<ProductAttachmentsManagerProps>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-gray-900">إضافة محتوى نصي</h3>
               <button
+                type="button"
                 onClick={() => {
                   setShowTextModal(false);
                   setTextTitle('');
@@ -232,7 +251,7 @@ export const ProductAttachmentsManager: React.FC<ProductAttachmentsManagerProps>
                   value={textTitle}
                   onChange={(e) => setTextTitle(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="مثال: تعليمات الاستخدام"
+                  placeholder={isDigitalService ? 'مثال: تعليمات قبل تنفيذ الخدمة' : 'مثال: تعليمات الاستخدام'}
                 />
               </div>
 
@@ -245,7 +264,7 @@ export const ProductAttachmentsManager: React.FC<ProductAttachmentsManagerProps>
                   onChange={(e) => setTextContent(e.target.value)}
                   rows={8}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="اكتب المحتوى النصي هنا..."
+                  placeholder={isDigitalService ? 'اكتب تعليمات أو ملاحظات اختيارية مرتبطة بالخدمة...' : 'اكتب المحتوى النصي هنا...'}
                 />
               </div>
 
