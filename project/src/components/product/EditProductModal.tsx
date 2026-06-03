@@ -445,6 +445,10 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     }
   };
 
+  const itemLabel = isDigitalService ? 'الخدمة' : 'المنتج';
+  const itemLabelWithDigital = isDigitalService ? 'الخدمة الرقمية' : 'المنتج الرقمي';
+  const saveButtonLabel = isDigitalService ? 'حفظ الخدمة' : 'حفظ المنتج';
+
   if (!isOpen) return null;
 
   return (
@@ -461,7 +465,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             </button>
 
             <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-bold text-gray-900">تعديل المنتج</h2>
+              <h2 className="text-2xl font-bold text-gray-900">تعديل {itemLabel}</h2>
               <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
                 <Package className="w-5 h-5 text-blue-600" />
               </div>
@@ -472,7 +476,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             <div className="mt-4 flex justify-end">
               <CopyLinkButton
                 url={`${window.location.origin}/#/product-${product.id}`}
-                label="نسخ رابط المنتج"
+                label={isDigitalService ? "نسخ رابط الخدمة" : "نسخ رابط المنتج"}
                 variant="minimal"
               />
             </div>
@@ -492,36 +496,8 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
           <div className="space-y-6">
             <div className="pb-3 border-b">
-              <h3 className="font-bold text-lg">1. معلومات المنتج الأساسية</h3>
-              <p className="text-sm text-gray-500">أدخل المعلومات الأساسية</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                اسم المنتج <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                placeholder="اسم المنتج"
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData({ ...formData, name: e.target.value })
-                }
-                className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">وصف المنتج</label>
-              <textarea
-                rows={4}
-                placeholder="وصف المنتج"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
+              <h3 className="font-bold text-lg">1. نوع العرض</h3>
+              <p className="text-sm text-gray-500">اختر هل هذا العرض منتج رقمي جاهز أو خدمة رقمية يتم تنفيذها بعد الطلب.</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -547,7 +523,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                   <Download className="w-5 h-5" />
                   {PRODUCT_KIND_LABELS.digital_product}
                 </div>
-                <p className="text-xs leading-6">ملف أو قالب أو محتوى جاهز يحصل عليه العميل بعد الدفع.</p>
+                <p className="text-xs leading-6">ملف أو قالب أو محتوى جاهز يحصل عليه العميل فورًا بعد الدفع.</p>
               </button>
 
               <button
@@ -569,10 +545,44 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                   <Briefcase className="w-5 h-5" />
                   {PRODUCT_KIND_LABELS.digital_service}
                 </div>
-                <p className="text-xs leading-6">خدمة ينفذها التاجر بعد الشراء مثل تصميم أو إعداد أو استشارة.</p>
+                <p className="text-xs leading-6">خدمة ينفذها التاجر بعد الشراء مثل تصميم، إعداد، كتابة محتوى، أو استشارة.</p>
               </button>
             </div>
+          </div>
 
+          <div className="space-y-6">
+            <div className="pb-3 border-b">
+              <h3 className="font-bold text-lg">2. معلومات {itemLabel} الأساسية</h3>
+              <p className="text-sm text-gray-500">أدخل المعلومات الأساسية لـ {itemLabelWithDigital}</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                اسم {itemLabel} <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder={isDigitalService ? 'مثال: تصميم بوست احترافي لحسابك' : 'مثال: قالب إدارة الميزانية الشهرية'}
+                value={formData.name}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
+                className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">وصف {itemLabel}</label>
+              <textarea
+                rows={4}
+                placeholder={isDigitalService ? 'اكتب وصفًا واضحًا للخدمة، ما الذي ستنفذه، وما الذي سيحصل عليه العميل.' : 'اكتب وصفًا تفصيليًا عن المنتج ومميزاته.'}
+                value={formData.description}
+                onChange={(e) =>
+                  setFormData({ ...formData, description: e.target.value })
+                }
+                className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
 
             {isDigitalService && (
               <div className="rounded-xl border border-purple-100 bg-purple-50 p-4 space-y-4">
@@ -582,7 +592,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">مدة التنفيذ بالأيام</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">مدة تنفيذ الخدمة بالأيام</label>
                     <input type="number" min="1" step="1" value={formData.service_delivery_days} onChange={(e) => setFormData({ ...formData, service_delivery_days: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" placeholder="مثال: 3" dir="ltr" />
                   </div>
                   <div>
@@ -591,9 +601,9 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">ملاحظات ومتطلبات الخدمة</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">متطلبات تنفيذ الخدمة</label>
                   <textarea value={formData.service_requirements_note} onChange={(e) => setFormData({ ...formData, service_requirements_note: e.target.value })} rows={3} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" placeholder="مثال: بعد الشراء سيحتاج العميل إلى إرسال الألوان، النصوص، الشعار، والمقاسات المطلوبة." />
-                  <p className="text-xs text-purple-700 mt-2">هذه الملاحظة تساعد العميل يعرف ماذا سيجهز بعد شراء الخدمة.</p>
+                  <p className="text-xs text-purple-700 mt-2">هذه الملاحظة تظهر للعميل وتساعده يعرف ما الذي يجب إرساله بعد شراء الخدمة.</p>
                 </div>
               </div>
             )}
@@ -638,7 +648,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
           <div className="space-y-6">
             <div className="pb-3 border-b">
-              <h3 className="font-bold text-lg">2. صور المنتج</h3>
+              <h3 className="font-bold text-lg">3. صور {itemLabel}</h3>
             </div>
 
             <ProductImagesManager images={images} onChange={setImages} maxImages={8} />
@@ -646,19 +656,21 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
           <div className="space-y-6">
             <div className="pb-3 border-b">
-              <h3 className="font-bold text-lg">3. {isDigitalService ? 'مرفقات اختيارية للخدمة' : 'مرفقات المنتج'}</h3>
+              <h3 className="font-bold text-lg">4. {isDigitalService ? 'مرفقات اختيارية للخدمة' : 'مرفقات المنتج الرقمي'}</h3>
               <p className="text-sm text-gray-500 mt-1">{isDigitalService ? 'يمكنك إضافة ملف تعريفي أو تعليمات اختيارية، ولا يشترط وجود مرفق للخدمة.' : 'المحتوى الذي سيحصل عليه العميل بعد الشراء.'}</p>
             </div>
 
             <ProductAttachmentsManager
               attachments={attachments}
               onChange={setAttachments}
+              productKind={formData.product_kind}
+              required={requiresInstantAttachments}
             />
           </div>
 
           <div className="space-y-6">
             <div className="pb-3 border-b">
-              <h3 className="font-bold text-lg">4. التسعير والظهور</h3>
+              <h3 className="font-bold text-lg">5. التسعير والظهور</h3>
               <p className="text-sm text-gray-500">حدد إعدادات النشر والعرض وحد المبيعات</p>
             </div>
 
@@ -671,7 +683,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 }
                 className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">منتج مستقل (بدون متجر)</option>
+                <option value="">{isDigitalService ? 'خدمة مستقلة (بدون متجر)' : 'منتج مستقل (بدون متجر)'}</option>
                 {stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}
@@ -704,7 +716,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 }
                 className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
               />
-              المنتج نشط
+              {itemLabel} نشط
             </label>
 
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -763,12 +775,12 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                     dir="ltr"
                   />
                   <p className="text-xs text-gray-500 mt-2">
-                    عند الوصول لهذا العدد سيتم منع شراء المنتج حتى ترفع الحد أو تجعله بدون حد.
+                    عند الوصول لهذا العدد سيتم منع شراء {itemLabel} حتى ترفع الحد أو تجعله بدون حد.
                   </p>
                 </div>
               ) : (
                 <p className="text-xs text-gray-500">
-                  المنتج متاح للبيع بدون حد أقصى لعدد مرات الشراء.
+                  {itemLabel} متاح للبيع بدون حد أقصى لعدد مرات الشراء.
                 </p>
               )}
             </div>
@@ -776,12 +788,12 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
           {!isFormValid() && (
             <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-800">
-              <p className="font-medium mb-2">لحفظ التغييرات، يجب:</p>
+              <p className="font-medium mb-2">لحفظ تغييرات {itemLabel}، يجب:</p>
               <ul className="space-y-1 mr-4">
-                {!safeTrim(formData.name) && <li>• إدخال اسم المنتج</li>}
+                {!safeTrim(formData.name) && <li>• إدخال اسم {itemLabel}</li>}
                 {!safeTrim(formData.price) && <li>• إدخال السعر</li>}
                 {images.length === 0 && <li>• إضافة صورة واحدة على الأقل</li>}
-                {requiresInstantAttachments && attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل للمنتج الفوري</li>}
+                {requiresInstantAttachments && attachments.length === 0 && <li>• إضافة مرفق واحد على الأقل للمنتج الرقمي</li>}
                 {!isServiceDeliveryDaysValid() && <li>• إدخال مدة تنفيذ صحيحة للخدمة</li>}
                 {!isServiceRevisionsCountValid() && <li>• إدخال عدد تعديلات صحيح للخدمة</li>}
                 {formData.quantity_limit_enabled && !isQuantityLimitValid() && (
@@ -832,7 +844,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                   <span>جاري الحفظ...</span>
                 </>
               ) : (
-                'حفظ التغييرات'
+                saveButtonLabel
               )}
             </button>
           </div>
