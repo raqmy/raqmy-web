@@ -6,7 +6,7 @@ import { CopyLinkButton } from '../shared/CopyLinkButton';
 import { ProductImagesManager, ProductImage } from './ProductImagesManager';
 import { ProductAttachmentsManager, ProductAttachment } from './ProductAttachmentsManager';
 import { useCurrency } from '../../lib/currency';
-import { PRODUCT_KIND_LABELS, PRODUCT_DELIVERY_MODE_LABELS, normalizeProductKind, normalizeProductDeliveryMode } from '../../lib/productSchema';
+import { PRODUCT_KIND_LABELS, normalizeProductKind, normalizeProductDeliveryMode } from '../../lib/productSchema';
 import type { ProductKind, ProductDeliveryMode } from '../../lib/productSchema';
 
 interface EditProductModalProps {
@@ -206,7 +206,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   };
 
   const isDigitalService = formData.product_kind === 'digital_service';
-  const requiresInstantAttachments = !isDigitalService && formData.delivery_mode === 'instant';
+  const requiresInstantAttachments = formData.product_kind === 'digital_product';
 
   const isServiceDeliveryDaysValid = () => {
     if (!isDigitalService) return true;
@@ -285,7 +285,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         price,
         currency: formData.currency || 'SAR',
         product_kind: formData.product_kind,
-        delivery_mode: isDigitalService ? 'manual' : formData.delivery_mode,
+        delivery_mode: isDigitalService ? 'manual' : 'instant',
         service_delivery_days: isDigitalService ? getNullablePositiveInteger(formData.service_delivery_days) : null,
         service_revisions_count: isDigitalService ? getNullableNonNegativeInteger(formData.service_revisions_count) : null,
         service_requirements_note: isDigitalService && safeTrim(formData.service_requirements_note) ? safeTrim(formData.service_requirements_note) : null,
@@ -573,35 +573,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
               </button>
             </div>
 
-            {!isDigitalService && (
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <label className="block text-sm font-medium text-gray-700 mb-3">طريقة تسليم المنتج</label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, delivery_mode: 'instant' })}
-                    className={`rounded-lg border px-4 py-3 text-sm font-semibold transition-colors ${
-                      formData.delivery_mode === 'instant'
-                        ? 'border-blue-600 bg-blue-50 text-blue-700'
-                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    {PRODUCT_DELIVERY_MODE_LABELS.instant}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, delivery_mode: 'manual' })}
-                    className={`rounded-lg border px-4 py-3 text-sm font-semibold transition-colors ${
-                      formData.delivery_mode === 'manual'
-                        ? 'border-blue-600 bg-blue-50 text-blue-700'
-                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    {PRODUCT_DELIVERY_MODE_LABELS.manual}
-                  </button>
-                </div>
-              </div>
-            )}
 
             {isDigitalService && (
               <div className="rounded-xl border border-purple-100 bg-purple-50 p-4 space-y-4">
