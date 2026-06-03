@@ -896,6 +896,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const serviceDeliveryDays = Number((product as any).service_delivery_days || 0);
   const serviceRevisionsCount = Number((product as any).service_revisions_count || 0);
   const serviceRequirementsNote = String((product as any).service_requirements_note || '').trim();
+  const shouldShowServiceRequirements = Boolean(isDigitalService && serviceRequirementsNote && canAccessAttachments);
   const productTitle = product.name || (product as any).title || (isDigitalService ? 'خدمة رقمية' : 'منتج رقمي');
   const productDescription = product.description?.trim() || 'لا يوجد وصف لهذا المنتج حالياً.';
   const storedViewsCount = Number((product as any).views_count ?? 0);
@@ -1192,7 +1193,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           </div>
         </div>
 
-        {isDigitalService && serviceRequirementsNote && (
+        {shouldShowServiceRequirements && (
           <div className="bg-purple-50 border border-purple-100 rounded-xl p-6 shadow-sm mb-8">
             <div className="flex items-center gap-2 mb-3 text-purple-900 font-bold">
               <Clock3 className="w-5 h-5" />
