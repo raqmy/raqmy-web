@@ -288,7 +288,7 @@ const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
-const SELLER_DASHBOARD_CACHE_VERSION = 7;
+const SELLER_DASHBOARD_CACHE_VERSION = 8;
 const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
 
 const getSellerDashboardCacheKey = (profileId: string) => {
@@ -2981,6 +2981,12 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               حسابك معلق مؤقتاً، لذلك لا يمكن تنفيذ إجراءات البيع أو السحب أو تعديل المنتجات والمتاجر حتى يتم رفع التعليق.
             </div>
           )}
+
+          {!isAccountSuspended && (
+            <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              يمكنك البدء في بيع منتجاتك وخدماتك الرقمية مباشرة قبل توثيق الهوية أو إضافة الحساب البنكي. التوثيق والحساب البنكي مطلوبان فقط عند طلب سحب الأرباح.
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-xl shadow-sm mb-8">
@@ -4274,6 +4280,9 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                     من هنا يمكنك متابعة رصيدك، مراجعة سجل المحفظة، وإرسال طلبات سحب الأرباح.
                   </p>
                   <p className="mt-2 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
+                  <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                    التوثيق والحساب البنكي لا يمنعانك من البيع أو استقبال الطلبات؛ هما مطلوبان فقط قبل إرسال طلب سحب الأرباح.
+                  </div>
                 </div>
 
                 <button
