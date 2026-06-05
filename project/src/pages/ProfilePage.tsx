@@ -3379,6 +3379,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                             </div>
                           </div>
 
+                          <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                            يمكنك البدء في البيع وإضافة المنتجات والخدمات الرقمية قبل توثيق الهوية. التوثيق مطلوب فقط عند طلب سحب الأرباح من المنصة.
+                          </div>
+
                           {identityMessage && (
                             <div className="mb-4 p-4 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-sm">
                               {identityMessage}
@@ -3637,6 +3641,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                             <div>
                               <h3 className="text-lg font-bold text-gray-900">الحساب البنكي</h3>
                             </div>
+                          </div>
+
+                          <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                            إضافة الحساب البنكي ليست شرطاً لبدء البيع. يمكنك استقبال الطلبات الآن، وسيُطلب الحساب البنكي فقط عند رغبتك في سحب أرباحك.
                           </div>
 
                           {bankMessage && (
