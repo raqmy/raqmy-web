@@ -2982,11 +2982,6 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             </div>
           )}
 
-          {!isAccountSuspended && (
-            <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-              يمكنك البدء في بيع منتجاتك وخدماتك الرقمية مباشرة قبل توثيق الهوية أو إضافة الحساب البنكي. التوثيق والحساب البنكي مطلوبان فقط عند طلب سحب الأرباح.
-            </div>
-          )}
         </div>
 
         <div className="bg-white rounded-xl shadow-sm mb-8">
