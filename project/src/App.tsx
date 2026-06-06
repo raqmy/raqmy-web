@@ -1468,7 +1468,14 @@ function AppContent() {
 
       case 'merchant-onboarding':
         return typedProfile?.role === 'seller' || typedProfile?.role === 'admin' ? (
-          <MerchantOnboardingPage onNavigate={navigateWithContext} />
+          <MerchantOnboardingPage
+            onNavigate={(page) => {
+              if (page === 'seller-dashboard' || page.startsWith('seller-dashboard')) {
+                setMerchantOnboardingRequired(false);
+              }
+              navigateWithContext(page);
+            }}
+          />
         ) : (
           <HomePage onNavigate={navigateWithContext} />
         );
