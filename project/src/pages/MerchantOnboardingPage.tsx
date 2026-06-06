@@ -58,7 +58,7 @@ const questions = [
     key: 'selling_type',
     badge: 'الخطوة الأولى',
     title: 'وش ناوي تبيع في رقمي؟',
-    description: 'اختيارك يساعدنا نجهز لك خطوات مناسبة بدل لوحة عامة.',
+    description: 'اختيارك يساعدنا نجهز لك خطوات مناسبة داخل لوحة التاجر.',
     options: [
       {
         value: 'digital_products',
@@ -249,12 +249,7 @@ export const MerchantOnboardingPage: React.FC<MerchantOnboardingPageProps> = ({ 
   const currentQuestion = questions[step];
   const isLastStep = step === questions.length - 1;
   const progress = Math.round(((step + 1) / questions.length) * 100);
-
   const selectedValue = answers[currentQuestion.key as keyof OnboardingAnswers];
-
-  const selectedOption = useMemo(() => {
-    return currentQuestion.options.find((option) => option.value === selectedValue);
-  }, [currentQuestion.options, selectedValue]);
 
   useEffect(() => {
     fetchExistingOnboarding();
@@ -476,7 +471,7 @@ export const MerchantOnboardingPage: React.FC<MerchantOnboardingPageProps> = ({ 
                     خلّنا نجهز طريقك لأول بيع
                   </h1>
                   <p className="text-gray-500 mt-2 leading-7">
-                    جاوب على {questions.length} أسئلة سريعة، وبعدها بنرتب لك المهام المناسبة داخل لوحة التاجر.
+                    جاوب على {questions.length} أسئلة سريعة، وبعدها تظهر لك خطوات البداية داخل لوحة التاجر.
                   </p>
                 </div>
               </div>
@@ -593,22 +588,6 @@ export const MerchantOnboardingPage: React.FC<MerchantOnboardingPageProps> = ({ 
               })}
             </div>
 
-            {selectedOption && (
-              <div className="mt-6 rounded-2xl bg-gradient-to-l from-blue-50 to-purple-50 border border-blue-100 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="text-2xl">{selectedOption.emoji}</div>
-                  <div>
-                    <div className="font-bold text-gray-900">
-                      اختيارك الحالي: {selectedOption.title}
-                    </div>
-                    <p className="text-sm text-gray-600 mt-1 leading-6">
-                      ممتاز، بنستخدم هذا الاختيار لاحقًا لترتيب المهام المناسبة لك داخل لوحة التاجر.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="mt-8 flex items-center justify-between gap-3">
               <button
                 type="button"
@@ -635,7 +614,7 @@ export const MerchantOnboardingPage: React.FC<MerchantOnboardingPageProps> = ({ 
 
         <div className="text-center mt-5">
           <p className="text-xs text-gray-400">
-            بعد الإنهاء ستظهر لك المهام داخل لوحة التاجر بناءً على إجاباتك وبياناتك الفعلية في الموقع.
+            بعد الإنهاء ستظهر لك الخطوات داخل لوحة التاجر.
           </p>
         </div>
       </div>
