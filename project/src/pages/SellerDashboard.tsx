@@ -197,6 +197,23 @@ interface SellerTaskItem {
   canSkip?: boolean;
 }
 
+interface SellerGrowthInsight {
+  key: string;
+  priority: 1 | 2 | 3 | 4 | 5;
+  level: 'critical' | 'high' | 'medium' | 'low' | 'success';
+  category: 'setup' | 'trust' | 'reach' | 'conversion' | 'operations' | 'growth';
+  title: string;
+  cause: string;
+  recommendation: string;
+  solutions: string[];
+  metricLabel?: string;
+  metricValue?: string;
+  primaryActionLabel?: string;
+  onPrimaryAction?: () => void;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
+}
+
 interface EarningsOrderMeta {
   affiliateLabel?: string | null;
   affiliateAmount?: number;
@@ -468,6 +485,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [merchantOnboarding, setMerchantOnboarding] = useState<MerchantOnboardingRow | null>(null);
   const [taskOverrides, setTaskOverrides] = useState<MerchantTaskOverrideRow[]>([]);
   const [tasksExpanded, setTasksExpanded] = useState(false);
+  const [growthInsightsExpanded, setGrowthInsightsExpanded] = useState(false);
   const [taskActionLoading, setTaskActionLoading] = useState<string | null>(null);
 
 
@@ -3044,6 +3062,46 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
 
+  const getPublicProductUrl = (product: any) => {
+    if (typeof window === 'undefined' || !product) return '';
+    const productPath = product?.slug ? `/p/${product.slug}` : `/p/${product.id}`;
+    return `${window.location.origin}${productPath}`;
+  };
+
+  const getPublicStoreUrl = (store: any) => {
+    if (typeof window === 'undefined' || !store) return '';
+    const storePath = store?.slug ? `/s/${store.slug}` : `/store/${store.id}`;
+    return `${window.location.origin}${storePath}`;
+  };
+
+  const copyTextToClipboard = async (textToCopy: string, successMessage = 'تم نسخ الرابط بنجاح.') => {
+    if (!textToCopy) return;
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else if (typeof document !== 'undefined') {
+        const textarea = document.createElement('textarea');
+        textarea.value = textToCopy;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+
+      setSellerRestrictionMessage(successMessage);
+      window.setTimeout(() => setSellerRestrictionMessage(''), 3500);
+    } catch (error) {
+      console.error('Clipboard copy error:', error);
+      setSellerRestrictionMessage('تعذر نسخ الرابط. افتح الصفحة وانسخ الرابط يدويًا.');
+      window.setTimeout(() => setSellerRestrictionMessage(''), 4000);
+    }
+  };
+
+
   const fetchMerchantOnboardingData = async () => {
     if (!profileId) return;
 
@@ -3519,6 +3577,361 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     (task) => task.status === 'completed' || task.status === 'skipped'
   ).length;
 
+  const areSellerOnboardingTasksDone =
+    sellerOnboardingTasks.length > 0 &&
+    sellerOnboardingTasks.every((task) => task.status === 'completed' || task.status === 'skipped');
+
+  const sellerGrowthInsights = useMemo<SellerGrowthInsight[]>(() => {
+    const insights: SellerGrowthInsight[] = [];
+
+    const activeProducts = products.filter((product) => Boolean(product?.is_active));
+    const storesWithMissingBasics = stores.filter((store: any) => {
+      return !hasUsefulText(store?.name) || !hasStoreImage(store) || !hasUsefulText(store?.description);
+    });
+
+    const paidOrdersCount = sellerOrders.filter(isPaidSellerOrder).length;
+    const totalViews = products.reduce((sum, product) => sum + Number(product?.views_count || 0), 0);
+    const totalProductSales = products.reduce((sum, product) => sum + Number(product?.sales_count || 0), 0);
+    const availableBalance = Number(walletData?.balance_available || 0);
+    const pendingBalance = Number(walletData?.balance_pending || 0);
+    const hasMoneyMovement = paidOrdersCount > 0 || availableBalance > 0 || pendingBalance > 0 || Number(stats.totalSales || 0) > 0;
+
+    const bestProductByViews = [...products].sort(
+      (a, b) => Number(b.views_count || 0) - Number(a.views_count || 0)
+    )[0];
+    const bestProductBySales = [...products].sort(
+      (a, b) => Number(b.sales_count || 0) - Number(a.sales_count || 0)
+    )[0];
+    const firstStore = stores[0] as any;
+    const firstActiveProduct = activeProducts[0] || products[0];
+
+    const productsMissingFiles = activeProducts.filter((product: any) => {
+      return normalizeProductKind(product?.product_kind) !== 'digital_service' && !hasProductDelivery(product);
+    });
+
+    const servicesMissingExecution = activeProducts.filter((product: any) => {
+      return normalizeProductKind(product?.product_kind) === 'digital_service' && !hasProductDelivery(product);
+    });
+
+    const productsMissingTrust = activeProducts.filter((product: any) => {
+      return !hasProductImage(product) || !hasUsefulText(product?.description) || Number(product?.price || 0) <= 0;
+    });
+
+    const lowViewsProducts = activeProducts.filter((product: any) => {
+      return Number(product?.views_count || 0) < 10 && Number(product?.sales_count || 0) === 0;
+    });
+
+    const highViewsNoSalesProducts = activeProducts.filter((product: any) => {
+      return Number(product?.views_count || 0) >= 20 && Number(product?.sales_count || 0) === 0;
+    });
+
+    if (activeProducts.length === 0) {
+      insights.push({
+        key: 'no-active-products',
+        priority: 1,
+        level: 'critical',
+        category: 'setup',
+        title: products.length > 0 ? 'فعّل منتجًا جاهزًا للبيع' : 'أضف أول منتج قابل للبيع',
+        cause:
+          products.length > 0
+            ? 'عندك منتجات محفوظة، لكنها غير مفعلة للظهور والبيع حاليًا.'
+            : 'المتجر يحتاج منتجًا واضحًا حتى يجد الزائر شيئًا يشتريه.',
+        recommendation:
+          products.length > 0
+            ? 'راجع المنتجات غير النشطة وفعّل المنتج الأفضل بعد التأكد من الصورة والوصف والسعر.'
+            : 'ابدأ بمنتج واحد فقط: عنوان واضح، صورة مناسبة، وصف مختصر، وسعر بسيط.',
+        solutions: [
+          products.length > 0 ? 'فعّل أفضل منتج عندك بدل إنشاء منتجات كثيرة دفعة واحدة.' : 'أضف منتجًا واحدًا مكتملًا قبل التفكير في التسويق.',
+          'تأكد أن المنتج يحتوي على صورة ووصف وسعر واضح.',
+          'بعد نشر المنتج انسخ رابطه وشاركه مع جمهور مناسب.',
+        ],
+        metricLabel: 'المنتجات النشطة',
+        metricValue: String(activeProducts.length),
+        primaryActionLabel: products.length > 0 ? 'فتح المنتجات' : 'إضافة منتج',
+        onPrimaryAction: () => {
+          handleTabChange('products');
+          if (products.length === 0 && canPerformSellerAction()) {
+            setShowCreateProductModal(true);
+          }
+        },
+      });
+    }
+
+    if (productsMissingFiles.length > 0) {
+      const product = productsMissingFiles[0] as any;
+      insights.push({
+        key: 'product-missing-file',
+        priority: 1,
+        level: 'critical',
+        category: 'setup',
+        title: 'أضف ملف المنتج قبل نشر الرابط',
+        cause: 'المنتج الرقمي يحتاج ملفًا أو طريقة تسليم واضحة حتى يحصل العميل على ما اشتراه بعد الدفع.',
+        recommendation: 'افتح المنتج وأضف الملف النهائي أو اجعل التسليم يدويًا إذا كان المنتج يحتاج متابعة منك.',
+        solutions: [
+          'أرفق الملف النهائي للمنتج داخل صفحة التعديل.',
+          'استخدم التسليم اليدوي فقط إذا كنت فعلًا سترسل الملف بعد الشراء.',
+          'بعد حفظ التعديل جرّب فتح المنتج وتأكد أن بياناته واضحة.',
+        ],
+        metricLabel: 'منتجات ناقصة ملف',
+        metricValue: String(productsMissingFiles.length),
+        primaryActionLabel: 'تعديل المنتج',
+        onPrimaryAction: () => setEditingProductId(product.id),
+        secondaryActionLabel: 'فتح المنتجات',
+        onSecondaryAction: () => handleTabChange('products'),
+      });
+    }
+
+    if (servicesMissingExecution.length > 0) {
+      const service = servicesMissingExecution[0] as any;
+      insights.push({
+        key: 'service-missing-execution',
+        priority: 1,
+        level: 'critical',
+        category: 'setup',
+        title: 'وضّح طريقة تنفيذ الخدمة',
+        cause: 'الخدمة حسب الطلب تحتاج مدة تنفيذ ومتطلبات واضحة حتى يعرف العميل ماذا يرسل ومتى يستلم.',
+        recommendation: 'أضف مدة التنفيذ والأسئلة المطلوبة من العميل قبل أن تبدأ تسويق الخدمة.',
+        solutions: [
+          'حدد مدة تنفيذ واقعية بالأيام.',
+          'اكتب متطلبات العميل مثل النصوص أو الملفات أو المقاسات التي تحتاجها.',
+          'اجعل الوصف يوضح النتيجة التي سيستلمها العميل.',
+        ],
+        metricLabel: 'خدمات تحتاج توضيح',
+        metricValue: String(servicesMissingExecution.length),
+        primaryActionLabel: 'تعديل الخدمة',
+        onPrimaryAction: () => setEditingProductId(service.id),
+        secondaryActionLabel: 'فتح المنتجات',
+        onSecondaryAction: () => handleTabChange('products'),
+      });
+    }
+
+    if (storesWithMissingBasics.length > 0 && activeProducts.length > 0) {
+      const store = storesWithMissingBasics[0] as any;
+      insights.push({
+        key: 'store-trust-basics',
+        priority: 2,
+        level: 'high',
+        category: 'trust',
+        title: 'ارفع ثقة الزائر بواجهة المتجر',
+        cause: 'الزائر يشتري أسرع عندما يرى اسم متجر واضح، صورة مناسبة، ووصف قصير يشرح نوع المنتجات.',
+        recommendation: 'كمّل واجهة المتجر قبل مشاركة الرابط على نطاق أوسع.',
+        solutions: [
+          'أضف صورة أو شعار بسيط للمتجر.',
+          'اكتب وصفًا من سطرين يوضح ماذا تبيع ولمن.',
+          'تأكد أن اسم المتجر مفهوم وليس مختصرًا جدًا.',
+        ],
+        metricLabel: 'متاجر تحتاج تحسين',
+        metricValue: String(storesWithMissingBasics.length),
+        primaryActionLabel: 'تعديل المتجر',
+        onPrimaryAction: () => {
+          handleTabChange('stores');
+          if (store?.id) setEditingStoreId(store.id);
+        },
+        secondaryActionLabel: 'فتح المتجر',
+        onSecondaryAction: () => {
+          if (store) openStorefront(store as Store);
+        },
+      });
+    }
+
+    if (productsMissingTrust.length > 0 && activeProducts.length > 0) {
+      const product = productsMissingTrust[0] as any;
+      insights.push({
+        key: 'product-trust-basics',
+        priority: 2,
+        level: 'high',
+        category: 'trust',
+        title: 'حسّن صفحة المنتج قبل زيادة التسويق',
+        cause: 'صفحة المنتج هي مكان قرار الشراء. إذا كانت الصورة أو الوصف أو السعر غير واضح، قد يدخل الزائر ويخرج بدون شراء.',
+        recommendation: 'ابدأ بأفضل منتج عندك وحسّن عرضه بدل تعديل كل المنتجات مرة واحدة.',
+        solutions: [
+          'اكتب الوصف على شكل: المشكلة، ماذا يحصل العميل، ولماذا المنتج مفيد.',
+          'استخدم صورة واضحة تعبر عن محتوى المنتج.',
+          'راجع السعر واجعله مناسبًا لقيمة المنتج وليس منخفضًا بلا سبب.',
+        ],
+        metricLabel: 'منتجات تحتاج تحسين',
+        metricValue: String(productsMissingTrust.length),
+        primaryActionLabel: 'تعديل المنتج',
+        onPrimaryAction: () => setEditingProductId(product.id),
+        secondaryActionLabel: 'فتح المنتج',
+        onSecondaryAction: () => openProduct(product),
+      });
+    }
+
+    if (activeProducts.length > 0 && paidOrdersCount === 0 && totalViews < 10) {
+      const product = bestProductByViews || firstActiveProduct;
+      insights.push({
+        key: 'low-reach',
+        priority: 3,
+        level: 'medium',
+        category: 'reach',
+        title: 'المشكلة الآن في الوصول للمنتج',
+        cause: 'المنتج موجود، لكن عدد المشاهدات قليل. قبل تعديل السعر أو العرض، تحتاج أن يرى المنتج عدد أكبر من المهتمين.',
+        recommendation: 'شارك رابط المنتج في مكان واحد مناسب اليوم، ثم راقب هل تزيد المشاهدات.',
+        solutions: [
+          'انسخ رابط أفضل منتج وشاركه مع 5 أشخاص مهتمين.',
+          'اكتب جملة قصيرة تشرح الفائدة بدل الاكتفاء بالرابط.',
+          'جرّب النشر في حسابك أو قروب مناسب بدون تكرار مزعج.',
+        ],
+        metricLabel: 'إجمالي المشاهدات',
+        metricValue: String(totalViews),
+        primaryActionLabel: 'نسخ رابط المنتج',
+        onPrimaryAction: () => copyTextToClipboard(getPublicProductUrl(product), 'تم نسخ رابط المنتج. شاركه مع جمهور مناسب.'),
+        secondaryActionLabel: 'فتح التسويق',
+        onSecondaryAction: () => handleTabChange('marketing'),
+      });
+    }
+
+    if (highViewsNoSalesProducts.length > 0) {
+      const product = highViewsNoSalesProducts[0] as any;
+      insights.push({
+        key: 'views-without-sales',
+        priority: 3,
+        level: 'high',
+        category: 'conversion',
+        title: 'فيه زيارات بدون مبيعات',
+        cause: 'وصول الزوار للمنتج يعني أن الرابط أو الظهور بدأ يعمل، لكن صفحة المنتج تحتاج تقوية حتى تقنع بالشراء.',
+        recommendation: 'راجع العنوان والوصف والصورة والسعر، ووضح للعميل بالضبط ماذا سيستلم.',
+        solutions: [
+          'اجعل أول سطر في الوصف يوضح النتيجة أو الفائدة.',
+          'أضف تفاصيل التسليم أو محتويات الملف بوضوح.',
+          'قارن السعر بقيمة المنتج، ولا تترك الوصف عامًا.',
+        ],
+        metricLabel: 'مشاهدات المنتج',
+        metricValue: String(Number(product?.views_count || 0)),
+        primaryActionLabel: 'تعديل المنتج',
+        onPrimaryAction: () => setEditingProductId(product.id),
+        secondaryActionLabel: 'فتح المنتج',
+        onSecondaryAction: () => openProduct(product),
+      });
+    }
+
+    if (paidOrdersCount > 0 && totalProductSales > 0 && products.length < 2) {
+      insights.push({
+        key: 'add-second-product',
+        priority: 4,
+        level: 'medium',
+        category: 'growth',
+        title: 'استفد من أول مبيعاتك بإضافة عرض قريب',
+        cause: 'وجود مبيعات يعني أن السوق فهم عرضك. أفضل خطوة بعدها هي إضافة منتج قريب بدل البدء من الصفر.',
+        recommendation: 'أنشئ منتجًا ثانيًا يكمل المنتج الذي باع أو يحل مشكلة قريبة لنفس الجمهور.',
+        solutions: [
+          'حوّل أكثر سؤال يجيك من العملاء إلى منتج جديد.',
+          'قدّم نسخة مختصرة أو متقدمة من المنتج الحالي.',
+          'اربط المنتج الجديد بوصف المنتج الأكثر مبيعًا.',
+        ],
+        metricLabel: 'عدد المنتجات',
+        metricValue: String(products.length),
+        primaryActionLabel: 'إضافة منتج جديد',
+        onPrimaryAction: () => {
+          handleTabChange('products');
+          if (canPerformSellerAction()) setShowCreateProductModal(true);
+        },
+      });
+    }
+
+    const identityApproved = identityVerification?.status === 'approved';
+    const bankApproved = bankAccountData?.status === 'approved';
+
+    if (hasMoneyMovement && (!identityApproved || !bankApproved)) {
+      insights.push({
+        key: 'payout-readiness',
+        priority: 2,
+        level: 'high',
+        category: 'operations',
+        title: 'جهّز السحب قبل احتياجك له',
+        cause: 'بعد وجود مبيعات أو رصيد، تحتاج توثيق الهوية والحساب البنكي حتى يكون طلب السحب جاهزًا عند توفر الرصيد.',
+        recommendation: 'أكمل التوثيق من صفحة الإعدادات بدل الانتظار إلى وقت السحب.',
+        solutions: [
+          !identityApproved ? 'أرسل بيانات الهوية وانتظر المراجعة.' : 'توثيق الهوية جاهز.',
+          !bankApproved ? 'أضف الحساب البنكي وتأكد أن الاسم مطابق قدر الإمكان.' : 'الحساب البنكي جاهز.',
+          'بعد الاعتماد ستتمكن من طلب السحب حسب الشروط داخل صفحة الأرباح.',
+        ],
+        metricLabel: 'جاهزية السحب',
+        metricValue: identityApproved || bankApproved ? 'جزئية' : 'غير مكتملة',
+        primaryActionLabel: 'فتح التوثيق والحساب البنكي',
+        onPrimaryAction: () => {
+          try {
+            sessionStorage.setItem('profile_default_tab', 'settings');
+          } catch (error) {
+            console.error('Error setting profile default tab:', error);
+          }
+          onNavigate('profile');
+        },
+        secondaryActionLabel: 'فتح الأرباح',
+        onSecondaryAction: () => handleTabChange('earnings'),
+      });
+    }
+
+    if (affiliateLinks.length === 0 && activeProducts.length > 0 && paidOrdersCount === 0) {
+      insights.push({
+        key: 'no-marketing-links',
+        priority: 4,
+        level: 'low',
+        category: 'reach',
+        title: 'جهّز رابطًا تسويقيًا يساعدك في الانتشار',
+        cause: 'وجود رابط تسويقي أو مشاركة منظمة يسهل عليك تتبع الجهود ومعرفة من أين تأتي الزيارات والطلبات.',
+        recommendation: 'افتح قسم التسويق وجهّز طريقة مشاركة واضحة قبل التواصل مع المسوقين أو الجمهور.',
+        solutions: [
+          'ابدأ برابط منتج واحد بدل نشر روابط كثيرة.',
+          'اكتب نصًا قصيرًا يشرح الفائدة من المنتج.',
+          'تابع النتائج من لوحة التاجر بعد النشر.',
+        ],
+        metricLabel: 'روابط التسويق',
+        metricValue: String(affiliateLinks.length),
+        primaryActionLabel: 'فتح التسويق',
+        onPrimaryAction: () => handleTabChange('marketing'),
+      });
+    }
+
+    if (insights.length === 0) {
+      const product = bestProductBySales || bestProductByViews || firstActiveProduct;
+      insights.push({
+        key: 'ready-for-growth',
+        priority: 5,
+        level: 'success',
+        category: 'growth',
+        title: 'متجرك جاهز للخطوة التالية',
+        cause: 'الأساسيات مكتملة ولا توجد مشكلة واضحة تمنع البيع الآن.',
+        recommendation: 'ركز على زيادة الوصول وإضافة عروض قريبة من المنتجات التي يهتم بها الزوار.',
+        solutions: [
+          'شارك رابط أفضل منتج لديك اليوم مع جمهور مناسب.',
+          'أضف منتجًا ثانيًا قريبًا من نفس الفكرة إذا كان عندك منتج واحد فقط.',
+          'راجع الأداء بعد يومين: إذا زادت المشاهدات بدون مبيعات، حسّن صفحة المنتج.',
+        ],
+        metricLabel: 'حالة المتجر',
+        metricValue: 'جاهز',
+        primaryActionLabel: product ? 'نسخ رابط المنتج' : firstStore ? 'نسخ رابط المتجر' : 'فتح المنتجات',
+        onPrimaryAction: () => {
+          if (product) {
+            copyTextToClipboard(getPublicProductUrl(product), 'تم نسخ رابط المنتج. ابدأ بمشاركته الآن.');
+          } else if (firstStore) {
+            copyTextToClipboard(getPublicStoreUrl(firstStore), 'تم نسخ رابط المتجر. ابدأ بمشاركته الآن.');
+          } else {
+            handleTabChange('products');
+          }
+        },
+        secondaryActionLabel: 'إضافة منتج جديد',
+        onSecondaryAction: () => {
+          handleTabChange('products');
+          if (canPerformSellerAction()) setShowCreateProductModal(true);
+        },
+      });
+    }
+
+    return [...insights].sort((a, b) => a.priority - b.priority);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    products,
+    stores,
+    sellerOrders,
+    walletData,
+    stats.totalSales,
+    identityVerification,
+    bankAccountData,
+    affiliateLinks,
+  ]);
+
   const getSellerTaskStatusMeta = (status: SellerTaskStatus) => {
     switch (status) {
       case 'completed':
@@ -3648,7 +4061,212 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     );
   };
 
+  const getGrowthInsightMeta = (level: SellerGrowthInsight['level']) => {
+    switch (level) {
+      case 'critical':
+        return {
+          label: 'أولوية عالية',
+          badgeClassName: 'bg-red-50 text-red-700 border-red-200',
+          cardClassName: 'from-red-50 via-orange-50 to-white border-red-100',
+          iconClassName: 'bg-red-600 text-white',
+          icon: <AlertTriangle className="h-5 w-5" />,
+        };
+      case 'high':
+        return {
+          label: 'مهم الآن',
+          badgeClassName: 'bg-orange-50 text-orange-700 border-orange-200',
+          cardClassName: 'from-orange-50 via-amber-50 to-white border-orange-100',
+          iconClassName: 'bg-orange-500 text-white',
+          icon: <TrendingUp className="h-5 w-5" />,
+        };
+      case 'medium':
+        return {
+          label: 'فرصة تحسين',
+          badgeClassName: 'bg-blue-50 text-blue-700 border-blue-200',
+          cardClassName: 'from-blue-50 via-sky-50 to-white border-blue-100',
+          iconClassName: 'bg-blue-600 text-white',
+          icon: <Eye className="h-5 w-5" />,
+        };
+      case 'low':
+        return {
+          label: 'اقتراح مفيد',
+          badgeClassName: 'bg-purple-50 text-purple-700 border-purple-200',
+          cardClassName: 'from-purple-50 via-indigo-50 to-white border-purple-100',
+          iconClassName: 'bg-purple-600 text-white',
+          icon: <Share2 className="h-5 w-5" />,
+        };
+      case 'success':
+      default:
+        return {
+          label: 'جاهز للنمو',
+          badgeClassName: 'bg-green-50 text-green-700 border-green-200',
+          cardClassName: 'from-green-50 via-emerald-50 to-white border-green-100',
+          iconClassName: 'bg-green-600 text-white',
+          icon: <CheckCircle2 className="h-5 w-5" />,
+        };
+    }
+  };
+
+  const getGrowthCategoryLabel = (category: SellerGrowthInsight['category']) => {
+    switch (category) {
+      case 'setup':
+        return 'تجهيز';
+      case 'trust':
+        return 'ثقة العميل';
+      case 'reach':
+        return 'الوصول';
+      case 'conversion':
+        return 'تحويل الزوار';
+      case 'operations':
+        return 'تشغيل وسحب';
+      case 'growth':
+      default:
+        return 'نمو';
+    }
+  };
+
+  const renderGrowthInsightCard = (insight: SellerGrowthInsight, isMain = false) => {
+    const meta = getGrowthInsightMeta(insight.level);
+
+    return (
+      <div
+        key={insight.key}
+        className={`overflow-hidden rounded-3xl border bg-gradient-to-br ${meta.cardClassName} ${
+          isMain ? 'p-4 shadow-sm' : 'p-4'
+        }`}
+      >
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${meta.badgeClassName}`}>
+                {meta.label}
+              </span>
+              <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-gray-600">
+                {getGrowthCategoryLabel(insight.category)}
+              </span>
+              {insight.metricLabel && (
+                <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-gray-600">
+                  {insight.metricLabel}: <span className="font-extrabold text-gray-900">{insight.metricValue}</span>
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-start gap-3">
+              <div className={`hidden h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl sm:flex ${meta.iconClassName}`}>
+                {meta.icon}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <h2 className={`${isMain ? 'text-lg' : 'text-base'} font-extrabold text-gray-900`}>
+                  {insight.title}
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-gray-700">
+                  {insight.cause}
+                </p>
+                <p className="mt-2 text-sm font-semibold leading-6 text-gray-900">
+                  {insight.recommendation}
+                </p>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {insight.solutions.slice(0, isMain ? 2 : 3).map((solution, index) => (
+                    <div key={`${insight.key}-solution-${index}`} className="flex items-start gap-2 rounded-2xl bg-white/70 px-3 py-2 text-xs leading-5 text-gray-700">
+                      <Check className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-blue-600" />
+                      <span>{solution}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-row flex-wrap gap-2 lg:w-44 lg:flex-col">
+            {insight.primaryActionLabel && (
+              <button
+                type="button"
+                onClick={insight.onPrimaryAction}
+                className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700"
+              >
+                {insight.primaryActionLabel}
+              </button>
+            )}
+
+            {insight.secondaryActionLabel && (
+              <button
+                type="button"
+                onClick={insight.onSecondaryAction}
+                className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-50"
+              >
+                {insight.secondaryActionLabel}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderGrowthAssistantCard = () => {
+    const mainInsight = sellerGrowthInsights[0];
+    if (!mainInsight) return null;
+
+    const remainingInsights = sellerGrowthInsights.slice(1);
+    const totalActionableInsights = sellerGrowthInsights.filter((insight) => insight.level !== 'success').length;
+
+    return (
+      <div className="mb-6 rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-blue-50 to-white p-4 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-blue-700">
+                مساعد نمو المتجر
+              </span>
+              <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">
+                الخطوة الجاية
+              </span>
+              <span className="text-xs font-semibold text-gray-500">
+                {totalActionableInsights > 0
+                  ? `${totalActionableInsights} نقطة تستحق انتباهك`
+                  : 'لا توجد مشكلة واضحة الآن'}
+              </span>
+            </div>
+            <h2 className="text-xl font-extrabold text-gray-900">
+              ركّز على أهم خطوة لتحسين نتائجك
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-gray-600">
+              نراجع منتجاتك ومتجرك ومبيعاتك ونقترح عليك أفضل خطوة عملية بدل عرض نصائح عامة.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setGrowthInsightsExpanded((current) => !current)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50"
+          >
+            {growthInsightsExpanded ? 'إخفاء التفاصيل' : remainingInsights.length > 0 ? 'عرض كل الاقتراحات' : 'عرض التفاصيل'}
+            <ChevronDown className={`h-4 w-4 transition-transform ${growthInsightsExpanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+
+        {renderGrowthInsightCard(mainInsight, true)}
+
+        {growthInsightsExpanded && (
+          <div className="mt-4 grid gap-3">
+            {remainingInsights.length > 0 ? (
+              remainingInsights.map((insight) => renderGrowthInsightCard(insight))
+            ) : (
+              <div className="rounded-2xl border border-green-100 bg-white p-4 text-sm leading-6 text-gray-700">
+                متجرك لا يظهر فيه عائق واضح الآن. استمر في مشاركة أفضل منتج، وراجع الأداء بعد وصول مشاهدات أكثر.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderSellerOnboardingTasksCard = () => {
+    if (areSellerOnboardingTasksDone) return renderGrowthAssistantCard();
+
     if (!currentSellerTask) return null;
 
     const progressPercentage = sellerOnboardingTasks.length > 0
