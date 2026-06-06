@@ -4218,7 +4218,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           <div>
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-blue-700">
-                مساعد نمو المتجر
+                مساعد نمو التاجر
               </span>
               <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">
                 الخطوة الجاية
