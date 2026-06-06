@@ -50,6 +50,7 @@ import { WhyRaqmyPage } from './pages/WhyRaqmyPage';
 import { FAQPage } from './pages/FAQPage';
 import { VerifyPhonePage } from './pages/VerifyPhonePage';
 import { MerchantBankDetailsPage } from './pages/MerchantBankDetailsPage';
+import { MerchantOnboardingPage } from './pages/MerchantOnboardingPage';
 import { supabase } from './lib/supabase';
 import { handleAffiliateTracking } from './lib/affiliate';
 
@@ -274,6 +275,7 @@ const parsePathToPage = (pathname: string, search: string = window.location.sear
     terms: 'terms',
     'verify-phone': 'verify-phone',
     'merchant-bank-details': 'merchant-bank-details',
+    'merchant-onboarding': 'merchant-onboarding',
   };
 
   return staticRoutes[segments[0]] || 'home';
@@ -551,6 +553,7 @@ const getPublicPathFromPage = (page: string) => {
     'admin-announcements': '/admin-announcements',
     'verify-phone': '/verify-phone',
     'merchant-bank-details': '/merchant-bank-details',
+    'merchant-onboarding': '/merchant-onboarding',
   };
 
   return publicRoutes[page] || null;
@@ -644,6 +647,7 @@ function AppContent() {
   const { user, profile, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState(() => parsePathToPage(window.location.pathname, window.location.search));
   const [hasBankDetails, setHasBankDetails] = useState<boolean | null>(null);
+  const [merchantOnboardingRequired, setMerchantOnboardingRequired] = useState<boolean | null>(null);
   const [isHandlingPaymentReturn, setIsHandlingPaymentReturn] = useState(false);
   const hasInitializedRouteSync = useRef(false);
 
@@ -1174,6 +1178,38 @@ function AppContent() {
   }, [currentPage, isHandlingPaymentReturn]);
 
   useEffect(() => {
+    const checkMerchantOnboarding = async () => {
+      if (!user || !typedProfile || typedProfile.role !== 'seller' || !signupCompleted) {
+        setMerchantOnboardingRequired(false);
+        return;
+      }
+
+      try {
+        setMerchantOnboardingRequired(null);
+
+        const { data, error } = await supabase
+          .from('merchant_onboarding')
+          .select('id, completed_at, skipped_at')
+          .eq('user_id', typedProfile.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error checking merchant onboarding:', error);
+          setMerchantOnboardingRequired(false);
+          return;
+        }
+
+        setMerchantOnboardingRequired(!data?.completed_at && !data?.skipped_at);
+      } catch (err) {
+        console.error('Error in checkMerchantOnboarding:', err);
+        setMerchantOnboardingRequired(false);
+      }
+    };
+
+    checkMerchantOnboarding();
+  }, [user, typedProfile, signupCompleted]);
+
+  useEffect(() => {
     if (isHandlingPaymentReturn) return;
     if (currentPage === 'auth-reset-password') return;
     if (!user || loading || !typedProfile) return;
@@ -1185,13 +1221,20 @@ function AppContent() {
       return;
     }
 
-    if (
-      typedProfile.role === 'seller' &&
-      hasBankDetails === false &&
-      currentPage !== 'merchant-bank-details'
-    ) {
-      setCurrentPage('merchant-bank-details');
-      return;
+    if (typedProfile.role === 'seller') {
+      if (merchantOnboardingRequired === null) {
+        return;
+      }
+
+      if (
+        merchantOnboardingRequired &&
+        currentPage !== 'merchant-onboarding' &&
+        !currentPage.startsWith('subscription-') &&
+        !currentPage.startsWith('payment-')
+      ) {
+        setCurrentPage('merchant-onboarding');
+        return;
+      }
     }
 
     if (isAuthRoute(currentPage) && currentPage !== 'auth-reset-password') {
@@ -1212,6 +1255,7 @@ function AppContent() {
     loading,
     currentPage,
     hasBankDetails,
+    merchantOnboardingRequired,
     isHandlingPaymentReturn,
     storeSlug,
   ]);
@@ -1421,6 +1465,13 @@ function AppContent() {
 
       case 'merchant-bank-details':
         return <MerchantBankDetailsPage onNavigate={navigateWithContext} />;
+
+      case 'merchant-onboarding':
+        return typedProfile?.role === 'seller' || typedProfile?.role === 'admin' ? (
+          <MerchantOnboardingPage onNavigate={navigateWithContext} />
+        ) : (
+          <HomePage onNavigate={navigateWithContext} />
+        );
 
       case 'pricing':
         return <PricingPage onNavigate={navigateWithContext} />;
