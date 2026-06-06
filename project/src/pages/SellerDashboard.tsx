@@ -306,6 +306,8 @@ type NormalizedProduct = Product & {
   delivery_mode?: string | null;
   service_delivery_days?: number | null;
   service_revisions_count?: number | null;
+  product_attachment_count?: number;
+  has_product_attachments?: boolean;
 };
 
 type StoreImageRecord = Store & Record<string, any>;
@@ -339,7 +341,7 @@ const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
-const SELLER_DASHBOARD_CACHE_VERSION = 9;
+const SELLER_DASHBOARD_CACHE_VERSION = 10;
 const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
 
 const getSellerDashboardCacheKey = (profileId: string) => {
@@ -1310,6 +1312,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
       const productIds = normalizedProducts.map((p) => p.id).filter(Boolean);
       const thumbMap: Record<string, string> = {};
+      const productAttachmentCountMap: Record<string, number> = {};
       const productSalesMap: Record<string, number> = {};
       const productViewsMap: Record<string, number> = {};
 
@@ -1330,6 +1333,26 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               thumbMap[row.product_id] = row.image_url;
             }
           }
+        }
+
+        try {
+          const { data: attachmentRows, error: attachmentRowsErr } = await supabase
+            .from('product_attachments')
+            .select('product_id')
+            .in('product_id', productIds);
+
+          if (attachmentRowsErr) {
+            console.error('product_attachments fetch error:', attachmentRowsErr);
+          } else {
+            for (const row of safeArray(attachmentRows) as any[]) {
+              const productId = row?.product_id;
+              if (!productId) continue;
+
+              productAttachmentCountMap[productId] = (productAttachmentCountMap[productId] || 0) + 1;
+            }
+          }
+        } catch (error) {
+          console.error('product_attachments unexpected error:', error);
         }
 
         const { data: viewedProductsData, error: viewedProductsErr } = await supabase
@@ -1378,6 +1401,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       const productsWithThumbs = normalizedProducts.map((p) => ({
         ...p,
         thumbnail_url: p.thumbnail_url || thumbMap[p.id] || null,
+        product_attachment_count: productAttachmentCountMap[p.id] || Number((p as any).product_attachment_count || 0) || 0,
+        has_product_attachments:
+          (productAttachmentCountMap[p.id] || Number((p as any).product_attachment_count || 0) || 0) > 0 ||
+          Boolean((p as any).has_product_attachments),
         views_count: Math.max(Number(p.views_count || 0) || 0, productViewsMap[p.id] || 0),
         sales_count: productSalesMap[p.id] ?? Number(p.sales_count || 0) ?? 0,
       }));
@@ -3135,14 +3162,25 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   };
 
   const hasDigitalProductFile = (product: any) => {
+    const attachmentCount =
+      Number(product?.product_attachment_count || 0) ||
+      Number(product?.attachments_count || 0) ||
+      Number(product?.attachment_count || 0) ||
+      Number(product?.product_attachments_count || 0) ||
+      0;
+
     return !!(
+      attachmentCount > 0 ||
+      product?.has_product_attachments ||
       product?.file_url ||
       product?.download_url ||
       product?.delivery_url ||
       product?.attachment_url ||
       product?.digital_file_url ||
       product?.file_path ||
-      product?.attachment_path
+      product?.attachment_path ||
+      product?.download_path ||
+      product?.digital_file_path
     );
   };
 
@@ -3263,48 +3301,81 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       })
     );
 
-    const firstProduct = products[0] as any;
-    const productMissing: string[] = [];
+    const getOfferMissing = (product: any) => {
+      const missing: string[] = [];
+
+      if (!product) {
+        missing.push('إضافة منتج أو خدمة واحدة على الأقل.');
+        return missing;
+      }
+
+      const productKind = normalizeProductKind(product?.product_kind);
+
+      if (!hasUsefulText(product?.name || product?.title)) {
+        missing.push('عنوان المنتج أو الخدمة غير واضح.');
+      }
+
+      if (!hasUsefulText(product?.description)) {
+        missing.push('إضافة وصف يوضح الفائدة.');
+      }
+
+      if (!hasProductImage(product)) {
+        missing.push('إضافة صورة للمنتج أو الخدمة.');
+      }
+
+      if (Number(product?.price || 0) <= 0) {
+        missing.push('تحديد سعر صحيح.');
+      }
+
+      if (productKind === 'digital_service') {
+        if (Number(product?.service_delivery_days || 0) <= 0) {
+          missing.push('تحديد مدة تنفيذ الخدمة.');
+        }
+
+        if (!hasServiceRequirementsNote(product)) {
+          missing.push('إضافة تعليمات أو أسئلة العميل المطلوبة للخدمة.');
+        }
+      } else if (!hasProductDelivery(product)) {
+        missing.push('إضافة ملف المنتج أو اختيار التسليم اليدوي.');
+      }
+
+      return missing;
+    };
+
+    const completedOffer = products.find((product: any) => getOfferMissing(product).length === 0) as any;
+    const firstProduct = (completedOffer || products[0]) as any;
+    const productMissing: string[] = firstProduct ? getOfferMissing(firstProduct) : ['إضافة منتج أو خدمة واحدة على الأقل.'];
     const firstProductKind = normalizeProductKind(firstProduct?.product_kind);
+    const isFirstProductService = firstProductKind === 'digital_service';
     const offerTitle =
-      merchantOnboarding?.selling_type === 'digital_services' || firstProductKind === 'digital_service'
+      merchantOnboarding?.selling_type === 'digital_services' || isFirstProductService
         ? 'أضف أول خدمة رقمية'
         : merchantOnboarding?.selling_type === 'both'
         ? 'أضف أول منتج أو خدمة'
         : 'أضف أول منتج رقمي';
-
-    if (!firstProduct) {
-      productMissing.push('إضافة منتج أو خدمة واحدة على الأقل.');
-    } else {
-      if (!hasUsefulText(firstProduct?.name || firstProduct?.title)) productMissing.push('عنوان المنتج أو الخدمة غير واضح.');
-      if (!hasUsefulText(firstProduct?.description)) productMissing.push('إضافة وصف يوضح الفائدة.');
-      if (!hasProductImage(firstProduct)) productMissing.push('إضافة صورة للمنتج أو الخدمة.');
-      if (Number(firstProduct?.price || 0) <= 0) productMissing.push('تحديد سعر صحيح.');
-      if (firstProductKind === 'digital_service') {
-        if (Number(firstProduct?.service_delivery_days || 0) <= 0) {
-          productMissing.push('تحديد مدة تنفيذ الخدمة.');
-        }
-        if (!hasServiceRequirementsNote(firstProduct)) {
-          productMissing.push('إضافة تعليمات أو أسئلة العميل المطلوبة للخدمة.');
-        }
-      } else if (!hasProductDelivery(firstProduct)) {
-        productMissing.push('إضافة ملف المنتج أو اختيار التسليم اليدوي.');
-      }
-    }
 
     tasks.push(
       applyTaskOverride({
         key: 'create_first_offer',
         order: 3,
         title: offerTitle,
-        description: 'العنوان والوصف والصورة والسعر والتسليم كلها تفاصيل داخل هذه المهمة.',
+        description: isFirstProductService
+          ? 'العنوان والوصف والصورة والسعر ومدة التنفيذ ومتطلبات العميل كلها تفاصيل داخل هذه المهمة.'
+          : 'العنوان والوصف والصورة والسعر وملف المنتج كلها تفاصيل داخل هذه المهمة.',
         status: !firstProduct ? 'pending' : productMissing.length > 0 ? 'warning' : 'completed',
         details: firstProduct
           ? [
               `لديك ${products.length} منتج/خدمة.`,
-              firstProductKind === 'digital_service' ? 'أول عرض لديك خدمة رقمية.' : 'أول عرض لديك منتج رقمي.',
+              isFirstProductService ? 'أول عرض لديك خدمة رقمية.' : 'أول عرض لديك منتج رقمي.',
               hasProductImage(firstProduct) ? 'الصورة موجودة.' : 'الصورة غير مضافة.',
               hasUsefulText(firstProduct?.description) ? 'الوصف موجود.' : 'الوصف غير مضاف.',
+              isFirstProductService
+                ? hasServiceRequirementsNote(firstProduct)
+                  ? 'متطلبات الخدمة موجودة.'
+                  : 'متطلبات الخدمة غير مضافة.'
+                : hasDigitalProductFile(firstProduct)
+                ? `مرفقات المنتج موجودة${Number(firstProduct?.product_attachment_count || 0) > 0 ? ` (${Number(firstProduct?.product_attachment_count || 0)})` : ''}.`
+                : 'مرفق المنتج غير مضاف.',
             ]
           : ['ابدأ بعرض واحد فقط حتى تنتهي بسرعة من أول خطوة بيع.'],
         missing: productMissing,
@@ -3318,6 +3389,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         canSkip: true,
       })
     );
+
 
     const shareMissing: string[] = [];
     if (!firstProduct) {
