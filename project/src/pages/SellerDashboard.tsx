@@ -4233,7 +4233,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
               ركّز على أهم خطوة لتحسين نتائجك
             </h2>
             <p className="mt-1 text-sm leading-6 text-gray-600">
-              نراجع منتجاتك ومتجرك ومبيعاتك ونقترح عليك أفضل خطوة عملية بدل عرض نصائح عامة.
+              نراجع منتجاتك ومتجرك ومبيعاتك ونقترح عليك أفضل خطوة عملية للنمو.
             </p>
           </div>
 
