@@ -314,21 +314,42 @@ const normalizeBrowserPath = (path: string) => {
   return normalized === '' ? '/' : normalized;
 };
 
-const buildProfilePath = (scopeInfo: ScopeInfo | null, requestedTab?: 'orders' | null) => {
+type ProfileTab = 'overview' | 'orders' | 'favorites' | 'viewed' | 'settings';
+
+const buildProfilePath = (scopeInfo: ScopeInfo | null, requestedTab?: 'orders' | 'settings' | null) => {
   const basePath = scopeInfo?.slug ? `/s/${scopeInfo.slug}/profile` : '/profile';
 
   if (requestedTab === 'orders') {
     return `${basePath}?tab=orders`;
   }
 
+  if (requestedTab === 'settings') {
+    return `${basePath}?tab=settings`;
+  }
+
   return basePath;
 };
 
-const getRequestedProfileTab = (): 'overview' | 'orders' => {
+const getRequestedProfileTab = (): ProfileTab => {
   if (typeof window === 'undefined') return 'overview';
 
   const searchParams = new URLSearchParams(window.location.search);
-  return searchParams.get('tab') === 'orders' ? 'orders' : 'overview';
+  const tabParam = searchParams.get('tab');
+
+  if (tabParam === 'orders') return 'orders';
+  if (tabParam === 'settings') return 'settings';
+
+  try {
+    const storedTab = sessionStorage.getItem('profile_default_tab');
+    if (storedTab === 'settings') {
+      sessionStorage.removeItem('profile_default_tab');
+      return 'settings';
+    }
+  } catch (error) {
+    console.error('Error reading profile default tab:', error);
+  }
+
+  return 'overview';
 };
 
 const resolveStoreScope = async (): Promise<ScopeInfo | null> => {
@@ -435,9 +456,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const identityFrontInputRef = useRef<HTMLInputElement | null>(null);
   const identityBackInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [activeTab, setActiveTab] = useState<
-    'overview' | 'orders' | 'favorites' | 'viewed' | 'settings'
-  >('overview');
+  const [activeTab, setActiveTab] = useState<ProfileTab>('overview');
 
   const [name, setName] = useState(profile?.name || '');
   const [email, setEmail] = useState(user?.email || '');
@@ -543,7 +562,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     if (scopeLoading || typeof window === 'undefined') return;
 
     const requestedTab = getRequestedProfileTab();
-    const targetPath = buildProfilePath(scopeInfo, requestedTab === 'orders' ? 'orders' : null);
+    const targetPath = buildProfilePath(
+      scopeInfo,
+      requestedTab === 'orders' || requestedTab === 'settings' ? requestedTab : null
+    );
     const currentPathWithSearch = `${normalizeBrowserPath(window.location.pathname)}${window.location.search}`;
 
     setActiveTab(requestedTab);
@@ -569,12 +591,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
     };
   }, [showAvatarMenu]);
 
-  const updateProfileTab = (tab: 'overview' | 'orders' | 'favorites' | 'viewed' | 'settings') => {
+  const updateProfileTab = (tab: ProfileTab) => {
     setActiveTab(tab);
 
     if (typeof window === 'undefined') return;
 
-    const requestedTab = tab === 'orders' ? 'orders' : null;
+    const requestedTab = tab === 'orders' || tab === 'settings' ? tab : null;
     const targetPath = buildProfilePath(scopeInfo, requestedTab);
     const currentPathWithSearch = `${normalizeBrowserPath(window.location.pathname)}${window.location.search}`;
 
