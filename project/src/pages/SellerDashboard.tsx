@@ -27,7 +27,11 @@ import {
   Search,
   ImagePlus,
   Trash2,
-  Briefcase
+  Briefcase,
+  ChevronDown,
+  CheckCircle2,
+  Circle,
+  XCircle
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Store, Product } from '../lib/supabase';
@@ -144,6 +148,53 @@ interface WithdrawalLimitSettingsRow {
 interface WithdrawalLimitStatusRow extends WithdrawalLimitSettingsRow {
   used_requests: number;
   remaining_requests: number;
+}
+
+interface MerchantOnboardingRow {
+  id: string;
+  user_id: string;
+  selling_type: 'digital_products' | 'digital_services' | 'both' | 'not_sure' | string;
+  readiness_status: 'ready' | 'idea_only' | 'needs_ideas' | 'many_products' | string;
+  preferred_sales_channel: 'store' | 'marketplace' | 'direct_link' | 'all' | string;
+  audience_source: 'social_accounts' | 'groups' | 'previous_customers' | 'none' | string;
+  first_goal: 'first_sale' | 'professional_store' | 'try_platform' | 'multiple_products' | string;
+  completed_at: string | null;
+  skipped_at: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+interface MerchantTaskOverrideRow {
+  id: string;
+  user_id: string;
+  task_key: SellerTaskKey;
+  status: 'skipped' | 'user_completed';
+  note: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+type SellerTaskKey =
+  | 'onboarding_profile'
+  | 'create_store'
+  | 'create_first_offer'
+  | 'share_and_market'
+  | 'first_sale'
+  | 'verification_and_bank';
+
+type SellerTaskStatus = 'completed' | 'warning' | 'pending' | 'locked' | 'skipped';
+
+interface SellerTaskItem {
+  key: SellerTaskKey;
+  order: number;
+  title: string;
+  description: string;
+  status: SellerTaskStatus;
+  details: string[];
+  missing: string[];
+  actionLabel?: string;
+  onAction?: () => void;
+  canSkip?: boolean;
 }
 
 interface EarningsOrderMeta {
@@ -288,7 +339,7 @@ const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
-const SELLER_DASHBOARD_CACHE_VERSION = 8;
+const SELLER_DASHBOARD_CACHE_VERSION = 9;
 const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
 
 const getSellerDashboardCacheKey = (profileId: string) => {
@@ -412,6 +463,10 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
   const [withdrawalProofLoading, setWithdrawalProofLoading] = useState(false);
   const [withdrawalProofError, setWithdrawalProofError] = useState('');
   const [sellerRestrictionMessage, setSellerRestrictionMessage] = useState('');
+  const [merchantOnboarding, setMerchantOnboarding] = useState<MerchantOnboardingRow | null>(null);
+  const [taskOverrides, setTaskOverrides] = useState<MerchantTaskOverrideRow[]>([]);
+  const [tasksExpanded, setTasksExpanded] = useState(false);
+  const [taskActionLoading, setTaskActionLoading] = useState<string | null>(null);
 
 
 
@@ -552,6 +607,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           : {}
       );
       setSellerOrders(Array.isArray(parsedCache.sellerOrders) ? parsedCache.sellerOrders : []);
+      setMerchantOnboarding(parsedCache.merchantOnboarding ?? null);
+      setTaskOverrides(Array.isArray(parsedCache.taskOverrides) ? parsedCache.taskOverrides : []);
       setHasCachedDashboardData(true);
       setLoading(false);
     } catch (error) {
@@ -571,6 +628,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     fetchEarningsData();
     fetchWithdrawalLimitData();
     fetchOrdersData();
+    fetchMerchantOnboardingData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, hasRestoredDashboardCache]);
 
@@ -597,6 +655,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         withdrawalLimitSettings,
         earningsOrderMeta,
         sellerOrders,
+        merchantOnboarding,
+        taskOverrides,
       };
 
       sessionStorage.setItem(getSellerDashboardCacheKey(profileId), JSON.stringify(payload));
@@ -622,6 +682,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     withdrawalLimitSettings,
     earningsOrderMeta,
     sellerOrders,
+    merchantOnboarding,
+    taskOverrides,
   ]);
 
 
@@ -2954,6 +3016,578 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     onNavigate(`store-detail-${store.id}`);
   };
 
+
+  const fetchMerchantOnboardingData = async () => {
+    if (!profileId) return;
+
+    try {
+      const [onboardingResponse, overridesResponse] = await Promise.all([
+        supabase
+          .from('merchant_onboarding')
+          .select('*')
+          .eq('user_id', profileId)
+          .maybeSingle(),
+        supabase
+          .from('merchant_task_overrides')
+          .select('*')
+          .eq('user_id', profileId),
+      ]);
+
+      if (onboardingResponse.error) {
+        console.error('merchant_onboarding fetch error:', onboardingResponse.error);
+      } else {
+        setMerchantOnboarding((onboardingResponse.data as MerchantOnboardingRow | null) || null);
+      }
+
+      if (overridesResponse.error) {
+        console.error('merchant_task_overrides fetch error:', overridesResponse.error);
+      } else {
+        setTaskOverrides((overridesResponse.data || []) as MerchantTaskOverrideRow[]);
+      }
+    } catch (error) {
+      console.error('Error fetching merchant onboarding data:', error);
+    }
+  };
+
+  const upsertTaskOverride = async (
+    taskKey: SellerTaskKey,
+    status: 'skipped' | 'user_completed'
+  ) => {
+    if (!profileId) return;
+
+    const confirmationMessage =
+      status === 'skipped'
+        ? 'هل تريد تخطي هذه المهمة؟ تقدر ترجع لها لاحقًا، لكن الأفضل إكمالها إذا كانت مهمة لأول بيع.'
+        : 'هل تريد تعليم هذه المهمة كمنجزة يدويًا؟ استخدم هذا الخيار فقط إذا أنجزتها خارج النظام.';
+
+    if (!window.confirm(confirmationMessage)) return;
+
+    try {
+      setTaskActionLoading(`${taskKey}-${status}`);
+
+      const { error } = await supabase
+        .from('merchant_task_overrides')
+        .upsert(
+          {
+            user_id: profileId,
+            task_key: taskKey,
+            status,
+            note: status === 'skipped' ? 'تم تخطي المهمة من لوحة التاجر' : 'تم تعليم المهمة كمنجزة يدويًا',
+          },
+          { onConflict: 'user_id,task_key' }
+        );
+
+      if (error) throw error;
+
+      await fetchMerchantOnboardingData();
+    } catch (error: any) {
+      console.error('Task override error:', error);
+      setSellerRestrictionMessage(error?.message || 'تعذر تحديث حالة المهمة. حاول مرة أخرى.');
+      window.setTimeout(() => setSellerRestrictionMessage(''), 5000);
+    } finally {
+      setTaskActionLoading(null);
+    }
+  };
+
+  const getTaskOverride = (taskKey: SellerTaskKey) => {
+    return taskOverrides.find((override) => override.task_key === taskKey) || null;
+  };
+
+  const applyTaskOverride = (task: SellerTaskItem): SellerTaskItem => {
+    const override = getTaskOverride(task.key);
+    if (!override) return task;
+
+    if (override.status === 'user_completed') {
+      return {
+        ...task,
+        status: 'completed',
+        details: [...task.details, 'تم تعليم المهمة كمنجزة يدويًا.'],
+      };
+    }
+
+    if (override.status === 'skipped') {
+      return {
+        ...task,
+        status: 'skipped',
+        details: [...task.details, 'تم تخطي هذه المهمة يدويًا.'],
+      };
+    }
+
+    return task;
+  };
+
+  const hasUsefulText = (value: unknown) => {
+    return typeof value === 'string' && value.trim().length > 0;
+  };
+
+  const hasStoreImage = (store: any) => {
+    return !!getStoreImageUrl(store);
+  };
+
+  const hasProductImage = (product: any) => {
+    return !!(
+      product?.thumbnail_url ||
+      product?.image_url ||
+      product?.cover_image ||
+      product?.cover_url ||
+      product?.main_image_url
+    );
+  };
+
+  const hasProductDelivery = (product: any) => {
+    const productKind = normalizeProductKind(product?.product_kind);
+    if (productKind === 'digital_service') {
+      return (
+        Number(product?.service_delivery_days || 0) > 0 ||
+        hasUsefulText(product?.service_requirements_note)
+      );
+    }
+
+    return !!(
+      product?.file_url ||
+      product?.download_url ||
+      product?.delivery_url ||
+      product?.attachment_url ||
+      product?.digital_file_url ||
+      product?.delivery_mode === 'manual'
+    );
+  };
+
+  const isPaidSellerOrder = (order: SellerOrderUI | SellerOrderRow) => {
+    const status = String(order?.status || '').toLowerCase();
+    return status === 'paid' || status === 'completed';
+  };
+
+  const hasFirstSale = useMemo(() => {
+    const available = Number(walletData?.balance_available || 0);
+    const pending = Number(walletData?.balance_pending || 0);
+
+    return (
+      Number(stats.totalSales || 0) > 0 ||
+      sellerOrders.some(isPaidSellerOrder) ||
+      available > 0 ||
+      pending > 0
+    );
+  }, [stats.totalSales, sellerOrders, walletData]);
+
+  const sellerOnboardingTasks = useMemo<SellerTaskItem[]>(() => {
+    const tasks: SellerTaskItem[] = [];
+
+    const onboardingMissing: string[] = [];
+    if (!merchantOnboarding?.completed_at && !merchantOnboarding?.skipped_at) {
+      onboardingMissing.push('إكمال أسئلة البداية حتى تظهر لك خطوات مناسبة.');
+    }
+
+    tasks.push(
+      applyTaskOverride({
+        key: 'onboarding_profile',
+        order: 1,
+        title: 'جهّز مسارك في رقمي',
+        description: 'أجب على أسئلة البداية حتى نرتب لك مهام مناسبة لطريقة بيعك.',
+        status: merchantOnboarding?.completed_at
+          ? 'completed'
+          : merchantOnboarding?.skipped_at
+          ? 'skipped'
+          : 'pending',
+        details: [
+          merchantOnboarding?.selling_type === 'digital_services'
+            ? 'نوع البيع: خدمات رقمية حسب الطلب.'
+            : merchantOnboarding?.selling_type === 'both'
+            ? 'نوع البيع: منتجات وخدمات معًا.'
+            : merchantOnboarding?.selling_type === 'not_sure'
+            ? 'نوع البيع: لم يتم تحديده بعد.'
+            : 'نوع البيع: منتجات رقمية جاهزة.',
+          merchantOnboarding?.preferred_sales_channel === 'store'
+            ? 'طريقة البيع المفضلة: متجر خاص.'
+            : merchantOnboarding?.preferred_sales_channel === 'marketplace'
+            ? 'طريقة البيع المفضلة: السوق العام.'
+            : merchantOnboarding?.preferred_sales_channel === 'direct_link'
+            ? 'طريقة البيع المفضلة: رابط مباشر.'
+            : 'طريقة البيع المفضلة: كل الطرق المتاحة.',
+        ],
+        missing: onboardingMissing,
+        actionLabel: 'فتح أسئلة البداية',
+        onAction: () => onNavigate('merchant-onboarding'),
+        canSkip: true,
+      })
+    );
+
+    const firstStore = stores[0] as any;
+    const storeMissing: string[] = [];
+
+    if (!firstStore) {
+      storeMissing.push('إنشاء متجر واحد على الأقل.');
+    } else {
+      if (!hasUsefulText(firstStore?.name)) storeMissing.push('اسم المتجر غير واضح.');
+      if (!hasStoreImage(firstStore)) storeMissing.push('إضافة صورة للمتجر.');
+      if (!hasUsefulText(firstStore?.description)) storeMissing.push('إضافة وصف مختصر للمتجر.');
+    }
+
+    tasks.push(
+      applyTaskOverride({
+        key: 'create_store',
+        order: 2,
+        title: 'أنشئ متجرك',
+        description: 'اسم المتجر والصورة والوصف كلها تعتبر تفاصيل داخل مهمة إنشاء المتجر.',
+        status: !firstStore ? 'pending' : storeMissing.length > 0 ? 'warning' : 'completed',
+        details: firstStore
+          ? [
+              `لديك ${stores.length} متجر.`,
+              hasStoreImage(firstStore) ? 'صورة المتجر موجودة.' : 'صورة المتجر غير مضافة.',
+              hasUsefulText(firstStore?.description) ? 'وصف المتجر موجود.' : 'وصف المتجر غير مضاف.',
+            ]
+          : ['ابدأ بإنشاء متجر واحد حتى يكون عندك رابط متجر واضح.'],
+        missing: storeMissing,
+        actionLabel: firstStore ? 'فتح المتاجر' : 'إنشاء متجر',
+        onAction: () => {
+          handleTabChange('stores');
+          if (!firstStore && canPerformSellerAction()) {
+            setShowCreateStoreModal(true);
+          }
+        },
+        canSkip: true,
+      })
+    );
+
+    const firstProduct = products[0] as any;
+    const productMissing: string[] = [];
+    const firstProductKind = normalizeProductKind(firstProduct?.product_kind);
+    const offerTitle =
+      merchantOnboarding?.selling_type === 'digital_services' || firstProductKind === 'digital_service'
+        ? 'أضف أول خدمة رقمية'
+        : merchantOnboarding?.selling_type === 'both'
+        ? 'أضف أول منتج أو خدمة'
+        : 'أضف أول منتج رقمي';
+
+    if (!firstProduct) {
+      productMissing.push('إضافة منتج أو خدمة واحدة على الأقل.');
+    } else {
+      if (!hasUsefulText(firstProduct?.name || firstProduct?.title)) productMissing.push('عنوان المنتج أو الخدمة غير واضح.');
+      if (!hasUsefulText(firstProduct?.description)) productMissing.push('إضافة وصف يوضح الفائدة.');
+      if (!hasProductImage(firstProduct)) productMissing.push('إضافة صورة للمنتج أو الخدمة.');
+      if (Number(firstProduct?.price || 0) <= 0) productMissing.push('تحديد سعر صحيح.');
+      if (!hasProductDelivery(firstProduct)) productMissing.push('تحديد طريقة التسليم أو ملف/متطلبات الخدمة.');
+    }
+
+    tasks.push(
+      applyTaskOverride({
+        key: 'create_first_offer',
+        order: 3,
+        title: offerTitle,
+        description: 'العنوان والوصف والصورة والسعر والتسليم كلها تفاصيل داخل هذه المهمة.',
+        status: !firstProduct ? 'pending' : productMissing.length > 0 ? 'warning' : 'completed',
+        details: firstProduct
+          ? [
+              `لديك ${products.length} منتج/خدمة.`,
+              firstProductKind === 'digital_service' ? 'أول عرض لديك خدمة رقمية.' : 'أول عرض لديك منتج رقمي.',
+              hasProductImage(firstProduct) ? 'الصورة موجودة.' : 'الصورة غير مضافة.',
+              hasUsefulText(firstProduct?.description) ? 'الوصف موجود.' : 'الوصف غير مضاف.',
+            ]
+          : ['ابدأ بعرض واحد فقط حتى تنتهي بسرعة من أول خطوة بيع.'],
+        missing: productMissing,
+        actionLabel: firstProduct ? 'فتح المنتجات' : 'إضافة منتج',
+        onAction: () => {
+          handleTabChange('products');
+          if (!firstProduct && canPerformSellerAction()) {
+            setShowCreateProductModal(true);
+          }
+        },
+        canSkip: true,
+      })
+    );
+
+    const shareMissing: string[] = [];
+    if (!firstProduct) {
+      shareMissing.push('أضف منتجًا أو خدمة قبل مشاركة الرابط.');
+    }
+    if (!hasFirstSale && !getTaskOverride('share_and_market')) {
+      shareMissing.push('شارك رابط المنتج أو المتجر مع جمهورك أو أول 5 أشخاص مهتمين.');
+    }
+
+    tasks.push(
+      applyTaskOverride({
+        key: 'share_and_market',
+        order: 4,
+        title: 'اضبط الظهور وشارك الرابط',
+        description: 'اختر طريقة الظهور المناسبة ثم انسخ رابط المنتج أو المتجر وابدأ النشر.',
+        status: hasFirstSale ? 'completed' : firstProduct ? 'pending' : 'locked',
+        details: [
+          merchantOnboarding?.audience_source === 'groups'
+            ? 'أنسب بداية لك: قروب واتساب أو تيليجرام مناسب.'
+            : merchantOnboarding?.audience_source === 'previous_customers'
+            ? 'أنسب بداية لك: أرسل الرابط لمعارف أو عملاء سابقين.'
+            : merchantOnboarding?.audience_source === 'none'
+            ? 'ابدأ بمشاركة بسيطة مع أشخاص مهتمين بدل انتظار جمهور كبير.'
+            : 'أنسب بداية لك: حسابات التواصل الاجتماعي.',
+          'هذه المهمة لا تفصل الوصف والصورة كمهام مستقلة؛ هي تركّز على مشاركة الرابط بعد تجهيز العرض.',
+        ],
+        missing: shareMissing,
+        actionLabel: 'فتح التسويق',
+        onAction: () => handleTabChange('marketing'),
+        canSkip: true,
+      })
+    );
+
+    tasks.push(
+      applyTaskOverride({
+        key: 'first_sale',
+        order: 5,
+        title: 'احصل على أول عملية شراء',
+        description: 'بعد تجهيز العرض ومشاركة الرابط، الهدف التالي هو أول طلب مدفوع.',
+        status: hasFirstSale ? 'completed' : firstProduct ? 'pending' : 'locked',
+        details: hasFirstSale
+          ? ['تم رصد طلب مدفوع أو رصيد في محفظتك.']
+          : ['راقب الطلبات من لوحة التاجر، وحسّن العنوان أو السعر إذا لم تصل زيارات.'],
+        missing: hasFirstSale ? [] : ['لم يتم رصد أول عملية شراء حتى الآن.'],
+        actionLabel: 'فتح الطلبات',
+        onAction: () => handleTabChange('orders'),
+        canSkip: true,
+      })
+    );
+
+    const identityApproved = identityVerification?.status === 'approved';
+    const bankApproved = bankAccountData?.status === 'approved';
+    const verificationMissing: string[] = [];
+
+    if (hasFirstSale) {
+      if (!identityApproved) verificationMissing.push('توثيق الهوية غير مكتمل أو غير معتمد.');
+      if (!bankApproved) verificationMissing.push('الحساب البنكي غير مكتمل أو غير معتمد.');
+    } else {
+      verificationMissing.push('تظهر أهمية هذه الخطوة بعد أول بيع أو وجود أرباح.');
+    }
+
+    tasks.push(
+      applyTaskOverride({
+        key: 'verification_and_bank',
+        order: 6,
+        title: 'أكمل التوثيق والحساب البنكي',
+        description: 'هذه الخطوة تأتي بعد أول بيع حتى تتمكن من سحب أرباحك.',
+        status: !hasFirstSale
+          ? 'locked'
+          : identityApproved && bankApproved
+          ? 'completed'
+          : identityVerification || bankAccountData
+          ? 'warning'
+          : 'pending',
+        details: [
+          identityApproved
+            ? 'توثيق الهوية معتمد.'
+            : identityVerification?.status === 'pending'
+            ? 'توثيق الهوية قيد المراجعة.'
+            : 'توثيق الهوية غير مكتمل.',
+          bankApproved
+            ? 'الحساب البنكي معتمد.'
+            : bankAccountData?.status === 'pending'
+            ? 'الحساب البنكي قيد المراجعة.'
+            : 'الحساب البنكي غير مكتمل.',
+        ],
+        missing: verificationMissing,
+        actionLabel: hasFirstSale ? 'فتح الأرباح والتوثيق' : 'تظهر بعد أول بيع',
+        onAction: () => handleTabChange('earnings'),
+        canSkip: false,
+      })
+    );
+
+    return tasks;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    merchantOnboarding,
+    stores,
+    products,
+    hasFirstSale,
+    identityVerification,
+    bankAccountData,
+    taskOverrides,
+    onNavigate,
+  ]);
+
+  const currentSellerTask = useMemo(() => {
+    return (
+      sellerOnboardingTasks.find((task) => task.status === 'warning') ||
+      sellerOnboardingTasks.find((task) => task.status === 'pending') ||
+      sellerOnboardingTasks.find((task) => task.status === 'locked') ||
+      sellerOnboardingTasks[0]
+    );
+  }, [sellerOnboardingTasks]);
+
+  const completedSellerTasksCount = sellerOnboardingTasks.filter(
+    (task) => task.status === 'completed' || task.status === 'skipped'
+  ).length;
+
+  const getSellerTaskStatusMeta = (status: SellerTaskStatus) => {
+    switch (status) {
+      case 'completed':
+        return {
+          label: 'مكتملة',
+          className: 'bg-green-50 text-green-700 border-green-200',
+          icon: <CheckCircle2 className="w-4 h-4" />,
+        };
+      case 'warning':
+        return {
+          label: 'تحتاج تحسين',
+          className: 'bg-orange-50 text-orange-700 border-orange-200',
+          icon: <AlertTriangle className="w-4 h-4" />,
+        };
+      case 'skipped':
+        return {
+          label: 'تم تخطيها',
+          className: 'bg-gray-100 text-gray-600 border-gray-200',
+          icon: <XCircle className="w-4 h-4" />,
+        };
+      case 'locked':
+        return {
+          label: 'لاحقًا',
+          className: 'bg-slate-50 text-slate-500 border-slate-200',
+          icon: <Clock3 className="w-4 h-4" />,
+        };
+      default:
+        return {
+          label: 'غير مكتملة',
+          className: 'bg-blue-50 text-blue-700 border-blue-200',
+          icon: <Circle className="w-4 h-4" />,
+        };
+    }
+  };
+
+  const renderSellerTaskCard = (task: SellerTaskItem, compact = false) => {
+    const meta = getSellerTaskStatusMeta(task.status);
+    const isActionDisabled = task.status === 'locked' || !!taskActionLoading;
+
+    return (
+      <div
+        key={task.key}
+        className={`rounded-2xl border ${
+          compact ? 'border-gray-100 bg-white p-4' : 'border-blue-100 bg-white p-5'
+        }`}
+      >
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
+                {task.order}
+              </span>
+              <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold ${meta.className}`}>
+                {meta.icon}
+                {meta.label}
+              </span>
+            </div>
+
+            <h3 className={`${compact ? 'text-base' : 'text-xl'} font-extrabold text-gray-900`}>
+              {task.title}
+            </h3>
+            <p className="mt-1 text-sm leading-6 text-gray-600">{task.description}</p>
+
+            {!compact && task.details.length > 0 && (
+              <div className="mt-4 grid gap-2 md:grid-cols-2">
+                {task.details.map((detail, index) => (
+                  <div key={`${task.key}-detail-${index}`} className="flex items-start gap-2 text-sm text-gray-600">
+                    <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-600" />
+                    <span>{detail}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {task.missing.length > 0 && (
+              <div className="mt-4 rounded-xl border border-orange-100 bg-orange-50 px-4 py-3">
+                <p className="mb-2 text-sm font-bold text-orange-800">النواقص أو الخطوة المطلوبة:</p>
+                <ul className="space-y-1 text-sm text-orange-700">
+                  {task.missing.map((missingItem, index) => (
+                    <li key={`${task.key}-missing-${index}`}>• {missingItem}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 md:w-48">
+            {task.actionLabel && (
+              <button
+                type="button"
+                onClick={task.onAction}
+                disabled={isActionDisabled}
+                className={`rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
+                  task.status === 'locked'
+                    ? 'cursor-not-allowed bg-gray-100 text-gray-400'
+                    : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60'
+                }`}
+              >
+                {task.actionLabel}
+              </button>
+            )}
+
+            {task.canSkip && task.status !== 'completed' && task.status !== 'skipped' && (
+              <button
+                type="button"
+                onClick={() => upsertTaskOverride(task.key, 'skipped')}
+                disabled={!!taskActionLoading}
+                className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+              >
+                تخطي
+              </button>
+            )}
+
+            {task.status !== 'completed' && task.status !== 'skipped' && (
+              <button
+                type="button"
+                onClick={() => upsertTaskOverride(task.key, 'user_completed')}
+                disabled={!!taskActionLoading}
+                className="rounded-xl border border-green-200 px-4 py-2.5 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:opacity-60"
+              >
+                تم الإنجاز يدويًا
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSellerOnboardingTasksCard = () => {
+    if (!currentSellerTask) return null;
+
+    return (
+      <div className="mb-8 rounded-3xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm sm:p-5">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-blue-700">
+                خطواتك لأول بيع
+              </span>
+              <span className="text-xs font-medium text-gray-500">
+                {completedSellerTasksCount} من {sellerOnboardingTasks.length} مكتملة
+              </span>
+            </div>
+            <h2 className="text-xl font-extrabold text-gray-900">
+              المهمة الحالية: {currentSellerTask.title}
+            </h2>
+            <p className="mt-1 text-sm text-gray-600">
+              المهام الرئيسية فقط تظهر هنا، أما التفاصيل مثل الوصف والصورة والسعر فهي داخل كل مهمة.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setTasksExpanded((current) => !current)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm font-bold text-blue-700 hover:bg-blue-50"
+          >
+            {tasksExpanded ? 'إخفاء كل المهام' : 'عرض كل المهام'}
+            <ChevronDown className={`h-4 w-4 transition-transform ${tasksExpanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+
+        {renderSellerTaskCard(currentSellerTask)}
+
+        {tasksExpanded && (
+          <div className="mt-4 grid gap-3">
+            {sellerOnboardingTasks.map((task) => renderSellerTaskCard(task, true))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+
   if (loading && !hasCachedDashboardData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -2983,6 +3617,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
           )}
 
         </div>
+
+        {renderSellerOnboardingTasksCard()}
 
         <div className="bg-white rounded-xl shadow-sm mb-8">
           <div className="flex items-center gap-2 p-2 overflow-x-auto">
