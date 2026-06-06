@@ -3134,23 +3134,37 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
     );
   };
 
-  const hasProductDelivery = (product: any) => {
-    const productKind = normalizeProductKind(product?.product_kind);
-    if (productKind === 'digital_service') {
-      return (
-        Number(product?.service_delivery_days || 0) > 0 ||
-        hasUsefulText(product?.service_requirements_note)
-      );
-    }
-
+  const hasDigitalProductFile = (product: any) => {
     return !!(
       product?.file_url ||
       product?.download_url ||
       product?.delivery_url ||
       product?.attachment_url ||
       product?.digital_file_url ||
-      product?.delivery_mode === 'manual'
+      product?.file_path ||
+      product?.attachment_path
     );
+  };
+
+  const hasServiceRequirementsNote = (product: any) => {
+    return !!(
+      hasUsefulText(product?.service_requirements_note) ||
+      hasUsefulText(product?.service_requirements) ||
+      hasUsefulText(product?.requirements_note)
+    );
+  };
+
+  const hasProductDelivery = (product: any) => {
+    const productKind = normalizeProductKind(product?.product_kind);
+    const deliveryMode = String(product?.delivery_mode || '').toLowerCase();
+
+    if (productKind === 'digital_service') {
+      return Number(product?.service_delivery_days || 0) > 0 && hasServiceRequirementsNote(product);
+    }
+
+    // المنتج الرقمي الجاهز لا يحتاج متطلبات خدمة.
+    // المطلوب فقط: ملف المنتج أو اختيار التسليم اليدوي لو كان المنتج يُسلّم يدويًا.
+    return deliveryMode === 'manual' || hasDigitalProductFile(product);
   };
 
   const isPaidSellerOrder = (order: SellerOrderUI | SellerOrderRow) => {
@@ -3266,7 +3280,16 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       if (!hasUsefulText(firstProduct?.description)) productMissing.push('إضافة وصف يوضح الفائدة.');
       if (!hasProductImage(firstProduct)) productMissing.push('إضافة صورة للمنتج أو الخدمة.');
       if (Number(firstProduct?.price || 0) <= 0) productMissing.push('تحديد سعر صحيح.');
-      if (!hasProductDelivery(firstProduct)) productMissing.push('تحديد طريقة التسليم أو ملف/متطلبات الخدمة.');
+      if (firstProductKind === 'digital_service') {
+        if (Number(firstProduct?.service_delivery_days || 0) <= 0) {
+          productMissing.push('تحديد مدة تنفيذ الخدمة.');
+        }
+        if (!hasServiceRequirementsNote(firstProduct)) {
+          productMissing.push('إضافة تعليمات أو أسئلة العميل المطلوبة للخدمة.');
+        }
+      } else if (!hasProductDelivery(firstProduct)) {
+        productMissing.push('إضافة ملف المنتج أو اختيار التسليم اليدوي.');
+      }
     }
 
     tasks.push(
