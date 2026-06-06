@@ -21,6 +21,9 @@ import {
   RefreshCw,
   Building2,
   Wallet,
+  Activity,
+  Radio,
+  MousePointerClick,
 } from 'lucide-react';
 import { supabase, Product, Store, UserProfile } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -35,6 +38,16 @@ interface Stats {
   totalStores: number;
   totalProducts: number;
   totalRevenue: number;
+}
+
+
+interface SiteAnalyticsSummary {
+  totalVisitors: number;
+  todayVisitors: number;
+  last7DaysVisitors: number;
+  totalPageViews: number;
+  todayPageViews: number;
+  onlineNow: number;
 }
 
 interface AdminProductUI extends Product {
@@ -257,6 +270,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     totalRevenue: 0,
   });
 
+
+  const [siteAnalytics, setSiteAnalytics] = useState<SiteAnalyticsSummary>({
+    totalVisitors: 0,
+    todayVisitors: 0,
+    last7DaysVisitors: 0,
+    totalPageViews: 0,
+    todayPageViews: 0,
+    onlineNow: 0,
+  });
+  const [siteAnalyticsLoading, setSiteAnalyticsLoading] = useState(false);
+
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [products, setProducts] = useState<AdminProductUI[]>([]);
@@ -379,6 +403,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     if (profile?.role === 'admin' || profile?.role === 'superadmin') {
       fetchDashboardData();
 
+      if (activeTab === 'overview') {
+        fetchSiteAnalyticsSummary();
+      }
+
       if (activeTab === 'payment-settings') {
         loadPaymentKeys();
       }
@@ -439,6 +467,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   useEffect(() => {
     setBankAccountRejectionReason(selectedBankAccount?.rejection_reason || '');
   }, [selectedBankAccountId, selectedBankAccount?.rejection_reason]);
+
+
+  const fetchSiteAnalyticsSummary = async () => {
+    try {
+      setSiteAnalyticsLoading(true);
+
+      const { data, error } = await supabase.rpc('get_admin_site_analytics_summary');
+      if (error) throw error;
+
+      const row = Array.isArray(data) ? data[0] : data;
+
+      setSiteAnalytics({
+        totalVisitors: Number(row?.total_visitors || 0),
+        todayVisitors: Number(row?.today_visitors || 0),
+        last7DaysVisitors: Number(row?.last_7_days_visitors || 0),
+        totalPageViews: Number(row?.total_page_views || 0),
+        todayPageViews: Number(row?.today_page_views || 0),
+        onlineNow: Number(row?.online_now || 0),
+      });
+    } catch (error) {
+      console.error('Error fetching site analytics summary:', error);
+    } finally {
+      setSiteAnalyticsLoading(false);
+    }
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -2255,6 +2308,82 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">{stats.totalProducts}</div>
                 <p className="text-sm text-gray-600">المنتجات</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-8">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-5">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">زوار الموقع والنشاط الحالي</h2>
+                  <p className="text-sm text-gray-500 mt-1">أرقام مباشرة من تتبع زيارات رقمي. المتصلون الآن يعني النشطين خلال آخر دقيقتين.</p>
+                </div>
+
+                <button
+                  onClick={fetchSiteAnalyticsSummary}
+                  disabled={siteAnalyticsLoading}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-60 text-sm font-semibold"
+                >
+                  <RefreshCw className={`w-4 h-4 ${siteAnalyticsLoading ? 'animate-spin' : ''}`} />
+                  تحديث الأرقام
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-11 h-11 bg-white rounded-xl flex items-center justify-center shadow-sm">
+                      <Users className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <span className="text-xs font-semibold text-blue-700 bg-white rounded-full px-3 py-1">إجمالي</span>
+                  </div>
+                  <div className="text-2xl font-extrabold text-gray-900">{siteAnalytics.totalVisitors}</div>
+                  <p className="text-sm text-gray-600 mt-1">زوار الموقع</p>
+                </div>
+
+                <div className="rounded-2xl border border-green-100 bg-green-50/70 p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-11 h-11 bg-white rounded-xl flex items-center justify-center shadow-sm">
+                      <Activity className="w-5 h-5 text-green-600" />
+                    </div>
+                    <span className="text-xs font-semibold text-green-700 bg-white rounded-full px-3 py-1">اليوم</span>
+                  </div>
+                  <div className="text-2xl font-extrabold text-gray-900">{siteAnalytics.todayVisitors}</div>
+                  <p className="text-sm text-gray-600 mt-1">زوار اليوم</p>
+                </div>
+
+                <div className="rounded-2xl border border-purple-100 bg-purple-50/70 p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-11 h-11 bg-white rounded-xl flex items-center justify-center shadow-sm">
+                      <MousePointerClick className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <span className="text-xs font-semibold text-purple-700 bg-white rounded-full px-3 py-1">اليوم</span>
+                  </div>
+                  <div className="text-2xl font-extrabold text-gray-900">{siteAnalytics.todayPageViews}</div>
+                  <p className="text-sm text-gray-600 mt-1">مشاهدات الصفحات اليوم</p>
+                </div>
+
+                <div className="rounded-2xl border border-red-100 bg-red-50/70 p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-11 h-11 bg-white rounded-xl flex items-center justify-center shadow-sm relative">
+                      <Radio className="w-5 h-5 text-red-600" />
+                      <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>
+                    </div>
+                    <span className="text-xs font-semibold text-red-700 bg-white rounded-full px-3 py-1">مباشر</span>
+                  </div>
+                  <div className="text-2xl font-extrabold text-gray-900">{siteAnalytics.onlineNow}</div>
+                  <p className="text-sm text-gray-600 mt-1">متصلون الآن</p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 flex items-center justify-between">
+                  <span className="text-gray-600">زوار آخر 7 أيام</span>
+                  <span className="font-bold text-gray-900">{siteAnalytics.last7DaysVisitors}</span>
+                </div>
+                <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 flex items-center justify-between">
+                  <span className="text-gray-600">إجمالي مشاهدات الصفحات</span>
+                  <span className="font-bold text-gray-900">{siteAnalytics.totalPageViews}</span>
+                </div>
               </div>
             </div>
 
