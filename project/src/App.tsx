@@ -55,6 +55,45 @@ import { supabase } from './lib/supabase';
 import { handleAffiliateTracking } from './lib/affiliate';
 
 
+const SITE_VISITOR_STORAGE_KEY = 'raqmy_site_visitor_token';
+const SITE_VISIT_LAST_PATH_KEY = 'raqmy_site_last_tracked_path';
+
+const createSiteVisitorToken = () => {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // fallback below
+  }
+
+  return `visitor_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+};
+
+const getOrCreateSiteVisitorToken = () => {
+  if (typeof window === 'undefined') return '';
+
+  try {
+    const existingToken = window.localStorage.getItem(SITE_VISITOR_STORAGE_KEY);
+    if (existingToken && existingToken.trim().length >= 8) {
+      return existingToken;
+    }
+
+    const nextToken = createSiteVisitorToken();
+    window.localStorage.setItem(SITE_VISITOR_STORAGE_KEY, nextToken);
+    return nextToken;
+  } catch (error) {
+    console.error('Failed to create site visitor token:', error);
+    return createSiteVisitorToken();
+  }
+};
+
+const getCurrentTrackingPath = () => {
+  if (typeof window === 'undefined') return '/';
+  return `${window.location.pathname || '/'}${window.location.search || ''}`;
+};
+
+
 const MERCHANT_REFERRAL_STORAGE_KEY = 'raqmy_merchant_referral';
 const MERCHANT_REFERRAL_COOKIE_DAYS = 3;
 
@@ -662,6 +701,74 @@ function AppContent() {
     rememberMerchantReferralFromUrl();
     handleAffiliateTracking();
   }, []);
+
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const visitorToken = getOrCreateSiteVisitorToken();
+    if (!visitorToken) return;
+
+    let isMounted = true;
+
+    const trackVisit = async () => {
+      const currentPath = getCurrentTrackingPath();
+      const lastTrackedPath = window.sessionStorage.getItem(SITE_VISIT_LAST_PATH_KEY);
+
+      if (lastTrackedPath === currentPath) {
+        return;
+      }
+
+      window.sessionStorage.setItem(SITE_VISIT_LAST_PATH_KEY, currentPath);
+
+      try {
+        await supabase.rpc('track_site_visit', {
+          p_visitor_token: visitorToken,
+          p_path: currentPath,
+          p_referrer: document.referrer || null,
+        });
+      } catch (error) {
+        console.error('Site visit tracking failed:', error);
+      }
+    };
+
+    const heartbeat = async () => {
+      if (!isMounted) return;
+
+      try {
+        await supabase.rpc('heartbeat_online_session', {
+          p_visitor_token: visitorToken,
+          p_path: getCurrentTrackingPath(),
+        });
+      } catch (error) {
+        console.error('Online session heartbeat failed:', error);
+      }
+    };
+
+    const initialTrackingTimer = window.setTimeout(() => {
+      trackVisit();
+      heartbeat();
+    }, 0);
+
+    const heartbeatTimer = window.setInterval(heartbeat, 30000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        heartbeat();
+      }
+    };
+
+    window.addEventListener('focus', heartbeat);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(initialTrackingTimer);
+      window.clearInterval(heartbeatTimer);
+      window.removeEventListener('focus', heartbeat);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [currentPage]);
 
   const navigateWithContext = (page: string) => {
     const activeStoreSlug = getActiveStoreSlugFromContext(currentPage);
