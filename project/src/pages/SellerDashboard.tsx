@@ -3084,8 +3084,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
     const confirmationMessage =
       status === 'skipped'
-        ? 'هل تريد تخطي هذه المهمة؟ تقدر ترجع لها لاحقًا، لكن الأفضل إكمالها إذا كانت مهمة لأول بيع.'
-        : 'هل تريد تعليم هذه المهمة كمنجزة يدويًا؟ استخدم هذا الخيار فقط إذا أنجزتها خارج النظام.';
+        ? 'هل تريد تخطي هذه الخطوة مؤقتًا؟ يمكنك الرجوع لها لاحقًا من لوحة التاجر.'
+        : 'هل تريد تأكيد إنجاز هذه الخطوة؟ استخدم هذا الخيار فقط إذا أنهيتها بالفعل.';
 
     if (!window.confirm(confirmationMessage)) return;
 
@@ -3128,7 +3128,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       return {
         ...task,
         status: 'completed',
-        details: [...task.details, 'تم تعليم المهمة كمنجزة يدويًا.'],
+        details: [...task.details, 'تم تأكيد إنجازها.'],
       };
     }
 
@@ -3136,7 +3136,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
       return {
         ...task,
         status: 'skipped',
-        details: [...task.details, 'تم تخطي هذه المهمة يدويًا.'],
+        details: [...task.details, 'تم تخطيها مؤقتًا.'],
       };
     }
 
@@ -3227,7 +3227,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
 
     const onboardingMissing: string[] = [];
     if (!merchantOnboarding?.completed_at && !merchantOnboarding?.skipped_at) {
-      onboardingMissing.push('إكمال أسئلة البداية حتى تظهر لك خطوات مناسبة.');
+      onboardingMissing.push('إكمال أسئلة البداية حتى تظهر لك خطوات أوضح.');
     }
 
     tasks.push(
@@ -3235,7 +3235,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         key: 'onboarding_profile',
         order: 1,
         title: 'جهّز مسارك في رقمي',
-        description: 'أجب على أسئلة البداية حتى نرتب لك مهام مناسبة لطريقة بيعك.',
+        description: 'أكمل أسئلة البداية مرة واحدة حتى تظهر لك خطوات أوضح داخل لوحة التاجر.',
         status: merchantOnboarding?.completed_at
           ? 'completed'
           : merchantOnboarding?.skipped_at
@@ -3280,7 +3280,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         key: 'create_store',
         order: 2,
         title: 'أنشئ متجرك',
-        description: 'اسم المتجر والصورة والوصف كلها تعتبر تفاصيل داخل مهمة إنشاء المتجر.',
+        description: 'أنشئ متجرًا واضحًا يساعد الزائر يعرف من يشتري منه ويثق برابطك.',
         status: !firstStore ? 'pending' : storeMissing.length > 0 ? 'warning' : 'completed',
         details: firstStore
           ? [
@@ -3360,8 +3360,8 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
         order: 3,
         title: offerTitle,
         description: isFirstProductService
-          ? 'العنوان والوصف والصورة والسعر ومدة التنفيذ ومتطلبات العميل كلها تفاصيل داخل هذه المهمة.'
-          : 'العنوان والوصف والصورة والسعر وملف المنتج كلها تفاصيل داخل هذه المهمة.',
+          ? 'جهّز خدمة واضحة بسعر مناسب ومدة تنفيذ محددة حتى يعرف العميل ما الذي سيحصل عليه.'
+          : 'جهّز منتجًا واضحًا بصورة وسعر وملف جاهز حتى يستطيع العميل الشراء بثقة.',
         status: !firstProduct ? 'pending' : productMissing.length > 0 ? 'warning' : 'completed',
         details: firstProduct
           ? [
@@ -3414,7 +3414,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             : merchantOnboarding?.audience_source === 'none'
             ? 'ابدأ بمشاركة بسيطة مع أشخاص مهتمين بدل انتظار جمهور كبير.'
             : 'أنسب بداية لك: حسابات التواصل الاجتماعي.',
-          'هذه المهمة لا تفصل الوصف والصورة كمهام مستقلة؛ هي تركّز على مشاركة الرابط بعد تجهيز العرض.',
+          'شارك الرابط بعد التأكد من أن صفحة المنتج أو الخدمة واضحة ومناسبة للشراء.',
         ],
         missing: shareMissing,
         actionLabel: 'فتح التسويق',
