@@ -341,7 +341,7 @@ const isSellerDashboardTab = (value: unknown): value is SellerDashboardTab => {
 };
 
 const SELLER_DASHBOARD_CACHE_PREFIX = 'seller_dashboard_cache';
-const SELLER_DASHBOARD_CACHE_VERSION = 10;
+const SELLER_DASHBOARD_CACHE_VERSION = 11;
 const SELLER_DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 15;
 
 const getSellerDashboardCacheKey = (profileId: string) => {
@@ -3477,8 +3477,18 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             : 'الحساب البنكي غير مكتمل.',
         ],
         missing: verificationMissing,
-        actionLabel: hasFirstSale ? 'فتح الأرباح والتوثيق' : 'تظهر بعد أول بيع',
-        onAction: () => handleTabChange('earnings'),
+        actionLabel: hasFirstSale ? 'فتح الإعدادات والتوثيق' : 'تظهر بعد أول بيع',
+        onAction: () => {
+          if (!hasFirstSale) return;
+
+          try {
+            sessionStorage.setItem('profile_default_tab', 'settings');
+          } catch (error) {
+            console.error('Error setting profile default tab:', error);
+          }
+
+          onNavigate('profile');
+        },
         canSkip: false,
       })
     );
