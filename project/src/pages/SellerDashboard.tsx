@@ -3477,7 +3477,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             : 'الحساب البنكي غير مكتمل.',
         ],
         missing: verificationMissing,
-        actionLabel: hasFirstSale ? 'فتح الإعدادات والتوثيق' : 'تظهر بعد أول بيع',
+        actionLabel: hasFirstSale ? 'فتح صفحة التوثيق والحساب البنكي' : 'تظهر بعد أول بيع',
         onAction: () => {
           if (!hasFirstSale) return;
 
