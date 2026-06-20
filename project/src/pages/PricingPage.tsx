@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, CreditCard } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { supabase, Plan } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -11,6 +11,7 @@ type PlanWithExtras = Plan & {
   slug?: string;
   description?: string;
   interval?: string;
+  currency?: string | null;
   is_popular?: boolean;
   sort_order?: number;
   marketplace_commission_percent?: number;
@@ -18,7 +19,7 @@ type PlanWithExtras = Plan & {
   commission_percent?: number;
   product_limit?: number | null;
   storage_limit_mb?: number | null;
-  features?: string[] | null;
+  features?: string[] | string | null;
 };
 
 type PaymentFeeSetting = {
@@ -74,20 +75,20 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       if (paymentFeesResult.error) {
         console.warn('Could not load payment fee settings:', paymentFeesResult.error.message);
         setPaymentFeeSettings([]);
-        setPaymentFeesWarning('تعذر تحميل تفاصيل رسوم بوابة الدفع من قاعدة البيانات.');
+        setPaymentFeesWarning('رسوم بوابة الدفع تُطبق حسب إعدادات مزود الدفع.');
       } else {
         const fees = (paymentFeesResult.data || []) as PaymentFeeSetting[];
         setPaymentFeeSettings(fees);
 
         if (fees.length === 0) {
-          setPaymentFeesWarning('لا توجد رسوم دفع مفعلة حاليًا في جدول payment_fee_settings.');
+          setPaymentFeesWarning('رسوم بوابة الدفع تُطبق حسب طريقة الدفع والعملة.');
         }
       }
     } catch (error) {
       console.error('Error fetching pricing data:', error);
       setPlans([]);
       setPaymentFeeSettings([]);
-      setPaymentFeesWarning('تعذر تحميل بيانات الباقات أو الرسوم.');
+      setPaymentFeesWarning('رسوم بوابة الدفع تُطبق حسب إعدادات مزود الدفع.');
     } finally {
       setLoading(false);
     }
@@ -193,15 +194,15 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     const code = normalizeCurrencyCode(currency);
 
     const currencyLabels: Record<string, string> = {
-      SAR: 'ر.س',
-      USD: 'USD',
-      EUR: 'EUR',
-      AED: 'AED',
-      KWD: 'KWD',
-      BHD: 'BHD',
-      QAR: 'QAR',
-      OMR: 'OMR',
-      SYP: 'SYP',
+      SAR: 'ريال',
+      USD: 'دولار',
+      EUR: 'يورو',
+      AED: 'درهم',
+      KWD: 'دينار كويتي',
+      BHD: 'دينار بحريني',
+      QAR: 'ريال قطري',
+      OMR: 'ريال عماني',
+      SYP: 'ليرة سورية',
     };
 
     return currencyLabels[code] || code;
@@ -217,18 +218,23 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     const methodLabels: Record<string, string> = {
       mada_local: 'مدى',
       mada: 'مدى',
-      card_local: 'البطاقات المحلية',
-      local_card: 'البطاقات المحلية',
-      card_international: 'البطاقات الدولية',
-      international_card: 'البطاقات الدولية',
-      credit_card: 'البطاقات',
-      card: 'البطاقات',
-      apple_pay: 'Apple Pay',
-      applepay: 'Apple Pay',
+      card_local: 'البطاقة المحلية',
+      local_card: 'البطاقة المحلية',
+      card_international: 'البطاقة الائتمانية',
+      international_card: 'البطاقة الائتمانية',
+      credit_card: 'البطاقة الائتمانية',
+      debit_card: 'البطاقة البنكية',
+      card: 'البطاقة',
+      cards: 'البطاقات',
+      apple_pay: 'آبل باي',
+      applepay: 'آبل باي',
       stc_pay: 'STC Pay',
+      stcpay: 'STC Pay',
       tabby: 'تابي',
       tamara: 'تمارا',
-      unknown: 'الطريقة الافتراضية',
+      paymob: 'بوابة الدفع',
+      default: 'بوابة الدفع',
+      unknown: 'بوابة الدفع',
     };
 
     if (methodLabels[key]) {
@@ -239,7 +245,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       key
         .replace(/[_-]+/g, ' ')
         .replace(/\s+/g, ' ')
-        .trim() || 'طريقة دفع'
+        .trim() || 'بوابة الدفع'
     );
   };
 
@@ -260,7 +266,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   };
 
   const paymentFeeRows = useMemo(() => {
-    return paymentFeeSettings
+    const activePaymobRows = paymentFeeSettings
       .filter((setting) => normalizeProvider(setting.provider) === 'paymob')
       .filter((setting) => setting.is_active !== false)
       .sort((a, b) => {
@@ -274,10 +280,86 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
         return String(a.method_key || '').localeCompare(String(b.method_key || ''));
       });
+
+    const sarRows = activePaymobRows.filter((setting) => normalizeCurrencyCode(setting.currency) === 'SAR');
+
+    return sarRows.length > 0 ? sarRows : activePaymobRows;
   }, [paymentFeeSettings]);
+
+  const paymentFeeFeatureLines = useMemo(() => {
+    if (paymentFeeRows.length === 0) {
+      return [
+        'رسوم بوابة الدفع تخصم من أرباح التاجر',
+        paymentFeesWarning || 'رسوم بوابة الدفع تُطبق حسب طريقة الدفع والعملة',
+      ];
+    }
+
+    const groupedFees = new Map<
+      string,
+      {
+        formula: string;
+        currency: string;
+        methods: Set<string>;
+      }
+    >();
+
+    paymentFeeRows.forEach((setting) => {
+      const formula = formatPaymentFeeFormula(setting);
+      const currency = normalizeCurrencyCode(setting.currency);
+      const methodLabel = getPaymentMethodLabel(setting.method_key);
+      const groupKey = `${currency}__${formula}`;
+
+      if (!groupedFees.has(groupKey)) {
+        groupedFees.set(groupKey, {
+          formula,
+          currency,
+          methods: new Set<string>(),
+        });
+      }
+
+      groupedFees.get(groupKey)?.methods.add(methodLabel);
+    });
+
+    const feeLines = Array.from(groupedFees.values()).map((group) => {
+      const methods = Array.from(group.methods).filter(Boolean);
+      const methodsText = methods.length > 0 ? methods.join(' - ') : 'بوابة الدفع';
+
+      return `رسوم (${group.formula}) عبر ${methodsText}`;
+    });
+
+    return [
+      'الدفع عبر بوابة Paymob المفعّلة',
+      ...feeLines,
+      'رسوم بوابة الدفع تخصم من أرباح التاجر',
+      'تسوية مدفوعات البطاقة المعالجة عبر رقمي خلال 72 ساعة',
+    ];
+  }, [paymentFeeRows, paymentFeesWarning]);
 
   const normalizeFeatureText = (text: string) =>
     text.replace(/\s+/g, ' ').replace(/٪/g, '%').trim();
+
+  const getRawPlanFeatures = (plan: PlanWithExtras) => {
+    if (Array.isArray(plan.features)) {
+      return plan.features;
+    }
+
+    if (typeof plan.features === 'string') {
+      try {
+        const parsed = JSON.parse(plan.features);
+
+        if (Array.isArray(parsed)) {
+          return parsed.map((item) => String(item));
+        }
+      } catch (_error) {
+        return plan.features
+          .split(/\n|،|,/)
+          .map((feature) => feature.trim())
+          .filter(Boolean);
+      }
+    }
+
+    return [];
+  };
 
   const buildPlanFeatures = (plan: PlanWithExtras) => {
     const featureSet = new Set<string>();
@@ -295,12 +377,9 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
         'تُفعّل لمدة شهر',
         'تفعل لمدة شهر',
         'تفعيل لمدة شهر',
-        'لمدة شهر',
-        'لمدة شهرين',
-        'تفعيل لمدة شهرين',
+        'تُفعّل لمدة شهرين',
         'تفعل لمدة شهرين',
-        'رسوم بوابة الدفع تخصم',
-        'رسوم الدفع تخصم',
+        'تفعيل لمدة شهرين',
       ];
 
       const shouldSkip = blockedTexts.some((blockedText) => normalized.includes(blockedText));
@@ -325,9 +404,9 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       addFeature(`عمولة البيع المباشر ${plan.direct_commission_percent}%`);
     }
 
-    if (Array.isArray(plan.features)) {
-      plan.features.forEach((feature) => addFeature(feature));
-    }
+    getRawPlanFeatures(plan).forEach((feature) => addFeature(feature));
+
+    paymentFeeFeatureLines.forEach((feature) => addFeature(feature));
 
     return Array.from(featureSet);
   };
@@ -479,7 +558,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center" dir="rtl">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-600">جاري تحميل الباقات...</p>
@@ -500,102 +579,18 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white py-20">
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white py-20" dir="rtl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold text-gray-900 mb-4">اختر الباقة المناسبة لك</h1>
-          <p className="text-xl text-gray-600">
+        <div className="text-center mb-16">
+          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+            اختر الباقة المناسبة لك
+          </h1>
+          <p className="text-lg md:text-xl text-gray-600">
             ابدأ مجاناً، وإذا احتجت عمولات أقل يمكنك الترقية في أي وقت
           </p>
         </div>
 
-        <div className="max-w-5xl mx-auto mb-10 rounded-2xl border border-blue-100 bg-white shadow-sm p-5">
-          <div className="flex flex-col md:flex-row md:items-start gap-4 text-right">
-            <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
-              <CreditCard className="w-6 h-6 text-blue-600" />
-            </div>
-
-            <div className="flex-1">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <h2 className="text-lg font-bold text-gray-900">ملاحظة مهمة عن صافي أرباح التاجر</h2>
-
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 border border-amber-100 w-fit">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  الرسوم تختلف حسب طريقة الدفع والعملة
-                </span>
-              </div>
-
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                عمولة رقمي المعروضة في الباقات تخص المنصة فقط. أما رسوم بوابة الدفع فتُخصم من أرباح التاجر بعد نجاح عملية الدفع، ولا تُضاف على العميل. لذلك يظهر صافي الربح النهائي في صفحة الأرباح بعد خصم عمولة المنصة ورسوم بوابة الدفع إن وُجدت.
-              </p>
-
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-                  <p className="font-semibold text-gray-900">سعر المنتج</p>
-                  <p className="text-gray-500 mt-1">المبلغ الذي يدفعه العميل</p>
-                </div>
-
-                <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-                  <p className="font-semibold text-gray-900">خصومات التشغيل</p>
-                  <p className="text-gray-500 mt-1">عمولة رقمي + رسوم بوابة الدفع</p>
-                </div>
-
-                <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-                  <p className="font-semibold text-gray-900">صافي ربح التاجر</p>
-                  <p className="text-gray-500 mt-1">المبلغ القابل للتعليق ثم السحب</p>
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
-                  <div>
-                    <h3 className="font-bold text-gray-900">رسوم بوابة الدفع الحالية</h3>
-                    <p className="text-xs text-gray-500 mt-1">
-                      هذه الرسوم تُقرأ من جدول payment_fee_settings وتظهر للتاجر بشكل توضيحي.
-                    </p>
-                  </div>
-                  <span className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-3 py-1 w-fit">
-                    Paymob
-                  </span>
-                </div>
-
-                {paymentFeeRows.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {paymentFeeRows.map((setting, index) => {
-                      const methodLabel = getPaymentMethodLabel(setting.method_key);
-                      const currency = normalizeCurrencyCode(setting.currency);
-                      const formula = formatPaymentFeeFormula(setting);
-
-                      return (
-                        <div
-                          key={setting.id || `${methodLabel}-${currency}-${index}`}
-                          className="rounded-xl bg-white border border-gray-100 p-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="font-semibold text-gray-900">{methodLabel}</p>
-                              <p className="text-xs text-gray-500 mt-1">{currency}</p>
-                            </div>
-                            <p className="font-bold text-gray-900 text-left">{formula}</p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-xl bg-white border border-gray-100 p-3">
-                    <p className="font-semibold text-gray-900">رسوم بوابة الدفع تخصم من أرباح التاجر</p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      {paymentFeesWarning || 'تُطبق حسب طريقة الدفع والعملة وإعدادات مزود الدفع.'}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto items-start">
           {sortedPlans.map((plan) => {
             const isPopular = !!plan.is_popular;
             const isSubmitting = submittingPlanId === plan.id;
@@ -607,46 +602,39 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
             return (
               <div
                 key={plan.id}
-                className={`bg-white rounded-2xl shadow-lg overflow-hidden transition-all hover:shadow-xl ${
-                  isPopular ? 'ring-2 ring-blue-600 scale-105' : ''
+                className={`relative bg-white rounded-2xl shadow-lg transition-all hover:shadow-xl ${
+                  isPopular ? 'ring-2 ring-blue-600 md:-mt-4' : ''
                 } ${lowerOrSameBlocked ? 'opacity-80' : ''}`}
               >
                 {isPopular && (
-                  <div className="bg-blue-600 text-white text-center py-2 text-sm font-semibold">
+                  <div className="absolute -top-4 right-1/2 translate-x-1/2 bg-blue-600 text-white px-5 py-1.5 rounded-full text-sm font-semibold shadow-sm whitespace-nowrap">
                     الأكثر شعبية
                   </div>
                 )}
 
                 <div className="p-8">
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">{plan.name}</h3>
+                  <div className="text-center mb-7">
+                    <h3 className="text-2xl font-bold text-gray-900 mb-3">{plan.name}</h3>
 
-                  {plan.description && (
-                    <p className="text-gray-600 mb-6">{plan.description}</p>
-                  )}
+                    {plan.description && (
+                      <p className="text-gray-600 leading-7 min-h-[56px]">{plan.description}</p>
+                    )}
 
-                  <div className="mb-2">
-                    <span className="text-4xl font-bold text-gray-900">
-                      {formatPlanPrice(plan.price)}
-                    </span>
+                    <div className="mt-6 mb-2">
+                      <span className="text-4xl font-extrabold text-gray-900">
+                        {formatPlanPrice(plan.price)}
+                      </span>
 
-                    {numericPrice > 0 && <span className="text-gray-600 mr-2">/ شهرياً</span>}
+                      {numericPrice > 0 && <span className="text-gray-600 mr-2">/ شهرياً</span>}
+                    </div>
+
+                    <p className="text-sm text-gray-500">{getPlanIntervalText(plan)}</p>
                   </div>
-
-                  <p className="text-sm text-gray-500 mb-6">{getPlanIntervalText(plan)}</p>
-
-                  <ul className="space-y-4 mb-8">
-                    {features.map((feature, idx) => (
-                      <li key={`${plan.id}-feature-${idx}`} className="flex items-start gap-3">
-                        <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-gray-700">{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
 
                   <button
                     onClick={() => handleSelectPlan(plan)}
                     disabled={buttonDisabled}
-                    className={`w-full py-3 rounded-xl font-semibold transition-all ${
+                    className={`w-full py-3 rounded-xl font-semibold transition-all mb-8 ${
                       buttonDisabled
                         ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
                         : isPopular
@@ -656,6 +644,20 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
                   >
                     {getPlanButtonLabel(plan, isSubmitting)}
                   </button>
+
+                  <ul className="space-y-3.5">
+                    {features.map((feature, idx) => (
+                      <li
+                        key={`${plan.id}-feature-${idx}`}
+                        className="flex items-start gap-2.5 text-right"
+                      >
+                        <Check className="w-4.5 h-4.5 text-green-600 flex-shrink-0 mt-1" />
+                        <span className="text-gray-700 text-sm leading-7 min-w-0 break-words">
+                          {feature}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             );
