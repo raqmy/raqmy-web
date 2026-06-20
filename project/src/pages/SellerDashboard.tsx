@@ -30,6 +30,7 @@ import {
   Briefcase,
   ChevronDown,
   CheckCircle2,
+  CreditCard,
   Circle,
   XCircle
 } from 'lucide-react';
@@ -343,6 +344,7 @@ const SERVICE_ATTACHMENTS_BUCKET = 'service-order-attachments';
 const MAX_SERVICE_ATTACHMENT_SIZE_MB = 50;
 const MAX_SERVICE_ATTACHMENT_COUNT_PER_ACTION = 5;
 const FINANCIAL_CURRENCY_NOTE = 'يتم احتساب الأرباح والسحب بالريال السعودي.';
+const FINANCIAL_GATEWAY_NOTE = 'الأرباح المعروضة هي صافي مبالغ التاجر بعد خصم عمولة رقمي ورسوم بوابة الدفع عند توفرها، ثم تُعلّق 48 ساعة قبل أن تصبح متاحة للسحب.';
 const SELLER_DASHBOARD_BASE_PATH = '/seller-dashboard';
 const SELLER_DASHBOARD_TAB_PATHS: Record<SellerDashboardTab, string> = {
   overview: SELLER_DASHBOARD_BASE_PATH,
@@ -5694,6 +5696,13 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
                     التوثيق والحساب البنكي لا يمنعانك من البيع أو استقبال الطلبات؛ هما مطلوبان فقط قبل إرسال طلب سحب الأرباح.
                   </div>
+
+                  <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                    <div className="flex items-start gap-2">
+                      <CreditCard className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                      <p>{FINANCIAL_GATEWAY_NOTE}</p>
+                    </div>
+                  </div>
                 </div>
 
                 <button
@@ -5747,7 +5756,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   </span>
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(availableBalance)}</div>
-                <p className="text-sm text-gray-500">الرصيد المتاح حالياً</p>
+                <p className="text-sm text-gray-500">الرصيد الصافي المتاح حالياً بعد الخصومات المحتسبة</p>
                 <p className="mt-2 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
               </div>
 
@@ -5761,7 +5770,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   </span>
                 </div>
                 <div className="text-2xl font-bold text-gray-900 mb-1">{formatCurrency(pendingBalance)}</div>
-                <p className="text-sm text-gray-500">أرباح دخلت للتاجر وتصبح متاحة بعد انتهاء فترة التعليق</p>
+                <p className="text-sm text-gray-500">صافي أرباح دخلت للتاجر وتصبح متاحة بعد انتهاء فترة التعليق</p>
                 <p className="mt-2 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
               </div>
 
@@ -5897,7 +5906,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                   </div>
 
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 space-y-2">
-                    <p>الرصيد المتاح حالياً: <span className="font-bold">{formatCurrency(availableBalance)}</span></p>
+                    <p>الرصيد الصافي المتاح حالياً: <span className="font-bold">{formatCurrency(availableBalance)}</span></p>
                     <p>الحد الأدنى الحالي للسحب: <span className="font-bold">{effectiveMinWithdrawalAmount} ريال</span></p>
                     {withdrawalLimitsEnabled && (
                       <>
@@ -5906,6 +5915,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
                       </>
                     )}
                     <p>بعد إرسال الطلب سيتم خصمه تنظيمياً كسحب قيد المراجعة حتى تعتمد الإدارة الطلب.</p>
+                    <p className="text-xs text-blue-700/80">المبالغ الظاهرة في المحفظة لا تمثل إجمالي سعر البيع؛ بل صافي ربح التاجر بعد عمولة المنصة ورسوم بوابة الدفع عند توفرها.</p>
                     <p className="text-xs text-blue-700/80">{FINANCIAL_CURRENCY_NOTE}</p>
                   </div>
 
@@ -6043,7 +6053,7 @@ export const SellerDashboard: React.FC<SellerDashboardProps> = ({ onNavigate }) 
             <div className="bg-white rounded-2xl shadow-sm p-8">
               <div className="mb-6">
                 <h3 className="text-xl font-bold text-gray-900 mb-1">سجل المحفظة</h3>
-                <p className="text-sm text-gray-500">آخر الحركات المالية المتعلقة بمحفظتك</p>
+                <p className="text-sm text-gray-500">آخر الحركات المالية المتعلقة بمحفظتك، مع عرض صافي مبالغ البيع بعد الخصومات التشغيلية</p>
                 <p className="mt-1 text-xs text-gray-400">{FINANCIAL_CURRENCY_NOTE}</p>
               </div>
 
