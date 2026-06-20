@@ -32,12 +32,41 @@ type PaymentFeeSetting = {
   is_active?: boolean | null;
 };
 
+const OFFICIAL_PAYMOB_KSA_FEES: PaymentFeeSetting[] = [
+  {
+    id: 'official-paymob-ksa-mada',
+    provider: 'paymob',
+    currency: 'SAR',
+    method_key: 'mada',
+    fee_rate: 1,
+    fixed_fee: 1,
+    is_active: true,
+  },
+  {
+    id: 'official-paymob-ksa-visa-mastercard',
+    provider: 'paymob',
+    currency: 'SAR',
+    method_key: 'visa_mastercard',
+    fee_rate: 2.7,
+    fixed_fee: 1,
+    is_active: true,
+  },
+  {
+    id: 'official-paymob-ksa-international',
+    provider: 'paymob',
+    currency: 'SAR',
+    method_key: 'international_cards',
+    fee_rate: 3.5,
+    fixed_fee: 1,
+    is_active: true,
+  },
+];
+
 export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   const { user, profile } = useAuth();
 
   const [plans, setPlans] = useState<PlanWithExtras[]>([]);
   const [paymentFeeSettings, setPaymentFeeSettings] = useState<PaymentFeeSetting[]>([]);
-  const [paymentFeesWarning, setPaymentFeesWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [submittingPlanId, setSubmittingPlanId] = useState<string | null>(null);
 
@@ -48,7 +77,6 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   const fetchPricingData = async () => {
     try {
       setLoading(true);
-      setPaymentFeesWarning('');
 
       const [plansResult, paymentFeesResult] = await Promise.all([
         supabase
@@ -75,20 +103,13 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       if (paymentFeesResult.error) {
         console.warn('Could not load payment fee settings:', paymentFeesResult.error.message);
         setPaymentFeeSettings([]);
-        setPaymentFeesWarning('رسوم بوابة الدفع تُطبق حسب إعدادات مزود الدفع.');
       } else {
-        const fees = (paymentFeesResult.data || []) as PaymentFeeSetting[];
-        setPaymentFeeSettings(fees);
-
-        if (fees.length === 0) {
-          setPaymentFeesWarning('رسوم بوابة الدفع تُطبق حسب طريقة الدفع والعملة.');
-        }
+        setPaymentFeeSettings((paymentFeesResult.data || []) as PaymentFeeSetting[]);
       }
     } catch (error) {
       console.error('Error fetching pricing data:', error);
       setPlans([]);
       setPaymentFeeSettings([]);
-      setPaymentFeesWarning('رسوم بوابة الدفع تُطبق حسب إعدادات مزود الدفع.');
     } finally {
       setLoading(false);
     }
@@ -218,10 +239,14 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     const methodLabels: Record<string, string> = {
       mada_local: 'مدى',
       mada: 'مدى',
+      visa_mastercard: 'فيزا وماستركارد',
+      visa_mastercard_local: 'فيزا وماستركارد المحلية',
+      local_visa_mastercard: 'فيزا وماستركارد المحلية',
       card_local: 'البطاقة المحلية',
       local_card: 'البطاقة المحلية',
-      card_international: 'البطاقة الائتمانية',
-      international_card: 'البطاقة الائتمانية',
+      card_international: 'البطاقات الدولية',
+      international_card: 'البطاقات الدولية',
+      international_cards: 'البطاقات الدولية',
       credit_card: 'البطاقة الائتمانية',
       debit_card: 'البطاقة البنكية',
       card: 'البطاقة',
@@ -283,57 +308,31 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
     const sarRows = activePaymobRows.filter((setting) => normalizeCurrencyCode(setting.currency) === 'SAR');
 
-    return sarRows.length > 0 ? sarRows : activePaymobRows;
+    if (sarRows.length > 0) {
+      return sarRows;
+    }
+
+    if (activePaymobRows.length > 0) {
+      return activePaymobRows;
+    }
+
+    return OFFICIAL_PAYMOB_KSA_FEES;
   }, [paymentFeeSettings]);
 
   const paymentFeeFeatureLines = useMemo(() => {
-    if (paymentFeeRows.length === 0) {
-      return [
-        'رسوم بوابة الدفع تخصم من أرباح التاجر',
-        paymentFeesWarning || 'رسوم بوابة الدفع تُطبق حسب طريقة الدفع والعملة',
-      ];
-    }
-
-    const groupedFees = new Map<
-      string,
-      {
-        formula: string;
-        currency: string;
-        methods: Set<string>;
-      }
-    >();
-
-    paymentFeeRows.forEach((setting) => {
-      const formula = formatPaymentFeeFormula(setting);
-      const currency = normalizeCurrencyCode(setting.currency);
+    const feeLines = paymentFeeRows.map((setting) => {
       const methodLabel = getPaymentMethodLabel(setting.method_key);
-      const groupKey = `${currency}__${formula}`;
+      const formula = formatPaymentFeeFormula(setting);
 
-      if (!groupedFees.has(groupKey)) {
-        groupedFees.set(groupKey, {
-          formula,
-          currency,
-          methods: new Set<string>(),
-        });
-      }
-
-      groupedFees.get(groupKey)?.methods.add(methodLabel);
-    });
-
-    const feeLines = Array.from(groupedFees.values()).map((group) => {
-      const methods = Array.from(group.methods).filter(Boolean);
-      const methodsText = methods.length > 0 ? methods.join(' - ') : 'بوابة الدفع';
-
-      return `رسوم (${group.formula}) عبر ${methodsText}`;
+      return `رسوم بوابة الدفع ${formula} عبر ${methodLabel}`;
     });
 
     return [
-      'الدفع عبر بوابة Paymob المفعّلة',
       ...feeLines,
       'رسوم بوابة الدفع تخصم من أرباح التاجر',
       'تسوية مدفوعات البطاقة المعالجة عبر رقمي خلال 72 ساعة',
     ];
-  }, [paymentFeeRows, paymentFeesWarning]);
+  }, [paymentFeeRows]);
 
   const normalizeFeatureText = (text: string) =>
     text.replace(/\s+/g, ' ').replace(/٪/g, '%').trim();
@@ -380,6 +379,10 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
         'تُفعّل لمدة شهرين',
         'تفعل لمدة شهرين',
         'تفعيل لمدة شهرين',
+        'رسوم بوابة الدفع تُطبق حسب إعدادات مزود الدفع',
+        'رسوم بوابة الدفع تطبق حسب إعدادات مزود الدفع',
+        'رسوم بوابة الدفع تُطبق حسب طريقة الدفع والعملة',
+        'رسوم بوابة الدفع تطبق حسب طريقة الدفع والعملة',
       ];
 
       const shouldSkip = blockedTexts.some((blockedText) => normalized.includes(blockedText));
