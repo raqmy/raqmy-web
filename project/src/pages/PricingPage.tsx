@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check } from 'lucide-react';
+import { AlertTriangle, Check, CreditCard } from 'lucide-react';
 import { supabase, Plan } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -33,8 +33,10 @@ type PaymentFeeSetting = {
 
 export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   const { user, profile } = useAuth();
+
   const [plans, setPlans] = useState<PlanWithExtras[]>([]);
   const [paymentFeeSettings, setPaymentFeeSettings] = useState<PaymentFeeSetting[]>([]);
+  const [paymentFeesWarning, setPaymentFeesWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [submittingPlanId, setSubmittingPlanId] = useState<string | null>(null);
 
@@ -45,6 +47,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   const fetchPricingData = async () => {
     try {
       setLoading(true);
+      setPaymentFeesWarning('');
 
       const [plansResult, paymentFeesResult] = await Promise.all([
         supabase
@@ -63,6 +66,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
       if (plansResult.error) {
         console.error('Error fetching plans:', plansResult.error);
+        setPlans([]);
       } else {
         setPlans((plansResult.data || []) as PlanWithExtras[]);
       }
@@ -70,11 +74,20 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       if (paymentFeesResult.error) {
         console.warn('Could not load payment fee settings:', paymentFeesResult.error.message);
         setPaymentFeeSettings([]);
+        setPaymentFeesWarning('تعذر تحميل تفاصيل رسوم بوابة الدفع من قاعدة البيانات.');
       } else {
-        setPaymentFeeSettings((paymentFeesResult.data || []) as PaymentFeeSetting[]);
+        const fees = (paymentFeesResult.data || []) as PaymentFeeSetting[];
+        setPaymentFeeSettings(fees);
+
+        if (fees.length === 0) {
+          setPaymentFeesWarning('لا توجد رسوم دفع مفعلة حاليًا في جدول payment_fee_settings.');
+        }
       }
     } catch (error) {
       console.error('Error fetching pricing data:', error);
+      setPlans([]);
+      setPaymentFeeSettings([]);
+      setPaymentFeesWarning('تعذر تحميل بيانات الباقات أو الرسوم.');
     } finally {
       setLoading(false);
     }
@@ -92,6 +105,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     }
 
     const expiresAt = new Date(currentSubscriptionExpiresAt).getTime();
+
     if (Number.isNaN(expiresAt)) {
       return true;
     }
@@ -211,6 +225,9 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       card: 'البطاقات',
       apple_pay: 'Apple Pay',
       applepay: 'Apple Pay',
+      stc_pay: 'STC Pay',
+      tabby: 'تابي',
+      tamara: 'تمارا',
       unknown: 'الطريقة الافتراضية',
     };
 
@@ -218,10 +235,12 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       return methodLabels[key];
     }
 
-    return key
-      .replace(/[_-]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim() || 'طريقة دفع';
+    return (
+      key
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || 'طريقة دفع'
+    );
   };
 
   const formatPaymentFeeFormula = (setting: PaymentFeeSetting) => {
@@ -240,29 +259,21 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     return parts.length > 0 ? parts.join(' + ') : 'حسب إعدادات بوابة الدفع';
   };
 
-  const paymentFeeFeatureTexts = useMemo(() => {
-    const activePaymobFees = paymentFeeSettings
+  const paymentFeeRows = useMemo(() => {
+    return paymentFeeSettings
       .filter((setting) => normalizeProvider(setting.provider) === 'paymob')
       .filter((setting) => setting.is_active !== false)
       .sort((a, b) => {
-        const currencyCompare = normalizeCurrencyCode(a.currency).localeCompare(normalizeCurrencyCode(b.currency));
-        if (currencyCompare !== 0) return currencyCompare;
+        const currencyCompare = normalizeCurrencyCode(a.currency).localeCompare(
+          normalizeCurrencyCode(b.currency)
+        );
+
+        if (currencyCompare !== 0) {
+          return currencyCompare;
+        }
+
         return String(a.method_key || '').localeCompare(String(b.method_key || ''));
       });
-
-    if (activePaymobFees.length === 0) {
-      return ['رسوم بوابة الدفع تخصم من أرباح التاجر حسب طريقة الدفع.'];
-    }
-
-    return [
-      'رسوم بوابة الدفع تخصم من أرباح التاجر',
-      ...activePaymobFees.map((setting) => {
-        const currency = normalizeCurrencyCode(setting.currency);
-        const methodLabel = getPaymentMethodLabel(setting.method_key);
-        const feeFormula = formatPaymentFeeFormula(setting);
-        return `${methodLabel} (${currency}): ${feeFormula}`;
-      }),
-    ];
   }, [paymentFeeSettings]);
 
   const normalizeFeatureText = (text: string) =>
@@ -275,7 +286,10 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       if (!value) return;
 
       const normalized = normalizeFeatureText(value);
-      if (!normalized) return;
+
+      if (!normalized) {
+        return;
+      }
 
       const blockedTexts = [
         'تُفعّل لمدة شهر',
@@ -290,7 +304,10 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       ];
 
       const shouldSkip = blockedTexts.some((blockedText) => normalized.includes(blockedText));
-      if (shouldSkip) return;
+
+      if (shouldSkip) {
+        return;
+      }
 
       if (!featureSet.has(normalized)) {
         featureSet.add(normalized);
@@ -311,8 +328,6 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     if (Array.isArray(plan.features)) {
       plan.features.forEach((feature) => addFeature(feature));
     }
-
-    paymentFeeFeatureTexts.forEach((feature) => addFeature(feature));
 
     return Array.from(featureSet);
   };
@@ -494,6 +509,92 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
           </p>
         </div>
 
+        <div className="max-w-5xl mx-auto mb-10 rounded-2xl border border-blue-100 bg-white shadow-sm p-5">
+          <div className="flex flex-col md:flex-row md:items-start gap-4 text-right">
+            <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
+              <CreditCard className="w-6 h-6 text-blue-600" />
+            </div>
+
+            <div className="flex-1">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <h2 className="text-lg font-bold text-gray-900">ملاحظة مهمة عن صافي أرباح التاجر</h2>
+
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 border border-amber-100 w-fit">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  الرسوم تختلف حسب طريقة الدفع والعملة
+                </span>
+              </div>
+
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                عمولة رقمي المعروضة في الباقات تخص المنصة فقط. أما رسوم بوابة الدفع فتُخصم من أرباح التاجر بعد نجاح عملية الدفع، ولا تُضاف على العميل. لذلك يظهر صافي الربح النهائي في صفحة الأرباح بعد خصم عمولة المنصة ورسوم بوابة الدفع إن وُجدت.
+              </p>
+
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+                  <p className="font-semibold text-gray-900">سعر المنتج</p>
+                  <p className="text-gray-500 mt-1">المبلغ الذي يدفعه العميل</p>
+                </div>
+
+                <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+                  <p className="font-semibold text-gray-900">خصومات التشغيل</p>
+                  <p className="text-gray-500 mt-1">عمولة رقمي + رسوم بوابة الدفع</p>
+                </div>
+
+                <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+                  <p className="font-semibold text-gray-900">صافي ربح التاجر</p>
+                  <p className="text-gray-500 mt-1">المبلغ القابل للتعليق ثم السحب</p>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+                  <div>
+                    <h3 className="font-bold text-gray-900">رسوم بوابة الدفع الحالية</h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      هذه الرسوم تُقرأ من جدول payment_fee_settings وتظهر للتاجر بشكل توضيحي.
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-3 py-1 w-fit">
+                    Paymob
+                  </span>
+                </div>
+
+                {paymentFeeRows.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {paymentFeeRows.map((setting, index) => {
+                      const methodLabel = getPaymentMethodLabel(setting.method_key);
+                      const currency = normalizeCurrencyCode(setting.currency);
+                      const formula = formatPaymentFeeFormula(setting);
+
+                      return (
+                        <div
+                          key={setting.id || `${methodLabel}-${currency}-${index}`}
+                          className="rounded-xl bg-white border border-gray-100 p-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-gray-900">{methodLabel}</p>
+                              <p className="text-xs text-gray-500 mt-1">{currency}</p>
+                            </div>
+                            <p className="font-bold text-gray-900 text-left">{formula}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl bg-white border border-gray-100 p-3">
+                    <p className="font-semibold text-gray-900">رسوم بوابة الدفع تخصم من أرباح التاجر</p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {paymentFeesWarning || 'تُطبق حسب طريقة الدفع والعملة وإعدادات مزود الدفع.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
           {sortedPlans.map((plan) => {
             const isPopular = !!plan.is_popular;
@@ -527,9 +628,8 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
                     <span className="text-4xl font-bold text-gray-900">
                       {formatPlanPrice(plan.price)}
                     </span>
-                    {numericPrice > 0 && (
-                      <span className="text-gray-600 mr-2">/ شهرياً</span>
-                    )}
+
+                    {numericPrice > 0 && <span className="text-gray-600 mr-2">/ شهرياً</span>}
                   </div>
 
                   <p className="text-sm text-gray-500 mb-6">{getPlanIntervalText(plan)}</p>
@@ -564,6 +664,7 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
         <div className="mt-16 text-center">
           <p className="text-gray-600 mb-4">هل لديك أسئلة حول الباقات؟</p>
+
           <button
             onClick={() => onNavigate('support')}
             className="text-blue-600 font-semibold hover:text-blue-700"
