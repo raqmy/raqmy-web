@@ -88,26 +88,14 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
   };
 
-  const formatFeeAmount = (amount: number, currencyCode?: string | null) => {
-    const currency = normalizeCurrencyCode(currencyCode);
-    return `${roundMoney(amount).toFixed(2)} ${currency}`;
-  };
 
-  const getSelectedCurrencyName = (currencyCode?: string | null) => {
-    const code = normalizeCurrencyCode(currencyCode);
-    const currency = currencies.find((item) => normalizeCurrencyCode(item.code) === code);
-    return currency?.name_ar ? `${currency.name_ar} (${code})` : code;
-  };
-
-  const fetchPaymentFeeSettings = async (currencyCode: string) => {
-    const currency = normalizeCurrencyCode(currencyCode);
-
+  const fetchPaymentFeeSettings = async () => {
     try {
       const { data, error } = await supabase
         .from('payment_fee_settings')
         .select('provider,currency,method_key,fee_rate,fixed_fee,is_active')
         .eq('is_active', true)
-        .eq('currency', currency)
+        .order('currency', { ascending: true })
         .order('method_key', { ascending: true });
 
       if (error) {
@@ -123,6 +111,18 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     }
   };
 
+  const getCurrencyRateToSar = (currencyCode?: string | null) => {
+    const code = normalizeCurrencyCode(currencyCode);
+    const currency = currencies.find((item: any) => normalizeCurrencyCode(item.code) === code) as any;
+    const rate = Number(currency?.rate_to_sar ?? currency?.exchange_rate_to_sar ?? currency?.sar_rate ?? 0);
+
+    if (!Number.isFinite(rate) || rate <= 0) {
+      return code === 'SAR' ? 1 : null;
+    }
+
+    return rate;
+  };
+
   const buildPriceFeeNotice = (): PriceFeeNotice | null => {
     const price = Number(formData.price);
 
@@ -131,58 +131,55 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     }
 
     const currency = normalizeCurrencyCode(formData.currency);
-    const settings = paymentFeeSettings.filter((setting) => normalizeCurrencyCode(setting.currency) === currency);
+    const selectedCurrencySettings = paymentFeeSettings.filter(
+      (setting) => normalizeCurrencyCode(setting.currency) === currency
+    );
+    const sarSettings = paymentFeeSettings.filter(
+      (setting) => normalizeCurrencyCode(setting.currency) === 'SAR'
+    );
 
-    const feeEstimates = settings
+    const rateToSar = getCurrencyRateToSar(currency);
+    const priceInSar = currency === 'SAR' ? price : rateToSar ? roundMoney(price * rateToSar) : null;
+
+    const settingsForEstimate = selectedCurrencySettings.length > 0
+      ? selectedCurrencySettings
+      : priceInSar !== null
+      ? sarSettings
+      : [];
+    const priceForEstimate = selectedCurrencySettings.length > 0 ? price : priceInSar ?? price;
+
+    const feeEstimates = settingsForEstimate
       .map((setting) => {
         const rate = Number(setting.fee_rate || 0);
         const fixed = Number(setting.fixed_fee || 0);
-        return roundMoney((price * rate) / 100 + fixed);
+        return roundMoney((priceForEstimate * rate) / 100 + fixed);
       })
       .filter((value) => Number.isFinite(value) && value > 0);
 
-    const fixedFees = settings
+    const fixedFees = settingsForEstimate
       .map((setting) => Number(setting.fixed_fee || 0))
       .filter((value) => Number.isFinite(value) && value > 0);
 
     const highestFixedFee = fixedFees.length ? Math.max(...fixedFees) : 0;
     const highestEstimatedFee = feeEstimates.length ? Math.max(...feeEstimates) : 0;
-    const lowPriceThreshold = currency === 'SAR' ? 5 : highestFixedFee > 0 ? highestFixedFee * 5 : 0;
-    const selectedCurrencyName = getSelectedCurrencyName(currency);
+    const lowPriceThreshold = highestFixedFee > 0 ? highestFixedFee * 5 : 0;
 
-    if (highestFixedFee > 0 && price <= highestFixedFee) {
+    const isTooLowByGatewayFee =
+      (highestFixedFee > 0 && priceForEstimate <= highestFixedFee) ||
+      (highestEstimatedFee > 0 && priceForEstimate <= highestEstimatedFee);
+    const isLowByGatewayFee = lowPriceThreshold > 0 && priceForEstimate < lowPriceThreshold;
+    const isLowBySarValue = priceInSar !== null && priceInSar < 5;
+    const isLowByRawFallback = priceInSar === null && price < 5;
+
+    if (isTooLowByGatewayFee || isLowByGatewayFee || isLowBySarValue || isLowByRawFallback) {
       return {
-        level: 'danger',
-        title: 'السعر منخفض جدًا مقارنة بالرسوم الثابتة',
-        description: `أعلى رسم ثابت معروف لهذه العملة هو ${formatFeeAmount(highestFixedFee, currency)}. هذا السعر قد يجعل صافي ربحك صفرًا أو قريبًا من الصفر بعد خصم رسوم بوابة الدفع وعمولة المنصة.`,
+        level: isTooLowByGatewayFee ? 'danger' : 'warning',
+        title: 'تنبيه',
+        description: 'السعر منخفض جدًا وقد تكون الأرباح قليلة جدًا أو شبه معدومة بعد خصم عمولة رقمي ورسوم الدفع.',
       };
     }
 
-    if (highestEstimatedFee > 0 && price <= highestEstimatedFee) {
-      return {
-        level: 'danger',
-        title: 'رسوم الدفع قد تتجاوز قيمة البيع',
-        description: `التقدير الأعلى لرسوم بوابة الدفع على هذا السعر هو ${formatFeeAmount(highestEstimatedFee, currency)} حسب طريقة الدفع. ارفع السعر قبل النشر حتى لا يتحول البيع إلى خسارة.`,
-      };
-    }
-
-    if (lowPriceThreshold > 0 && price < lowPriceThreshold) {
-      return {
-        level: 'warning',
-        title: 'تنبيه قبل نشر سعر منخفض',
-        description: highestEstimatedFee > 0
-          ? `السعر أقل من ${formatFeeAmount(lowPriceThreshold, currency)}، وقد يصل تقدير رسوم بوابة الدفع وحدها إلى ${formatFeeAmount(highestEstimatedFee, currency)} قبل عمولة رقمي. المنتجات منخفضة السعر تحتاج حجم مبيعات أعلى حتى تصبح مجدية.`
-          : `السعر منخفض بعملة ${selectedCurrencyName}. راقب صافي الربح بعد البيع لأن رسوم بوابة الدفع وعمولة رقمي تُخصم من أرباح التاجر.`,
-      };
-    }
-
-    return {
-      level: 'info',
-      title: 'تذكير بطريقة احتساب الربح',
-      description: highestEstimatedFee > 0
-        ? `بعد نجاح الدفع سيتم خصم عمولة رقمي ورسوم بوابة الدفع من أرباحك. أعلى تقدير معروف لرسوم بوابة الدفع على هذا السعر هو ${formatFeeAmount(highestEstimatedFee, currency)} وقد يختلف حسب طريقة الدفع.`
-        : `بعد نجاح الدفع سيتم خصم عمولة رقمي ورسوم بوابة الدفع من أرباحك حسب طريقة الدفع والعملة المختارة: ${selectedCurrencyName}.`,
-    };
+    return null;
   };
 
   const getPriceFeeNoticeClassName = (level: FeeNoticeLevel) => {
@@ -199,9 +196,9 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    fetchPaymentFeeSettings(formData.currency);
+    fetchPaymentFeeSettings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, formData.currency]);
+  }, [isOpen]);
 
 
   useEffect(() => {
