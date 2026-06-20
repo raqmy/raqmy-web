@@ -306,7 +306,9 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
         return String(a.method_key || '').localeCompare(String(b.method_key || ''));
       });
 
-    const sarRows = activePaymobRows.filter((setting) => normalizeCurrencyCode(setting.currency) === 'SAR');
+    const sarRows = activePaymobRows.filter(
+      (setting) => normalizeCurrencyCode(setting.currency) === 'SAR'
+    );
 
     if (sarRows.length > 0) {
       return sarRows;
@@ -320,18 +322,12 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   }, [paymentFeeSettings]);
 
   const paymentFeeFeatureLines = useMemo(() => {
-    const feeLines = paymentFeeRows.map((setting) => {
+    return paymentFeeRows.map((setting) => {
       const methodLabel = getPaymentMethodLabel(setting.method_key);
       const formula = formatPaymentFeeFormula(setting);
 
       return `رسوم بوابة الدفع ${formula} عبر ${methodLabel}`;
     });
-
-    return [
-      ...feeLines,
-      'رسوم بوابة الدفع تخصم من أرباح التاجر',
-      'تسوية مدفوعات البطاقة المعالجة عبر رقمي خلال 72 ساعة',
-    ];
   }, [paymentFeeRows]);
 
   const normalizeFeatureText = (text: string) =>
@@ -383,6 +379,8 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
         'رسوم بوابة الدفع تطبق حسب إعدادات مزود الدفع',
         'رسوم بوابة الدفع تُطبق حسب طريقة الدفع والعملة',
         'رسوم بوابة الدفع تطبق حسب طريقة الدفع والعملة',
+        'رسوم بوابة الدفع تخصم من أرباح التاجر',
+        'تسوية مدفوعات البطاقة المعالجة عبر رقمي خلال 72 ساعة',
       ];
 
       const shouldSkip = blockedTexts.some((blockedText) => normalized.includes(blockedText));
@@ -455,7 +453,9 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
 
     if (isLowerOrSameActivePaidPlan(plan)) {
       alert(
-        `لديك حالياً باقة نشطة: ${currentPlan?.name || 'مدفوعة'}. لا يمكنك الاشتراك في باقة أقل أو مساوية قبل انتهاء باقتك الحالية.`
+        `لديك حالياً باقة نشطة: ${
+          currentPlan?.name || 'مدفوعة'
+        }. لا يمكنك الاشتراك في باقة أقل أو مساوية قبل انتهاء باقتك الحالية.`
       );
       return;
     }
