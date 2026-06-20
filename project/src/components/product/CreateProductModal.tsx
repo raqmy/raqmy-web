@@ -14,6 +14,24 @@ interface CreateProductModalProps {
   onSuccess: () => void;
 }
 
+
+type FeeNoticeLevel = 'info' | 'warning' | 'danger';
+
+interface PaymentFeeSetting {
+  provider?: string | null;
+  currency?: string | null;
+  method_key?: string | null;
+  fee_rate?: number | string | null;
+  fixed_fee?: number | string | null;
+  is_active?: boolean | null;
+}
+
+interface PriceFeeNotice {
+  level: FeeNoticeLevel;
+  title: string;
+  description: string;
+}
+
 // Cache for detected product columns (local to this component)
 let detectedProductColumns: string[] | null = null;
 
@@ -97,6 +115,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [stores, setStores] = useState<Store[]>([]);
   const [error, setError] = useState('');
+  const [paymentFeeSettings, setPaymentFeeSettings] = useState<PaymentFeeSetting[]>([]);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -116,6 +135,131 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
 
   const [images, setImages] = useState<ProductImage[]>([]);
   const [attachments, setAttachments] = useState<ProductAttachment[]>([]);
+
+  const normalizeCurrencyCode = (value?: string | null) => {
+    const normalized = String(value || 'SAR').trim().toUpperCase();
+    return normalized || 'SAR';
+  };
+
+  const roundMoney = (value: number) => {
+    return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+  };
+
+  const formatFeeAmount = (amount: number, currencyCode?: string | null) => {
+    const currency = normalizeCurrencyCode(currencyCode);
+    return `${roundMoney(amount).toFixed(2)} ${currency}`;
+  };
+
+  const getSelectedCurrencyName = (currencyCode?: string | null) => {
+    const code = normalizeCurrencyCode(currencyCode);
+    const currency = currencies.find((item) => normalizeCurrencyCode(item.code) === code);
+    return currency?.name_ar ? `${currency.name_ar} (${code})` : code;
+  };
+
+  const fetchPaymentFeeSettings = async (currencyCode: string) => {
+    const currency = normalizeCurrencyCode(currencyCode);
+
+    try {
+      const { data, error } = await supabase
+        .from('payment_fee_settings')
+        .select('provider,currency,method_key,fee_rate,fixed_fee,is_active')
+        .eq('is_active', true)
+        .eq('currency', currency)
+        .order('method_key', { ascending: true });
+
+      if (error) {
+        console.warn('Could not load payment fee settings:', error.message);
+        setPaymentFeeSettings([]);
+        return;
+      }
+
+      setPaymentFeeSettings((data || []) as PaymentFeeSetting[]);
+    } catch (error) {
+      console.warn('Could not load payment fee settings:', error);
+      setPaymentFeeSettings([]);
+    }
+  };
+
+  const buildPriceFeeNotice = (): PriceFeeNotice | null => {
+    const price = Number(formData.price);
+
+    if (!formData.price || !Number.isFinite(price) || price <= 0) {
+      return null;
+    }
+
+    const currency = normalizeCurrencyCode(formData.currency);
+    const settings = paymentFeeSettings.filter((setting) => normalizeCurrencyCode(setting.currency) === currency);
+
+    const feeEstimates = settings
+      .map((setting) => {
+        const rate = Number(setting.fee_rate || 0);
+        const fixed = Number(setting.fixed_fee || 0);
+        return roundMoney((price * rate) / 100 + fixed);
+      })
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    const fixedFees = settings
+      .map((setting) => Number(setting.fixed_fee || 0))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    const highestFixedFee = fixedFees.length ? Math.max(...fixedFees) : 0;
+    const highestEstimatedFee = feeEstimates.length ? Math.max(...feeEstimates) : 0;
+    const lowPriceThreshold = currency === 'SAR' ? 5 : highestFixedFee > 0 ? highestFixedFee * 5 : 0;
+    const selectedCurrencyName = getSelectedCurrencyName(currency);
+
+    if (highestFixedFee > 0 && price <= highestFixedFee) {
+      return {
+        level: 'danger',
+        title: 'السعر منخفض جدًا مقارنة بالرسوم الثابتة',
+        description: `أعلى رسم ثابت معروف لهذه العملة هو ${formatFeeAmount(highestFixedFee, currency)}. هذا السعر قد يجعل صافي ربحك صفرًا أو قريبًا من الصفر بعد خصم رسوم بوابة الدفع وعمولة المنصة.`,
+      };
+    }
+
+    if (highestEstimatedFee > 0 && price <= highestEstimatedFee) {
+      return {
+        level: 'danger',
+        title: 'رسوم الدفع قد تتجاوز قيمة البيع',
+        description: `التقدير الأعلى لرسوم بوابة الدفع على هذا السعر هو ${formatFeeAmount(highestEstimatedFee, currency)} حسب طريقة الدفع. ارفع السعر قبل النشر حتى لا يتحول البيع إلى خسارة.`,
+      };
+    }
+
+    if (lowPriceThreshold > 0 && price < lowPriceThreshold) {
+      return {
+        level: 'warning',
+        title: 'تنبيه قبل نشر سعر منخفض',
+        description: highestEstimatedFee > 0
+          ? `السعر أقل من ${formatFeeAmount(lowPriceThreshold, currency)}، وقد يصل تقدير رسوم بوابة الدفع وحدها إلى ${formatFeeAmount(highestEstimatedFee, currency)} قبل عمولة رقمي. المنتجات منخفضة السعر تحتاج حجم مبيعات أعلى حتى تصبح مجدية.`
+          : `السعر منخفض بعملة ${selectedCurrencyName}. راقب صافي الربح بعد البيع لأن رسوم بوابة الدفع وعمولة رقمي تُخصم من أرباح التاجر.`,
+      };
+    }
+
+    return {
+      level: 'info',
+      title: 'تذكير بطريقة احتساب الربح',
+      description: highestEstimatedFee > 0
+        ? `بعد نجاح الدفع سيتم خصم عمولة رقمي ورسوم بوابة الدفع من أرباحك. أعلى تقدير معروف لرسوم بوابة الدفع على هذا السعر هو ${formatFeeAmount(highestEstimatedFee, currency)} وقد يختلف حسب طريقة الدفع.`
+        : `بعد نجاح الدفع سيتم خصم عمولة رقمي ورسوم بوابة الدفع من أرباحك حسب طريقة الدفع والعملة المختارة: ${selectedCurrencyName}.`,
+    };
+  };
+
+  const getPriceFeeNoticeClassName = (level: FeeNoticeLevel) => {
+    if (level === 'danger') {
+      return 'border-red-200 bg-red-50 text-red-800';
+    }
+
+    if (level === 'warning') {
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    }
+
+    return 'border-blue-200 bg-blue-50 text-blue-800';
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    fetchPaymentFeeSettings(formData.currency);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, formData.currency]);
+
 
   useEffect(() => {
     if (isOpen) {
@@ -536,6 +680,7 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
   const itemLabel = isDigitalService ? 'الخدمة' : 'المنتج';
   const itemLabelWithDigital = isDigitalService ? 'الخدمة الرقمية' : 'المنتج الرقمي';
   const createButtonLabel = isDigitalService ? 'إضافة الخدمة' : 'إضافة المنتج';
+  const priceFeeNotice = buildPriceFeeNotice();
 
   if (!isOpen) return null;
 
@@ -734,6 +879,18 @@ export const CreateProductModal: React.FC<CreateProductModalProps> = ({
                 </select>
               </div>
             </div>
+
+            {priceFeeNotice && (
+              <div className={`mt-4 rounded-xl border p-4 ${getPriceFeeNoticeClassName(priceFeeNotice.level)}`}>
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-bold">{priceFeeNotice.title}</p>
+                    <p className="text-sm leading-6 mt-1">{priceFeeNotice.description}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-6">
