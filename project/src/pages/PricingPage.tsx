@@ -21,33 +21,60 @@ type PlanWithExtras = Plan & {
   features?: string[] | null;
 };
 
+type PaymentFeeSetting = {
+  id?: string;
+  provider?: string | null;
+  currency?: string | null;
+  method_key?: string | null;
+  fee_rate?: number | string | null;
+  fixed_fee?: number | string | null;
+  is_active?: boolean | null;
+};
+
 export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
   const { user, profile } = useAuth();
   const [plans, setPlans] = useState<PlanWithExtras[]>([]);
+  const [paymentFeeSettings, setPaymentFeeSettings] = useState<PaymentFeeSetting[]>([]);
   const [loading, setLoading] = useState(true);
   const [submittingPlanId, setSubmittingPlanId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchPlans();
+    fetchPricingData();
   }, []);
 
-  const fetchPlans = async () => {
+  const fetchPricingData = async () => {
     try {
-      const { data, error } = await supabase
-        .from('plans')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true, nullsFirst: false })
-        .order('price', { ascending: true });
+      setLoading(true);
 
-      if (error) {
-        console.error('Error fetching plans:', error);
-        return;
+      const [plansResult, paymentFeesResult] = await Promise.all([
+        supabase
+          .from('plans')
+          .select('*')
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true, nullsFirst: false })
+          .order('price', { ascending: true }),
+        supabase
+          .from('payment_fee_settings')
+          .select('id,provider,currency,method_key,fee_rate,fixed_fee,is_active')
+          .eq('is_active', true)
+          .order('currency', { ascending: true })
+          .order('method_key', { ascending: true }),
+      ]);
+
+      if (plansResult.error) {
+        console.error('Error fetching plans:', plansResult.error);
+      } else {
+        setPlans((plansResult.data || []) as PlanWithExtras[]);
       }
 
-      setPlans((data || []) as PlanWithExtras[]);
+      if (paymentFeesResult.error) {
+        console.warn('Could not load payment fee settings:', paymentFeesResult.error.message);
+        setPaymentFeeSettings([]);
+      } else {
+        setPaymentFeeSettings((paymentFeesResult.data || []) as PaymentFeeSetting[]);
+      }
     } catch (error) {
-      console.error('Error fetching plans:', error);
+      console.error('Error fetching pricing data:', error);
     } finally {
       setLoading(false);
     }
@@ -124,6 +151,120 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     return 'اشتراك شهري قابل للتجديد';
   };
 
+  const normalizeCurrencyCode = (value?: string | null) => {
+    const normalized = String(value || 'SAR').trim().toUpperCase();
+    return normalized || 'SAR';
+  };
+
+  const normalizeProvider = (value?: string | null) => {
+    const normalized = String(value || 'paymob').trim().toLowerCase();
+    return normalized || 'paymob';
+  };
+
+  const toNumber = (value: number | string | null | undefined) => {
+    const numeric = Number(value ?? 0);
+    return Number.isFinite(numeric) ? numeric : 0;
+  };
+
+  const formatCompactNumber = (value: number) => {
+    const numeric = toNumber(value);
+
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: Number.isInteger(numeric) ? 0 : 1,
+      maximumFractionDigits: 2,
+    }).format(numeric);
+  };
+
+  const getCurrencyDisplay = (currency?: string | null) => {
+    const code = normalizeCurrencyCode(currency);
+
+    const currencyLabels: Record<string, string> = {
+      SAR: 'ر.س',
+      USD: 'USD',
+      EUR: 'EUR',
+      AED: 'AED',
+      KWD: 'KWD',
+      BHD: 'BHD',
+      QAR: 'QAR',
+      OMR: 'OMR',
+      SYP: 'SYP',
+    };
+
+    return currencyLabels[code] || code;
+  };
+
+  const formatFixedFee = (amount: number, currency?: string | null) => {
+    return `${formatCompactNumber(amount)} ${getCurrencyDisplay(currency)}`;
+  };
+
+  const getPaymentMethodLabel = (methodKey?: string | null) => {
+    const key = String(methodKey || 'unknown').trim().toLowerCase();
+
+    const methodLabels: Record<string, string> = {
+      mada_local: 'مدى',
+      mada: 'مدى',
+      card_local: 'البطاقات المحلية',
+      local_card: 'البطاقات المحلية',
+      card_international: 'البطاقات الدولية',
+      international_card: 'البطاقات الدولية',
+      credit_card: 'البطاقات',
+      card: 'البطاقات',
+      apple_pay: 'Apple Pay',
+      applepay: 'Apple Pay',
+      unknown: 'الطريقة الافتراضية',
+    };
+
+    if (methodLabels[key]) {
+      return methodLabels[key];
+    }
+
+    return key
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || 'طريقة دفع';
+  };
+
+  const formatPaymentFeeFormula = (setting: PaymentFeeSetting) => {
+    const feeRate = toNumber(setting.fee_rate);
+    const fixedFee = toNumber(setting.fixed_fee);
+    const parts: string[] = [];
+
+    if (feeRate > 0) {
+      parts.push(`${formatCompactNumber(feeRate)}%`);
+    }
+
+    if (fixedFee > 0) {
+      parts.push(formatFixedFee(fixedFee, setting.currency));
+    }
+
+    return parts.length > 0 ? parts.join(' + ') : 'حسب إعدادات بوابة الدفع';
+  };
+
+  const paymentFeeFeatureTexts = useMemo(() => {
+    const activePaymobFees = paymentFeeSettings
+      .filter((setting) => normalizeProvider(setting.provider) === 'paymob')
+      .filter((setting) => setting.is_active !== false)
+      .sort((a, b) => {
+        const currencyCompare = normalizeCurrencyCode(a.currency).localeCompare(normalizeCurrencyCode(b.currency));
+        if (currencyCompare !== 0) return currencyCompare;
+        return String(a.method_key || '').localeCompare(String(b.method_key || ''));
+      });
+
+    if (activePaymobFees.length === 0) {
+      return ['رسوم بوابة الدفع تخصم من أرباح التاجر حسب طريقة الدفع.'];
+    }
+
+    return [
+      'رسوم بوابة الدفع تخصم من أرباح التاجر',
+      ...activePaymobFees.map((setting) => {
+        const currency = normalizeCurrencyCode(setting.currency);
+        const methodLabel = getPaymentMethodLabel(setting.method_key);
+        const feeFormula = formatPaymentFeeFormula(setting);
+        return `${methodLabel} (${currency}): ${feeFormula}`;
+      }),
+    ];
+  }, [paymentFeeSettings]);
+
   const normalizeFeatureText = (text: string) =>
     text.replace(/\s+/g, ' ').replace(/٪/g, '%').trim();
 
@@ -144,6 +285,8 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
         'لمدة شهرين',
         'تفعيل لمدة شهرين',
         'تفعل لمدة شهرين',
+        'رسوم بوابة الدفع تخصم',
+        'رسوم الدفع تخصم',
       ];
 
       const shouldSkip = blockedTexts.some((blockedText) => normalized.includes(blockedText));
@@ -165,11 +308,11 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
       addFeature(`عمولة البيع المباشر ${plan.direct_commission_percent}%`);
     }
 
-    addFeature('رسوم بوابة الدفع تخصم من أرباح التاجر');
-
     if (Array.isArray(plan.features)) {
       plan.features.forEach((feature) => addFeature(feature));
     }
+
+    paymentFeeFeatureTexts.forEach((feature) => addFeature(feature));
 
     return Array.from(featureSet);
   };
@@ -350,7 +493,6 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
             ابدأ مجاناً، وإذا احتجت عمولات أقل يمكنك الترقية في أي وقت
           </p>
         </div>
-
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
           {sortedPlans.map((plan) => {
