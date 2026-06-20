@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, CreditCard } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { supabase, Plan } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -164,6 +164,8 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
     if (typeof plan.direct_commission_percent === 'number') {
       addFeature(`عمولة البيع المباشر ${plan.direct_commission_percent}%`);
     }
+
+    addFeature('رسوم بوابة الدفع تخصم من أرباح التاجر');
 
     if (Array.isArray(plan.features)) {
       plan.features.forEach((feature) => addFeature(feature));
@@ -349,42 +351,6 @@ export const PricingPage: React.FC<PricingPageProps> = ({ onNavigate }) => {
           </p>
         </div>
 
-        <div className="max-w-5xl mx-auto mb-10 rounded-2xl border border-blue-100 bg-white shadow-sm p-5">
-          <div className="flex flex-col md:flex-row md:items-start gap-4 text-right">
-            <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
-              <CreditCard className="w-6 h-6 text-blue-600" />
-            </div>
-
-            <div className="flex-1">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <h2 className="text-lg font-bold text-gray-900">ملاحظة مهمة عن صافي أرباح التاجر</h2>
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 border border-amber-100 w-fit">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  الرسوم تختلف حسب طريقة الدفع والعملة
-                </span>
-              </div>
-
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                عمولة رقمي المعروضة في الباقات تخص المنصة فقط. أما رسوم بوابة الدفع فتُخصم من أرباح التاجر بعد نجاح عملية الدفع، ولا تُضاف على العميل. لذلك يظهر صافي الربح النهائي في صفحة الأرباح بعد خصم عمولة المنصة ورسوم بوابة الدفع إن وُجدت.
-              </p>
-
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-                  <p className="font-semibold text-gray-900">سعر المنتج</p>
-                  <p className="text-gray-500 mt-1">المبلغ الذي يدفعه العميل</p>
-                </div>
-                <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-                  <p className="font-semibold text-gray-900">خصومات التشغيل</p>
-                  <p className="text-gray-500 mt-1">عمولة رقمي + رسوم بوابة الدفع</p>
-                </div>
-                <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-                  <p className="font-semibold text-gray-900">صافي ربح التاجر</p>
-                  <p className="text-gray-500 mt-1">المبلغ القابل للتعليق ثم السحب</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
           {sortedPlans.map((plan) => {
